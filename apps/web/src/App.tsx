@@ -11,6 +11,7 @@ import {
   LockKeyhole,
   LogOut,
   Mail,
+  PencilLine,
   Plus,
   ReceiptText,
   RefreshCw,
@@ -21,9 +22,11 @@ import {
 import { For, Match, Show, Switch, createEffect, createMemo, createResource, createSignal, onMount } from "solid-js";
 import { BrandMark } from "./components/BrandMark";
 import { ExpenseComposer } from "./components/ExpenseComposer";
+import { GroupComposer } from "./components/GroupComposer";
 import { Avatar, Badge, Button, Card } from "./components/ui";
 import { inviteGroupMember } from "./lib/api";
 import { authClient, getOfflineActorId, signOutAndClearLocalLedger } from "./lib/auth";
+import type { LocalExpense } from "./lib/db";
 import { appStore, initializeStore } from "./lib/store";
 
 type Tab = "friends" | "groups" | "activity" | "account";
@@ -69,7 +72,7 @@ function SectionHeading(props: { title: string; detail?: string }) {
   );
 }
 
-function ExpenseList(props: { groupId?: string | undefined }) {
+function ExpenseList(props: { groupId?: string | undefined; onEdit(expense: LocalExpense): void }) {
   const visibleExpenses = createMemo(() => appStore.expenses().filter((expense) => !props.groupId || expense.groupId === props.groupId));
   const activeCount = createMemo(() => visibleExpenses().filter((expense) => expense.status === "active").length);
   return (
@@ -90,7 +93,7 @@ function ExpenseList(props: { groupId?: string | undefined }) {
         <div class="divide-y divide-border">
           <For each={visibleExpenses()}>
             {(expense) => (
-              <article class="flex items-center gap-3 px-5 py-4 sm:px-6" classList={{ "opacity-50": expense.status === "voided" }}>
+              <button type="button" class="group-row flex w-full items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-muted/50 sm:px-6" classList={{ "opacity-50": expense.status === "voided" }} disabled={expense.status === "voided"} onClick={() => props.onEdit(expense)} aria-label={`Edit ${expense.description}`}>
                 <span class="grid size-10 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground"><ReceiptText size={17} /></span>
                 <div class="min-w-0 flex-1">
                   <strong class="block truncate text-sm font-medium">{expense.description}</strong>
@@ -104,7 +107,8 @@ function ExpenseList(props: { groupId?: string | undefined }) {
                     {expense.syncStatus === "pending" ? "Saved on device" : expense.yourNetMinor === 0 ? "Your share" : expense.yourNetMinor > 0 ? "You lent " + money(expense.yourNetMinor, expense.currency) : "You owe " + money(-expense.yourNetMinor, expense.currency)}
                   </span>
                 </div>
-              </article>
+                <PencilLine size={15} class="shrink-0 text-muted-foreground" aria-hidden="true" />
+              </button>
             )}
           </For>
         </div>
@@ -113,10 +117,21 @@ function ExpenseList(props: { groupId?: string | undefined }) {
   );
 }
 
+function GroupPicker(props: { value?: string | undefined; onChange(groupId: string): void; label?: string; compact?: boolean }) {
+  return (
+    <label class="group-picker grid gap-1.5">
+      <span class="text-xs font-medium uppercase tracking-wider text-primary">{props.label ?? "Viewing group"}</span>
+      <select class="group-title-select" classList={{ compact: props.compact }} value={props.value} onInput={(event) => props.onChange(event.currentTarget.value)} aria-label={props.label ?? "Viewing group"}>
+        <For each={appStore.groups()}>{(group) => <option value={group.id}>{group.name}</option>}</For>
+      </select>
+    </label>
+  );
+}
+
 function GroupsCard(props: { activeGroupId?: string | undefined; onSelect(groupId: string): void }) {
   return (
     <Card class="overflow-hidden">
-      <SectionHeading title="Your groups" detail={appStore.groups().length + " active"} />
+      <SectionHeading title="All groups" detail={appStore.groups().length + (appStore.groups().length === 1 ? " group" : " groups")} />
       <div class="divide-y divide-border">
         <For each={appStore.groups()} fallback={<p class="px-5 py-8 text-sm text-muted-foreground">Preparing your first group…</p>}>
           {(group) => {
@@ -127,7 +142,7 @@ function GroupsCard(props: { activeGroupId?: string | undefined; onSelect(groupI
                 <Avatar name={group.name} class="rounded-lg bg-emerald-50 text-emerald-700" />
                 <div class="min-w-0 flex-1">
                   <strong class="block truncate text-sm font-medium">{group.name}</strong>
-                  <span class="text-xs text-muted-foreground">{members().length} people · {group.settlementCurrency}</span>
+                  <span class="text-xs text-muted-foreground">{members().length} {members().length === 1 ? "person" : "people"} · {group.settlementCurrency}</span>
                 </div>
                 <div class="shrink-0 text-right">
                   <strong class="block text-sm font-semibold tabular-nums" classList={{ "text-emerald-700": groupNet() > 0, "text-rose-700": groupNet() < 0 }}>
@@ -145,7 +160,7 @@ function GroupsCard(props: { activeGroupId?: string | undefined; onSelect(groupI
   );
 }
 
-function GroupsView(props: { activeGroupId?: string | undefined; onSelectGroup(groupId: string): void; onAddExpense(groupId?: string): void }) {
+function GroupsView(props: { activeGroupId?: string | undefined; onSelectGroup(groupId: string): void; onAddExpense(groupId?: string): void; onEditExpense(expense: LocalExpense): void; onCreateGroup(): void }) {
   const group = createMemo(() => appStore.groups().find((item) => item.id === props.activeGroupId) ?? appStore.groups()[0]);
   const groupExpenses = createMemo(() => appStore.expenses().filter((expense) => !group() || expense.groupId === group()!.id));
   const groupMembers = createMemo(() => appStore.members().filter((member) => member.groupId === group()?.id));
@@ -156,11 +171,13 @@ function GroupsView(props: { activeGroupId?: string | undefined; onSelectGroup(g
     <div class="page-enter space-y-6">
       <header class="flex items-start justify-between gap-4">
         <div>
-          <p class="mb-1 text-xs font-medium uppercase tracking-wider text-primary">Group</p>
-          <h1 class="text-2xl font-semibold tracking-tight sm:text-3xl">{group()?.name ?? "Your expenses"}</h1>
-          <p class="mt-1 text-sm text-muted-foreground">{group() ? `${groupMembers().length} people · ${group()!.settlementCurrency}` : "Your balances and recent shared expenses."}</p>
+          <GroupPicker value={group()?.id} onChange={props.onSelectGroup} />
+          <p class="mt-1 text-sm text-muted-foreground">{group() ? `${groupMembers().length} ${groupMembers().length === 1 ? "person" : "people"} · ${group()!.settlementCurrency}` : "Your balances and recent shared expenses."}</p>
         </div>
-        <Button onClick={() => props.onAddExpense(group()?.id)}><Plus size={16} /> <span class="hidden sm:inline">Add expense</span><span class="sm:hidden">Add</span></Button>
+        <div class="flex gap-2">
+          <Button variant="secondary" onClick={props.onCreateGroup} aria-label="Create group"><UsersRound size={16} /><span class="hidden sm:inline">New group</span></Button>
+          <Button onClick={() => props.onAddExpense(group()?.id)}><Plus size={16} /> <span class="hidden sm:inline">Add to {group()?.name ?? "group"}</span><span class="sm:hidden">Add</span></Button>
+        </div>
       </header>
 
       <Card class="p-5 sm:p-6">
@@ -184,14 +201,14 @@ function GroupsView(props: { activeGroupId?: string | undefined; onSelectGroup(g
       </Card>
 
       <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <ExpenseList groupId={group()?.id} />
+        <ExpenseList groupId={group()?.id} onEdit={props.onEditExpense} />
         <GroupsCard activeGroupId={group()?.id} onSelect={props.onSelectGroup} />
       </div>
     </div>
   );
 }
 
-function FriendsView(props: { actorId: string; activeGroupId?: string | undefined }) {
+function FriendsView(props: { actorId: string; activeGroupId?: string | undefined; onSelectGroup(groupId: string): void }) {
   const [inviteOpen, setInviteOpen] = createSignal(false);
   const [inviteEmail, setInviteEmail] = createSignal("");
   const [inviteMessage, setInviteMessage] = createSignal("");
@@ -218,7 +235,7 @@ function FriendsView(props: { actorId: string; activeGroupId?: string | undefine
   return (
     <div class="page-enter space-y-6">
       <header class="flex items-start justify-between gap-4">
-        <div><h1 class="text-2xl font-semibold tracking-tight sm:text-3xl">People</h1><p class="mt-1 text-sm text-muted-foreground">Members of {activeGroup()?.name ?? "your selected group"}.</p></div>
+        <div><h1 class="text-2xl font-semibold tracking-tight sm:text-3xl">People</h1><div class="mt-3"><GroupPicker compact label="Members in" value={activeGroup()?.id} onChange={props.onSelectGroup} /></div></div>
         <Button variant="secondary" onClick={() => setInviteOpen((open) => !open)}><UserPlus size={16} /> Invite</Button>
       </header>
       <Show when={inviteOpen()}>
@@ -255,7 +272,7 @@ function ActivityView() {
           {(expense) => (
             <article class="flex gap-3 border-b border-border px-5 py-4 last:border-0 sm:px-6">
               <span class="mt-1.5 size-2 shrink-0 rounded-full bg-primary" />
-              <div class="min-w-0 flex-1"><strong class="block text-sm font-medium">{expense.description} was added</strong><p class="mt-0.5 text-xs text-muted-foreground">{money(expense.amountMinor, expense.currency)} · {expense.syncStatus === "pending" ? "Waiting to sync" : "Accepted by ledger"}</p></div>
+              <div class="min-w-0 flex-1"><strong class="block text-sm font-medium">{expense.description} was {expense.version > 1 ? "updated" : "added"}</strong><p class="mt-0.5 text-xs text-muted-foreground">{appStore.groups().find((group) => group.id === expense.groupId)?.name ?? "Group"} · {money(expense.amountMinor, expense.currency)} · {expense.syncStatus === "pending" ? "Waiting to sync" : expense.syncStatus === "conflicted" ? "Needs review" : "Accepted by ledger"}</p></div>
               <time class="shrink-0 text-xs text-muted-foreground">{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(expenseDate(expense.expenseDate))}</time>
             </article>
           )}
@@ -296,8 +313,11 @@ function AccountView(props: { displayName: string }) {
 function AuthenticatedApp(props: { actorId: string }) {
   const [tab, setTab] = createSignal<Tab>("groups");
   const [composerOpen, setComposerOpen] = createSignal(false);
+  const [groupComposerOpen, setGroupComposerOpen] = createSignal(false);
   const [selectedGroupId, setSelectedGroupId] = createSignal<string>();
+  const [editingExpense, setEditingExpense] = createSignal<LocalExpense>();
   const [toastVisible, setToastVisible] = createSignal(false);
+  const [toastMessage, setToastMessage] = createSignal("Expense added");
   onMount(() => void initializeStore(props.actorId));
   createEffect(() => {
     if (!selectedGroupId() && appStore.groups()[0]) setSelectedGroupId(appStore.groups()[0]!.id);
@@ -310,7 +330,34 @@ function AuthenticatedApp(props: { actorId: string }) {
     { id: "account" as const, label: "Settings", icon: CircleUserRound },
   ];
 
-  function showSavedToast(): void {
+  function selectGroup(groupId: string): void {
+    setSelectedGroupId(groupId);
+    setTab("groups");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function openNewExpense(groupId?: string): void {
+    if (groupId) setSelectedGroupId(groupId);
+    setEditingExpense(undefined);
+    setComposerOpen(true);
+  }
+
+  function openExpenseEditor(expense: LocalExpense): void {
+    setSelectedGroupId(expense.groupId);
+    setEditingExpense(expense);
+    setComposerOpen(true);
+  }
+
+  function showSavedToast(mode: "created" | "updated"): void {
+    setToastMessage(mode === "updated" ? "Expense updated" : "Expense added");
+    setToastVisible(true);
+    window.setTimeout(() => setToastVisible(false), 3200);
+  }
+
+  function handleGroupCreated(groupId: string): void {
+    setSelectedGroupId(groupId);
+    setTab("groups");
+    setToastMessage("Group created");
     setToastVisible(true);
     window.setTimeout(() => setToastVisible(false), 3200);
   }
@@ -326,6 +373,16 @@ function AuthenticatedApp(props: { actorId: string }) {
             </Button>
           )}</For>
         </nav>
+        <div class="border-t border-border px-3 py-4">
+          <div class="mb-2 flex items-center justify-between px-2"><p class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Groups</p><button type="button" class="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" onClick={() => setGroupComposerOpen(true)} aria-label="Create group"><Plus size={14} /></button></div>
+          <div class="grid gap-1">
+            <For each={appStore.groups()}>{(group) => (
+              <button type="button" class="group-row flex min-h-9 items-center gap-2 rounded-md px-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" classList={{ "bg-primary/8 font-medium text-primary": selectedGroupId() === group.id }} onClick={() => selectGroup(group.id)}>
+                <span class="size-2 rounded-full bg-emerald-600" /> <span class="truncate">{group.name}</span>
+              </button>
+            )}</For>
+          </div>
+        </div>
         <div class="mt-auto border-t border-border p-3"><ConnectionBadge /><p class="px-2 pt-1 text-xs leading-5 text-muted-foreground">Expenses save on this device before syncing.</p></div>
       </aside>
 
@@ -336,8 +393,8 @@ function AuthenticatedApp(props: { actorId: string }) {
         </header>
         <main class="mx-auto w-full max-w-6xl px-4 py-6 pb-24 sm:px-6 sm:py-8 md:px-8 md:pb-10 lg:px-10">
           <Switch>
-            <Match when={tab() === "friends"}><FriendsView actorId={props.actorId} activeGroupId={selectedGroupId()} /></Match>
-            <Match when={tab() === "groups"}><GroupsView activeGroupId={selectedGroupId()} onSelectGroup={setSelectedGroupId} onAddExpense={(groupId) => { if (groupId) setSelectedGroupId(groupId); setComposerOpen(true); }} /></Match>
+            <Match when={tab() === "friends"}><FriendsView actorId={props.actorId} activeGroupId={selectedGroupId()} onSelectGroup={(groupId) => setSelectedGroupId(groupId)} /></Match>
+            <Match when={tab() === "groups"}><GroupsView activeGroupId={selectedGroupId()} onSelectGroup={selectGroup} onAddExpense={openNewExpense} onEditExpense={openExpenseEditor} onCreateGroup={() => setGroupComposerOpen(true)} /></Match>
             <Match when={tab() === "activity"}><ActivityView /></Match>
             <Match when={tab() === "account"}><AccountView displayName={displayName()} /></Match>
           </Switch>
@@ -353,10 +410,11 @@ function AuthenticatedApp(props: { actorId: string }) {
       </nav>
       <Show when={toastVisible()}>
         <div class="toast-enter fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full bg-foreground px-4 py-2.5 text-sm font-medium text-background shadow-lg md:bottom-6">
-          <CheckCircle2 size={16} /> Expense added
+          <CheckCircle2 size={16} /> {toastMessage()}
         </div>
       </Show>
-      <ExpenseComposer open={composerOpen()} actorId={props.actorId} initialGroupId={selectedGroupId()} onOpenChange={setComposerOpen} onSaved={showSavedToast} />
+      <ExpenseComposer open={composerOpen()} actorId={props.actorId} initialGroupId={selectedGroupId()} expense={editingExpense()} onOpenChange={(open) => { setComposerOpen(open); if (!open) setEditingExpense(undefined); }} onSaved={showSavedToast} />
+      <GroupComposer open={groupComposerOpen()} onOpenChange={setGroupComposerOpen} onCreated={handleGroupCreated} />
     </div>
   );
 }

@@ -231,7 +231,7 @@ export class LedgerStore {
     }
     if (operation.actorId !== actorId) return "ACTOR_MISMATCH";
     if (!isOperationType(operation.type)) return "UNKNOWN_OPERATION_TYPE";
-    if (!this.isActiveMember(operation.groupId, actorId)) return "NOT_A_GROUP_MEMBER";
+    if (operation.type !== "GroupCreated" && !this.isActiveMember(operation.groupId, actorId)) return "NOT_A_GROUP_MEMBER";
     const device = this.db
       .query<DeviceRow, [string]>("SELECT id, user_id, public_key_jwk, status FROM devices WHERE id = ?")
       .get(operation.deviceId);
@@ -402,6 +402,26 @@ export class LedgerStore {
   }
 
   private applyProjection(operation: OperationEnvelope, version: number, receivedAt: string): void {
+    if (operation.type === "GroupCreated") {
+      if (operation.groupId !== operation.targetId) throw new TypeError("A new group must target its own group id");
+      const payload = jsonObject(operation.payload);
+      const name = requiredString(payload, "name", 100);
+      const settlementCurrency = requiredString(payload, "settlementCurrency", 3).toUpperCase();
+      if (!/^[A-Z]{3}$/.test(settlementCurrency)) throw new TypeError("settlementCurrency must be a three-letter ISO code");
+      const profile = this.db.query<{ displayName: string; email: string | null }, [string]>(
+        `SELECT display_name AS displayName, email
+         FROM group_members WHERE user_id = ? ORDER BY joined_at LIMIT 1`,
+      ).get(operation.actorId);
+      this.db.query(
+        "INSERT INTO groups(id, name, settlement_currency, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
+      ).run(operation.groupId, name, settlementCurrency, operation.actorId, receivedAt);
+      this.db.query(
+        `INSERT INTO group_members(group_id, user_id, display_name, email, status, joined_at)
+         VALUES (?, ?, ?, ?, 'active', ?)`,
+      ).run(operation.groupId, operation.actorId, profile?.displayName ?? operation.actorId, profile?.email ?? null, receivedAt);
+      return;
+    }
+
     if (operation.type === "ExpenseCreated" || operation.type === "ExpenseAmended") {
       const payload = parseExpensePayload(operation.payload);
       this.assertActiveParticipants(operation.groupId, "payers", payload.payers);

@@ -1,15 +1,17 @@
 import { Dialog } from "@kobalte/core/dialog";
 import { Check, ChevronDown, ChevronUp, LoaderCircle, SlidersHorizontal, X } from "lucide-solid";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
-import { appStore, calculateExpenseAllocations, createExpense, type SplitMethod } from "../lib/store";
+import type { LocalExpense } from "../lib/db";
+import { appStore, calculateExpenseAllocations, createExpense, updateExpense, type SplitMethod } from "../lib/store";
 import { Avatar, Button } from "./ui";
 
 interface ExpenseComposerProps {
   open: boolean;
   actorId: string;
   initialGroupId?: string | undefined;
+  expense?: LocalExpense | undefined;
   onOpenChange(open: boolean): void;
-  onSaved(): void;
+  onSaved(mode: "created" | "updated"): void;
 }
 
 const splitMethods: Array<{ id: SplitMethod; label: string }> = [
@@ -21,6 +23,10 @@ const splitMethods: Array<{ id: SplitMethod; label: string }> = [
 
 function formatMinor(amountMinor: number, currency = "USD"): string {
   return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(amountMinor / 100);
+}
+
+function minorInput(amountMinor: number): string {
+  return (amountMinor / 100).toFixed(2);
 }
 
 export function ExpenseComposer(props: ExpenseComposerProps) {
@@ -49,21 +55,41 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   createEffect(() => {
     const open = props.open;
     if (open && !wasOpen) {
-      const nextGroupId = props.initialGroupId && appStore.groups().some((group) => group.id === props.initialGroupId)
-        ? props.initialGroupId
+      const editingExpense = props.expense;
+      const preferredGroupId = editingExpense?.groupId ?? props.initialGroupId;
+      const nextGroupId = preferredGroupId && appStore.groups().some((group) => group.id === preferredGroupId)
+        ? preferredGroupId
         : appStore.groups()[0]?.id ?? "";
       setGroupId(nextGroupId);
-      setDescription("");
-      setAmount("");
-      setCategory("General");
-      setDate(new Date().toISOString().slice(0, 10));
-      setNotes("");
+      setDescription(editingExpense?.description ?? "");
+      setAmount(editingExpense ? minorInput(editingExpense.amountMinor) : "");
+      setCategory(editingExpense?.category ?? "General");
+      setDate(editingExpense?.expenseDate ?? new Date().toISOString().slice(0, 10));
+      setNotes(editingExpense?.notes ?? "");
       setDetailsOpen(false);
       setSplitOpen(false);
-      setSplitMethod("equal");
-      setSplitValues({});
       setError("");
-      initializedGroup = "";
+      if (editingExpense) {
+        const participantIds = editingExpense.allocations.map(({ participantId }) => participantId);
+        const equalAllocations = calculateExpenseAllocations({
+          amount: minorInput(editingExpense.amountMinor),
+          participantIds,
+          splitMethod: "equal",
+          splitValues: {},
+        });
+        const isEqual = equalAllocations.every((allocation) => (
+          editingExpense.allocations.find(({ participantId }) => participantId === allocation.participantId)?.amountMinor === allocation.amountMinor
+        ));
+        setParticipants(participantIds);
+        setPayerId(editingExpense.payers[0]?.participantId ?? props.actorId);
+        setSplitMethod(isEqual ? "equal" : "exact");
+        setSplitValues(isEqual ? {} : Object.fromEntries(editingExpense.allocations.map(({ participantId, amountMinor }) => [participantId, minorInput(amountMinor)])));
+        initializedGroup = nextGroupId;
+      } else {
+        setSplitMethod("equal");
+        setSplitValues({});
+        initializedGroup = "";
+      }
     }
     if (!open) initializedGroup = "";
     wasOpen = open;
@@ -146,10 +172,11 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
+    const editingExpense = props.expense;
     setSaving(true);
     setError("");
     try {
-      await createExpense({
+      const input = {
         groupId: groupId(),
         description: description(),
         amount: amount(),
@@ -161,9 +188,11 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
         splitMethod: splitMethod(),
         splitValues: splitValues(),
         notes: notes(),
-      });
+      };
+      if (editingExpense) await updateExpense(editingExpense, input);
+      else await createExpense(input);
       props.onOpenChange(false);
-      props.onSaved();
+      props.onSaved(editingExpense ? "updated" : "created");
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Could not save this expense");
     } finally {
@@ -179,19 +208,19 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
           <Dialog.Content class="composer-dialog max-h-[96dvh] w-full overflow-y-auto rounded-t-2xl border border-border bg-card shadow-2xl outline-none sm:max-w-xl sm:rounded-xl">
             <header class="sticky top-0 z-20 flex min-h-14 items-center justify-between border-b border-border bg-card/95 px-5 backdrop-blur">
               <div class="min-w-0">
-                <Dialog.Title class="truncate text-base font-semibold">Add to {currentGroup()?.name ?? "a group"}</Dialog.Title>
-                <Dialog.Description class="sr-only">Record a shared expense. Amount, description, payer, and split are required.</Dialog.Description>
+                <Dialog.Title class="truncate text-base font-semibold">{props.expense ? "Edit in " : "Add to "}{currentGroup()?.name ?? "a group"}</Dialog.Title>
+                <Dialog.Description class="sr-only">{props.expense ? "Update this shared expense." : "Record a shared expense."}</Dialog.Description>
               </div>
               <Dialog.CloseButton class="grid size-9 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label="Close expense form"><X size={17} /></Dialog.CloseButton>
             </header>
 
             <form class="grid gap-5 p-5 pb-0 sm:p-6 sm:pb-0" onSubmit={(event) => void submit(event)}>
-              <Show when={appStore.groups().length > 1}>
+              <Show when={!props.expense && appStore.groups().length > 1}>
                 <label class="grid gap-2 text-sm font-medium">Group<select class="form-control" value={groupId()} onInput={(event) => setGroupId(event.currentTarget.value)}><For each={appStore.groups()}>{(group) => <option value={group.id}>{group.name}</option>}</For></select></label>
               </Show>
 
               <label class="grid gap-2 text-sm font-medium">What was it for?<input class="form-control h-12 text-base" autofocus value={description()} onInput={(event) => setDescription(event.currentTarget.value)} placeholder="Dinner, groceries, tickets…" maxlength={200} /></label>
-              <label class="grid gap-2 text-sm font-medium">Amount<div class="relative"><span class="absolute left-3 top-3 text-base text-muted-foreground">$</span><input class="form-control h-12 pl-7 text-xl font-semibold tabular-nums" inputmode="decimal" value={amount()} onInput={(event) => { setAmount(event.currentTarget.value); if (splitMethod() !== "equal") initializeValues(splitMethod()); }} placeholder="0.00" aria-label="Expense amount" /></div></label>
+              <label class="grid gap-2 text-sm font-medium">Amount<div class="relative"><span class="absolute left-3 top-3 text-base text-muted-foreground">$</span><input class="form-control amount-control h-12 pl-7 font-semibold tabular-nums" inputmode="decimal" value={amount()} onInput={(event) => { setAmount(event.currentTarget.value); if (splitMethod() !== "equal") initializeValues(splitMethod()); }} placeholder="0.00" aria-label="Expense amount" /></div></label>
 
               <button type="button" class="summary-row group grid min-h-16 w-full grid-cols-[1fr_auto] items-center gap-3 rounded-lg border border-border bg-muted/35 px-4 text-left transition-colors hover:bg-muted/60" onClick={() => setSplitOpen((open) => !open)}>
                 <div class="min-w-0"><span class="block text-xs text-muted-foreground">Paid by {payerId() === props.actorId ? "you" : payerName()}</span><strong class="block truncate text-sm font-medium">{splitSummary()}</strong></div>
@@ -247,7 +276,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
               <Show when={error()}><p class="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700" role="alert">{error()}</p></Show>
               <footer class="sticky bottom-0 z-10 -mx-5 mt-1 grid gap-2 border-t border-border bg-card/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur sm:-mx-6 sm:px-6">
                 <Button class="h-11 w-full" type="submit" disabled={!canSave()}>
-                  <Show when={saving()} fallback={<><Check size={16} /> Save expense</>}><LoaderCircle class="animate-spin" size={16} /> Saving…</Show>
+                  <Show when={saving()} fallback={<><Check size={16} /> {props.expense ? "Save changes" : "Save expense"}</>}><LoaderCircle class="animate-spin" size={16} /> Saving…</Show>
                 </Button>
                 <p class="text-center text-xs text-muted-foreground">Saves on this device first, then syncs automatically.</p>
               </footer>

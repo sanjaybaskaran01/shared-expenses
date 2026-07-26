@@ -123,6 +123,60 @@ describe("ledger ingestion", () => {
     ]);
   });
 
+  test("lets an active group member correct an expense created by another member", async () => {
+    const otherKeys = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
+    store.registerDevice({
+      id: "device-2",
+      userId: "user-2",
+      publicKeyJwk: await crypto.subtle.exportKey("jwk", otherKeys.publicKey),
+      name: "Friend phone",
+    });
+    const original = await signedOperation(otherKeys.privateKey, {
+      actorId: "user-2",
+      deviceId: "device-2",
+    });
+    expect((await store.push("user-2", [original])).accepted).toHaveLength(1);
+
+    const correction = await signedOperation(privateKey, {
+      id: crypto.randomUUID(),
+      type: "ExpenseAmended",
+      baseVersion: 1,
+      payload: {
+        description: "Corrected dinner",
+        category: "Dining out",
+        amountMinor: 1200,
+        currency: "USD",
+        expenseDate: "2026-07-25",
+        notes: "Corrected by another group member",
+        payers: [{ participantId: "user-2", amountMinor: 1200 }],
+        allocations: [
+          { participantId: "user-1", amountMinor: 600 },
+          { participantId: "user-2", amountMinor: 600 },
+        ],
+      },
+    });
+    expect((await store.push("user-1", [correction])).accepted).toHaveLength(1);
+    expect(store.snapshot("user-1").expenses).toEqual([
+      expect.objectContaining({ description: "Corrected dinner", version: 2, createdBy: "user-2" }),
+    ]);
+  });
+
+  test("allows a trusted user to create an additional group", async () => {
+    const groupId = "group-2";
+    const operation = await signedOperation(privateKey, {
+      id: crypto.randomUUID(),
+      groupId,
+      type: "GroupCreated",
+      targetId: groupId,
+      baseVersion: 0,
+      payload: { name: "Apartment", settlementCurrency: "USD" },
+    });
+    expect((await store.push("user-1", [operation])).accepted).toHaveLength(1);
+    expect(store.snapshot("user-1").groups).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: groupId, name: "Apartment", settlementCurrency: "USD" }),
+    ]));
+  });
+
   test("rejects a modified payload with the original signature", async () => {
     const operation = await signedOperation(privateKey);
     operation.payload = { ...(operation.payload as Record<string, JsonValue>), description: "Tampered" };
