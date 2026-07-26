@@ -24,6 +24,7 @@ export function expenseFromOperation(
     currency: String(payload.currency),
     expenseDate: String(payload.expenseDate),
     notes: String(payload.notes ?? ""),
+    recurrence: (String(payload.recurrence ?? "none") as NonNullable<LocalExpense["recurrence"]>),
     payers,
     allocations,
     yourNetMinor: paid - owed,
@@ -44,6 +45,14 @@ async function applyRemote(operation: OperationEnvelope, currentActorId: string)
   if (operation.type === "ExpenseVoided") {
     await localDb.expenses.update(operation.targetId, {
       status: "voided",
+      version: operation.baseVersion + 1,
+      updatedAt: operation.receivedAt ?? operation.clientTimestamp,
+      syncStatus: "accepted",
+    });
+  }
+  if (operation.type === "ExpenseRestored") {
+    await localDb.expenses.update(operation.targetId, {
+      status: "active",
       version: operation.baseVersion + 1,
       updatedAt: operation.receivedAt ?? operation.clientTimestamp,
       syncStatus: "accepted",
@@ -101,6 +110,14 @@ export class SyncEngine {
               const existingExpense = await localDb.expenses.get(operation.targetId);
               const expense = expenseFromOperation(operation, "accepted", device.actorId, existingExpense?.createdBy);
               if (expense) await localDb.expenses.put(expense);
+              if (operation.type === "ExpenseVoided" || operation.type === "ExpenseRestored") {
+                await localDb.expenses.update(operation.targetId, {
+                  status: operation.type === "ExpenseVoided" ? "voided" : "active",
+                  version: operation.baseVersion + 1,
+                  updatedAt: operation.receivedAt ?? operation.clientTimestamp,
+                  syncStatus: "accepted",
+                });
+              }
             }
           }
           for (const conflict of result.conflicts) {

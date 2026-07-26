@@ -177,6 +177,31 @@ describe("ledger ingestion", () => {
     ]));
   });
 
+  test("voids and restores an expense with versioned audit operations", async () => {
+    await store.push("user-1", [await signedOperation(privateKey)]);
+    const voided = await signedOperation(privateKey, {
+      id: crypto.randomUUID(),
+      type: "ExpenseVoided",
+      baseVersion: 1,
+      payload: { reason: "Entered twice" },
+    });
+    expect((await store.push("user-1", [voided])).accepted).toHaveLength(1);
+    expect(store.snapshot("user-1").expenses).toEqual([
+      expect.objectContaining({ status: "voided", version: 2 }),
+    ]);
+
+    const restored = await signedOperation(privateKey, {
+      id: crypto.randomUUID(),
+      type: "ExpenseRestored",
+      baseVersion: 2,
+      payload: { reason: "Deletion was a mistake" },
+    });
+    expect((await store.push("user-1", [restored])).accepted).toHaveLength(1);
+    expect(store.snapshot("user-1").expenses).toEqual([
+      expect.objectContaining({ status: "active", version: 3 }),
+    ]);
+  });
+
   test("rejects a modified payload with the original signature", async () => {
     const operation = await signedOperation(privateKey);
     operation.payload = { ...(operation.payload as Record<string, JsonValue>), description: "Tampered" };

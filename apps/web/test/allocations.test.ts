@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { calculateExpenseAllocations } from "../src/lib/store";
+import { calculateExpenseAllocations, calculateExpensePayers } from "../src/lib/store";
 
 describe("expense split allocations", () => {
   test("distributes an equal split deterministically", () => {
@@ -46,5 +46,34 @@ describe("expense split allocations", () => {
       { participantId: "a", amountMinor: 300 },
       { participantId: "b", amountMinor: 900 },
     ]);
+  });
+
+  test("applies adjustments before sharing the remainder", () => {
+    expect(calculateExpenseAllocations({
+      amount: "30.00",
+      participantIds: ["a", "b", "c"],
+      splitMethod: "adjustment",
+      splitValues: { a: "3.00", b: "0", c: "-3.00" },
+    })).toEqual([
+      { participantId: "a", amountMinor: 1300 },
+      { participantId: "b", amountMinor: 1000 },
+      { participantId: "c", amountMinor: 700 },
+    ]);
+  });
+
+  test("requires multiple payer amounts to equal the expense", () => {
+    expect(calculateExpensePayers({
+      amount: "42.75",
+      payerIds: ["a", "b"],
+      payerValues: { a: "20.00", b: "22.75" },
+    })).toEqual([
+      { participantId: "a", amountMinor: 2000 },
+      { participantId: "b", amountMinor: 2275 },
+    ]);
+    expect(() => calculateExpensePayers({
+      amount: "42.75",
+      payerIds: ["a", "b"],
+      payerValues: { a: "20.00", b: "20.00" },
+    })).toThrow();
   });
 });
