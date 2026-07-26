@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.shared-expenses.backup</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>REPLACE_WITH_RUN_BACKUP_SCRIPT_PATH</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>EXPENSES_ENV_FILE</key><string>REPLACE_WITH_ENV_FILE_PATH</string>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>3</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key><string>REPLACE_WITH_DATA_PATH/logs/backup.log</string>
+  <key>StandardErrorPath</key><string>REPLACE_WITH_DATA_PATH/logs/backup.error.log</string>
+</dict>
+</plist>

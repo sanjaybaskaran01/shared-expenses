@@ -133,6 +133,8 @@ EXPENSES_AGE_IDENTITY=/private/keys/expenses-age-key.txt \
 
 The backup script uses SQLite's online backup command, verifies database integrity, hashes the payload, encrypts it locally, and only then moves the completed archive into the destination. It never applies retention deletion automatically.
 
+For an unattended Mac deployment, copy `scripts/run-backup.sh` and `scripts/backup.sh` outside protected workspace folders, add the four backup variables shown above to the permissions-restricted production env file, and adapt `deploy/com.shared-expenses.backup.plist.example`. The example runs daily at 03:00 local time; verify at least one encrypted archive with `scripts/verify-backup.sh` before relying on the schedule.
+
 After deliberately restoring an older database, rotate its server generation before starting the API:
 
 ```sh
