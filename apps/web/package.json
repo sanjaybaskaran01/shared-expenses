@@ -16,9 +16,12 @@
     "@kobalte/core": "latest",
     "@solidjs/router": "latest",
     "better-auth": "latest",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "dexie": "latest",
     "lucide-solid": "latest",
     "solid-js": "latest",
+    "tailwind-merge": "^3.6.0",
     "workbox-window": "latest"
   },
   "devDependencies": {

@@ -14,8 +14,8 @@ export default defineConfig({
         name: "Expenses",
         short_name: "Expenses",
         description: "Shared fairly. Reconciled clearly.",
-        theme_color: "#071229",
-        background_color: "#f5f7fb",
+        theme_color: "#fafafa",
+        background_color: "#fafafa",
         display: "standalone",
         start_url: "/",
         icons: [
