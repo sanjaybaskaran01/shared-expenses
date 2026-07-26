@@ -8,7 +8,7 @@ export default defineConfig({
     solid(),
     tailwindcss(),
     VitePWA({
-      registerType: "prompt",
+      registerType: "autoUpdate",
       includeAssets: ["brand-mark.svg", "apple-touch-icon.png", "brand-concept.png"],
       manifest: {
         name: "Expenses",
