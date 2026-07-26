@@ -71,18 +71,20 @@ DATABASE_PATH=/absolute/private/path/expenses.sqlite
 ATTACHMENTS_PATH=/absolute/private/path/attachments
 WEB_ORIGIN=https://expenses.sanjaybaskaran.com
 PUBLIC_API_URL=https://api.expenses.sanjaybaskaran.com
-BETTER_AUTH_SECRET=generate-a-long-random-secret
+BETTER_AUTH_SECRET=
+BETTER_AUTH_SECRET_KEYCHAIN_SERVICE=shared-expenses-auth
 DEV_AUTH_BYPASS=false
 OWNER_EMAIL=your-real-invited-email@example.com
 BOOTSTRAP_GROUP_NAME=Shared expenses
 SMTP_USER=the-google-account-that-owns-the-app-password@gmail.com
-SMTP_APP_PASSWORD=google-app-password
+SMTP_APP_PASSWORD=
+SMTP_APP_PASSWORD_KEYCHAIN_SERVICE=shared-expenses-smtp
 SMTP_FROM=expenses@sanjaybaskaran.com
 ```
 
 `OWNER_EMAIL` is the only email allowed to create the first account. Invited placeholder members may then create accounts. Sign-in uses a verified, single-use link and does not require a password.
 
-Keep this environment file out of Git, backups, shell history, and launch-agent XML. Restrict it with `chmod 600`; the included `scripts/run-server.sh` loads it for `launchd` through the non-secret `EXPENSES_ENV_FILE` path.
+Keep this environment file out of Git, backups, shell history, and launch-agent XML. Restrict it with `chmod 600`; the included `scripts/run-server.sh` loads it for `launchd` through the non-secret `EXPENSES_ENV_FILE` path. When either Keychain service variable is set, the runner reads that secret from the macOS login Keychain and overrides the corresponding plaintext variable, so production does not need either secret in the env file.
 
 ### 2. Build and run the API
 
