@@ -1,5 +1,5 @@
 import { Dialog } from "@kobalte/core/dialog";
-import { Check, ChevronDown, ChevronUp, LoaderCircle, SlidersHorizontal, UsersRound, X } from "lucide-solid";
+import { Check, ChevronDown, ChevronRight, ChevronUp, LoaderCircle, SlidersHorizontal, UsersRound, X } from "lucide-solid";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { LocalExpense } from "../lib/db";
 import { appStore, calculateExpenseAllocations, calculateExpensePayers, createExpense, updateExpense, type SplitMethod } from "../lib/store";
@@ -9,8 +9,11 @@ interface ExpenseComposerProps {
   open: boolean;
   actorId: string;
   initialGroupId?: string | undefined;
+  initialParticipantIds?: string[] | undefined;
+  targetLabel?: string | undefined;
   expense?: LocalExpense | undefined;
   onOpenChange(open: boolean): void;
+  onChangeTarget?(): void;
   onSaved(mode: "created" | "updated"): void;
 }
 
@@ -101,9 +104,12 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       } else {
         setSplitMethod("equal");
         setSplitValues({});
-        setPayerIds([props.actorId]);
+        const memberIds = appStore.members().filter((member) => member.groupId === nextGroupId && member.status === "active").map((member) => member.userId);
+        const requested = props.initialParticipantIds?.filter((id) => memberIds.includes(id));
+        setParticipants(requested?.length ? requested : memberIds);
+        setPayerIds([memberIds.includes(props.actorId) ? props.actorId : memberIds[0] ?? props.actorId]);
         setPayerValues({});
-        initializedGroup = "";
+        initializedGroup = nextGroupId;
       }
     }
     if (!open) initializedGroup = "";
@@ -260,16 +266,18 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
           <Dialog.Content class="composer-dialog max-h-[96dvh] w-full overflow-y-auto rounded-t-2xl border border-border bg-card shadow-2xl outline-none sm:max-w-xl sm:rounded-xl">
             <header class="sticky top-0 z-20 flex min-h-14 items-center justify-between border-b border-border bg-card/95 px-5 backdrop-blur">
               <div class="min-w-0">
-                <Dialog.Title class="truncate text-base font-semibold">{props.expense ? "Edit in " : "Add to "}{currentGroup()?.name ?? "a group"}</Dialog.Title>
+                <Dialog.Title class="truncate text-base font-semibold">{props.expense ? "Edit expense" : "New expense"}</Dialog.Title>
                 <Dialog.Description class="sr-only">{props.expense ? "Update this shared expense." : "Record a shared expense."}</Dialog.Description>
               </div>
               <Dialog.CloseButton class="grid size-9 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label="Close expense form"><X size={17} /></Dialog.CloseButton>
             </header>
 
             <form class="grid gap-5 p-5 pb-0 sm:p-6 sm:pb-0" onSubmit={(event) => void submit(event)}>
-              <Show when={!props.expense && appStore.groups().length > 1}>
-                <label class="grid gap-2 text-sm font-medium">Group<select class="form-control" value={groupId()} onInput={(event) => setGroupId(event.currentTarget.value)}><For each={appStore.groups()}>{(group) => <option value={group.id}>{group.name}</option>}</For></select></label>
-              </Show>
+              <div class="expense-context-row">
+                <span class="target-icon"><UsersRound size={17} /></span>
+                <span class="min-w-0 flex-1"><small>{props.expense ? "Group" : "With"}</small><strong>{props.targetLabel ?? currentGroup()?.name ?? "Choose a group"}</strong><Show when={!props.expense && props.targetLabel && props.targetLabel !== currentGroup()?.name}><em>in {currentGroup()?.name}</em></Show></span>
+                <Show when={!props.expense && props.onChangeTarget}><button type="button" onClick={props.onChangeTarget}>Change <ChevronRight size={14} /></button></Show>
+              </div>
 
               <label class="grid gap-2 text-sm font-medium">What was it for?<input class="form-control h-12 text-base" value={description()} onInput={(event) => setDescription(event.currentTarget.value)} placeholder="Dinner, groceries, tickets…" maxlength={200} /></label>
               <label class="grid gap-2 text-sm font-medium">Amount<div class="relative"><span class="absolute left-3 top-3 text-sm font-semibold text-muted-foreground">{currency()}</span><input class="form-control amount-control h-12 pl-14 font-semibold tabular-nums" inputmode="decimal" value={amount()} onInput={(event) => { setAmount(event.currentTarget.value); if (splitMethod() !== "equal") initializeValues(splitMethod()); }} placeholder="0.00" aria-label="Expense amount" /></div></label>
