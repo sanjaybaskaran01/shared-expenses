@@ -7,6 +7,7 @@ export function expenseFromOperation(
   operation: OperationEnvelope,
   syncStatus: LocalOperation["syncStatus"],
   currentActorId: string,
+  originalCreatedBy?: string,
 ): LocalExpense | null {
   if (operation.type !== "ExpenseCreated" && operation.type !== "ExpenseAmended") return null;
   const payload = operation.payload as Record<string, JsonValue>;
@@ -28,7 +29,7 @@ export function expenseFromOperation(
     yourNetMinor: paid - owed,
     status: "active",
     version: operation.baseVersion + 1,
-    createdBy: operation.actorId,
+    createdBy: originalCreatedBy ?? operation.actorId,
     updatedAt: operation.receivedAt ?? operation.clientTimestamp,
     syncStatus,
   };
@@ -37,7 +38,8 @@ export function expenseFromOperation(
 async function applyRemote(operation: OperationEnvelope, currentActorId: string): Promise<void> {
   const localOperation: LocalOperation = { ...operation, syncStatus: "accepted" };
   await localDb.operations.put(localOperation);
-  const expense = expenseFromOperation(operation, "accepted", currentActorId);
+  const existingExpense = await localDb.expenses.get(operation.targetId);
+  const expense = expenseFromOperation(operation, "accepted", currentActorId, existingExpense?.createdBy);
   if (expense) await localDb.expenses.put(expense);
   if (operation.type === "ExpenseVoided") {
     await localDb.expenses.update(operation.targetId, {
@@ -85,6 +87,7 @@ export class SyncEngine {
       const outbound = recovering
         ? (await localDb.operations.toArray()).filter((operation) => operation.syncStatus !== "rejected" && operation.syncStatus !== "conflicted")
         : await localDb.operations.where("syncStatus").equals("pending").toArray();
+      outbound.sort((left, right) => left.clientTimestamp.localeCompare(right.clientTimestamp));
       for (let offset = 0; offset < outbound.length; offset += 100) {
         const result = await pushOperations(outbound.slice(offset, offset + 100));
         await localDb.transaction("rw", localDb.operations, localDb.expenses, async () => {
@@ -95,7 +98,8 @@ export class SyncEngine {
             });
             const operation = await localDb.operations.get(accepted.id);
             if (operation) {
-              const expense = expenseFromOperation(operation, "accepted", device.actorId);
+              const existingExpense = await localDb.expenses.get(operation.targetId);
+              const expense = expenseFromOperation(operation, "accepted", device.actorId, existingExpense?.createdBy);
               if (expense) await localDb.expenses.put(expense);
             }
           }
