@@ -5,12 +5,15 @@
   <key>Label</key><string>com.shared-expenses.tunnel</string>
   <key>ProgramArguments</key>
   <array>
-    <string>REPLACE_WITH_CLOUDFLARED_PATH</string>
-    <string>tunnel</string>
-    <string>--config</string>
-    <string>REPLACE_WITH_CONFIG_PATH</string>
-    <string>run</string>
+    <string>REPLACE_WITH_RUN_TUNNEL_SCRIPT_PATH</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CLOUDFLARED_PATH</key><string>REPLACE_WITH_CLOUDFLARED_PATH</string>
+    <key>CLOUDFLARED_PROTOCOL</key><string>auto</string>
+    <key>CLOUDFLARED_TOKEN_KEYCHAIN_ACCOUNT</key><string>REPLACE_WITH_MACOS_USERNAME</string>
+    <key>CLOUDFLARED_TOKEN_KEYCHAIN_SERVICE</key><string>shared-expenses-tunnel</string>
+  </dict>
   <key>KeepAlive</key><true/>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>REPLACE_WITH_DATA_PATH/logs/tunnel.log</string>

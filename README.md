@@ -53,7 +53,7 @@ bun run check
 The accepted zero-incremental-cost deployment is:
 
 - `expenses.example.com`: Cloudflare Pages, built from `apps/web/dist`.
-- `api.expenses.example.com`: Cloudflare Tunnel to `127.0.0.1:3000` on the existing Mac.
+- `api.example.com`: Cloudflare Tunnel to `127.0.0.1:3000` on the existing Mac.
 - SQLite and attachments: a non-iCloud local data directory.
 - Encrypted completed backups only: copied into iCloud Drive.
 - Email: Gmail SMTP with an app password and `expenses@example.com` as the requested From address.
@@ -70,7 +70,7 @@ PORT=3000
 DATABASE_PATH=/absolute/private/path/expenses.sqlite
 ATTACHMENTS_PATH=/absolute/private/path/attachments
 WEB_ORIGIN=https://expenses.example.com
-PUBLIC_API_URL=https://api.expenses.example.com
+PUBLIC_API_URL=https://api.example.com
 BETTER_AUTH_SECRET=
 BETTER_AUTH_SECRET_KEYCHAIN_SERVICE=shared-expenses-auth
 DEV_AUTH_BYPASS=false
@@ -100,15 +100,15 @@ The example `launchd` files in `deploy/` contain placeholders on purpose. Copy t
 
 Create a Cloudflare Pages project with:
 
-- Build command: `bun install --frozen-lockfile && VITE_API_URL=https://api.expenses.example.com bun --cwd apps/web run build`
+- Build command: `bun install --frozen-lockfile && VITE_API_URL=https://api.example.com bun --cwd apps/web run build`
 - Output directory: `apps/web/dist`
 - Custom domain: `expenses.example.com`
 
-The repository includes Pages `_headers` and SPA `_redirects`. Do not proxy the PWA through the home Mac; that would defeat offline app-shell availability.
+The repository includes static-host security and cache headers. Do not proxy the PWA through the home Mac; that would defeat offline app-shell availability.
 
 ### 4. Expose only the API
 
-Install `cloudflared`, create a named tunnel, and adapt `deploy/cloudflared-config.example.yml`. Route only `api.expenses.example.com` to `http://127.0.0.1:3000`. Do not add a router port-forward.
+Install `cloudflared`, create a named tunnel, and route only `api.example.com` to `http://127.0.0.1:3000`. Do not add a router port-forward. For a token-managed tunnel, store the token in macOS Keychain under service `shared-expenses-tunnel`, then adapt `deploy/com.shared-expenses.tunnel.plist.example`; its runner reads the token at startup without putting it in the plist or process arguments. `deploy/cloudflared-config.example.yml` remains available for credential-file installations.
 
 ### 5. Validate Gmail delivery
 
