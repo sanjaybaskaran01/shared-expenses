@@ -1,19 +1,17 @@
-import { BarChart, PieChart } from "echarts/charts";
+import { BarChart, LineChart } from "echarts/charts";
 import { GridComponent, TooltipComponent } from "echarts/components";
 import * as echarts from "echarts/core";
 import { SVGRenderer } from "echarts/renderers";
 import { createEffect, onCleanup, onMount } from "solid-js";
 import type { LocalExpense } from "../lib/db";
 
-echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, SVGRenderer]);
+echarts.use([BarChart, LineChart, GridComponent, TooltipComponent, SVGRenderer]);
 
 interface SpendingChartProps {
   expenses: LocalExpense[];
   currency: string;
   mode: "category" | "month";
 }
-
-const palette = ["#0f9f77", "#5d7cf6", "#f59e55", "#d95f89", "#8b72d8", "#56a7d8", "#7ab86d"];
 
 function money(value: number, currency: string): string {
   return new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 0 }).format(value / 100);
@@ -26,14 +24,23 @@ export function SpendingChart(props: SpendingChartProps) {
   function render(): void {
     if (!chart) return;
     const expenses = props.expenses.filter((expense) => expense.status === "active" && expense.currency === props.currency);
+    const styles = getComputedStyle(document.documentElement);
+    const ink = styles.getPropertyValue("--chart-ink").trim() || "#20294c";
+    const accent = styles.getPropertyValue("--chart-accent").trim() || "#93ea62";
+    const muted = styles.getPropertyValue("--muted-foreground").trim() || "#73766f";
+    const gridLine = styles.getPropertyValue("--chart-grid").trim() || "rgba(32,41,76,.1)";
+    const tooltip = { backgroundColor: styles.getPropertyValue("--card").trim(), borderColor: gridLine, textStyle: { color: styles.getPropertyValue("--foreground").trim(), fontSize: 12 }, extraCssText: "border-radius:10px;box-shadow:0 8px 24px rgba(18,22,20,.12);" };
     if (props.mode === "category") {
       const totals = new Map<string, number>();
       for (const expense of expenses) totals.set(expense.category, (totals.get(expense.category) ?? 0) + expense.amountMinor);
+      const entries = [...totals].sort((left, right) => left[1] - right[1]).slice(-6);
       chart.setOption({
         animationDuration: 450,
-        color: palette,
-        tooltip: { trigger: "item", formatter: (item: { name: string; value: number; percent: number }) => `${item.name}<br/><strong>${money(item.value, props.currency)}</strong> · ${item.percent}%` },
-        series: [{ type: "pie", radius: ["58%", "82%"], center: ["50%", "51%"], avoidLabelOverlap: true, padAngle: 3, itemStyle: { borderRadius: 7 }, label: { show: false }, emphasis: { scaleSize: 5 }, data: [...totals].sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value })) }],
+        grid: { top: 4, right: 58, bottom: 4, left: 4, containLabel: true },
+        tooltip: { ...tooltip, trigger: "item", formatter: (item: { name: string; value: number }) => `${item.name}<br/><strong>${money(item.value, props.currency)}</strong>` },
+        xAxis: { type: "value", show: false },
+        yAxis: { type: "category", data: entries.map(([name]) => name), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: muted, fontSize: 11, width: 82, overflow: "truncate" } },
+        series: [{ type: "bar", data: entries.map(([, value], index) => ({ value, itemStyle: { color: index === entries.length - 1 ? accent : ink } })), barWidth: 10, itemStyle: { borderRadius: 8 }, label: { show: true, position: "right", color: muted, fontSize: 10, formatter: (item: { value: number }) => money(item.value, props.currency) } }],
       }, true);
       return;
     }
@@ -45,12 +52,11 @@ export function SpendingChart(props: SpendingChartProps) {
     const entries = [...totals].sort(([left], [right]) => left.localeCompare(right)).slice(-6);
     chart.setOption({
       animationDuration: 450,
-      color: [palette[0]!],
-      grid: { top: 12, right: 4, bottom: 26, left: 4, containLabel: true },
-      tooltip: { trigger: "axis", formatter: (items: Array<{ axisValue: string; value: number }>) => `${items[0]?.axisValue ?? ""}<br/><strong>${money(items[0]?.value ?? 0, props.currency)}</strong>` },
-      xAxis: { type: "category", data: entries.map(([key]) => new Intl.DateTimeFormat(undefined, { month: "short" }).format(new Date(`${key}-15T12:00:00`))), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: "#7b7b82", fontSize: 11 } },
-      yAxis: { type: "value", splitLine: { lineStyle: { color: "rgba(120,120,128,.12)" } }, axisLabel: { show: false } },
-      series: [{ type: "bar", data: entries.map(([, value]) => value), barMaxWidth: 28, itemStyle: { borderRadius: [7, 7, 3, 3] } }],
+      grid: { top: 18, right: 12, bottom: 26, left: 8, containLabel: true },
+      tooltip: { ...tooltip, trigger: "axis", axisPointer: { type: "line", lineStyle: { color: accent, width: 1 } }, formatter: (items: Array<{ axisValue: string; value: number }>) => `${items[0]?.axisValue ?? ""}<br/><strong>${money(items[0]?.value ?? 0, props.currency)}</strong>` },
+      xAxis: { type: "category", boundaryGap: false, data: entries.map(([key]) => new Intl.DateTimeFormat(undefined, { month: "short" }).format(new Date(`${key}-15T12:00:00`))), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: muted, fontSize: 11 } },
+      yAxis: { type: "value", splitLine: { lineStyle: { color: gridLine } }, axisLabel: { show: false } },
+      series: [{ type: "line", smooth: .35, data: entries.map(([, value]) => value), symbol: "circle", symbolSize: 7, showSymbol: true, lineStyle: { color: ink, width: 2.5 }, itemStyle: { color: accent, borderColor: ink, borderWidth: 2 }, emphasis: { focus: "series", scale: 1.35 } }],
     }, true);
   }
 
