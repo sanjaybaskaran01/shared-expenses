@@ -33,6 +33,7 @@ export interface LocalExpense {
   currency: string;
   expenseDate: string;
   notes: string;
+  recurrence?: "none" | "weekly" | "fortnightly" | "monthly" | "yearly";
   payers: ParticipantAmount[];
   allocations: ParticipantAmount[];
   yourNetMinor: number;

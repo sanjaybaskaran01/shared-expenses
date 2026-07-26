@@ -48,6 +48,7 @@ const versionedTypes = new Set([
   "ExpenseCreated",
   "ExpenseAmended",
   "ExpenseVoided",
+  "ExpenseRestored",
   "PaymentRecorded",
   "PaymentReversed",
   "ConflictResolved",
@@ -475,6 +476,14 @@ export class LedgerStore {
     if (operation.type === "ExpenseVoided") {
       const result = this.db
         .query("UPDATE expenses SET status = 'voided', version = ?, updated_at = ? WHERE id = ?")
+        .run(version, receivedAt, operation.targetId);
+      if (result.changes !== 1) throw new Error("Expense does not exist");
+      return;
+    }
+
+    if (operation.type === "ExpenseRestored") {
+      const result = this.db
+        .query("UPDATE expenses SET status = 'active', version = ?, updated_at = ? WHERE id = ?")
         .run(version, receivedAt, operation.targetId);
       if (result.changes !== 1) throw new Error("Expense does not exist");
       return;

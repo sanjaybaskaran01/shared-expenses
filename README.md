@@ -8,8 +8,12 @@ This repository is an original implementation inspired by the shared-expense pro
 
 The working vertical slice includes:
 
-- Installable SolidJS PWA with an original visual system and generated app icons.
-- Group expense entry with payer selection and equal participant splits.
+- Installable, iPhone-first SolidJS PWA with a source-owned component system, light/dark appearance, glass navigation, motion, and generated app icons.
+- Multiple groups with contextual group switching, group-level ledgers, per-currency balances, and member views.
+- Expense create/edit/delete/restore with equal, exact, percentage, shares, and adjustment splits.
+- Single or multiple payers, category/currency/date/recurrence metadata, notes, and expense comments.
+- Basic analytics with total/personal spend plus category and monthly charts, loaded lazily with ECharts' SVG renderer.
+- Payment recording, deterministic settlement suggestions, payment-aware balances, and a complete signed Activity feed.
 - Immediate local saves that continue while the API or host Mac is offline.
 - Background push/pull reconciliation, idempotent operation UUIDs, and SSE wakeups.
 - Deterministic canonical JSON, SHA-256 content hashes, and P-256 device signatures.
@@ -18,7 +22,7 @@ The working vertical slice includes:
 - Transactional Gmail SMTP outbox with retry and idempotency.
 - Cloudflare Pages/Tunnel, native macOS `launchd`, Docker Compose, and encrypted-backup scaffolding.
 
-Receipt capture, OCR, detailed edit/conflict UI, settlement UI, arbitrary split methods, and an admin dashboard remain later milestones. OCR is intentionally outside v1.
+Receipt capture/OCR, itemized receipt splitting, full-text search, advanced group administration, notifications, exports, billing, and regulated money movement remain later milestones. OCR is intentionally outside v1.
 
 ## Architecture
 
@@ -52,7 +56,7 @@ bun run check
 
 The accepted zero-incremental-cost deployment is:
 
-- `expenses.sanjaybaskaran.com`: Cloudflare Pages, built from `apps/web/dist`.
+- `expenses.sanjaybaskaran.com`: Cloudflare Workers Static Assets, built from `apps/web/dist`.
 - `api.sanjaybaskaran.com`: Cloudflare Tunnel to `127.0.0.1:3000` on the existing Mac.
 - SQLite and attachments: a non-iCloud local data directory.
 - Encrypted completed backups only: copied into iCloud Drive.
@@ -98,11 +102,14 @@ The example `launchd` files in `deploy/` contain placeholders on purpose. Copy t
 
 ### 3. Publish the PWA
 
-Create a Cloudflare Pages project with:
+Build the production PWA with its public API origin, then deploy the static directory to the existing Worker:
 
-- Build command: `bun install --frozen-lockfile && VITE_API_URL=https://api.sanjaybaskaran.com bun --cwd apps/web run build`
-- Output directory: `apps/web/dist`
-- Custom domain: `expenses.sanjaybaskaran.com`
+```sh
+VITE_API_URL=https://api.sanjaybaskaran.com bun --cwd apps/web run build
+bunx wrangler deploy --name shared-expenses-web --assets apps/web/dist --compatibility-date 2026-07-25
+```
+
+The Worker has the `expenses.sanjaybaskaran.com` custom domain configured in Cloudflare. Static assets remain available while the home Mac is offline.
 
 The repository includes static-host security and cache headers. Do not proxy the PWA through the home Mac; that would defeat offline app-shell availability.
 

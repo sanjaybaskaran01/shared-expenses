@@ -1,8 +1,8 @@
 import { Dialog } from "@kobalte/core/dialog";
-import { Check, ChevronDown, ChevronUp, LoaderCircle, SlidersHorizontal, X } from "lucide-solid";
+import { Check, ChevronDown, ChevronUp, LoaderCircle, SlidersHorizontal, UsersRound, X } from "lucide-solid";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { LocalExpense } from "../lib/db";
-import { appStore, calculateExpenseAllocations, createExpense, updateExpense, type SplitMethod } from "../lib/store";
+import { appStore, calculateExpenseAllocations, calculateExpensePayers, createExpense, updateExpense, type SplitMethod } from "../lib/store";
 import { Avatar, Button } from "./ui";
 
 interface ExpenseComposerProps {
@@ -19,7 +19,11 @@ const splitMethods: Array<{ id: SplitMethod; label: string }> = [
   { id: "exact", label: "Amounts" },
   { id: "percentage", label: "%" },
   { id: "shares", label: "Shares" },
+  { id: "adjustment", label: "Adjust" },
 ];
+
+const categories = ["General", "Dining out", "Groceries", "Liquor", "Rent", "Household supplies", "Utilities", "Transportation", "Gas/fuel", "Taxi", "Plane", "Hotel", "Entertainment", "Games", "Medical expenses", "Gifts", "Education", "Pets"];
+const currencies = ["USD", "CAD", "EUR", "GBP", "INR", "AUD", "JPY", "SGD", "CHF", "CNY"];
 
 function formatMinor(amountMinor: number, currency = "USD"): string {
   return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(amountMinor / 100);
@@ -35,11 +39,14 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   const [amount, setAmount] = createSignal("");
   const [category, setCategory] = createSignal("General");
   const [date, setDate] = createSignal(new Date().toISOString().slice(0, 10));
-  const [payerId, setPayerId] = createSignal(props.actorId);
+  const [payerIds, setPayerIds] = createSignal<string[]>([props.actorId]);
+  const [payerValues, setPayerValues] = createSignal<Record<string, string>>({});
   const [participants, setParticipants] = createSignal<string[]>([]);
   const [splitMethod, setSplitMethod] = createSignal<SplitMethod>("equal");
   const [splitValues, setSplitValues] = createSignal<Record<string, string>>({});
   const [notes, setNotes] = createSignal("");
+  const [currency, setCurrency] = createSignal("USD");
+  const [recurrence, setRecurrence] = createSignal<"none" | "weekly" | "fortnightly" | "monthly" | "yearly">("none");
   const [detailsOpen, setDetailsOpen] = createSignal(false);
   const [splitOpen, setSplitOpen] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
@@ -49,8 +56,11 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
 
   const currentGroup = createMemo(() => appStore.groups().find((group) => group.id === groupId()));
   const groupMembers = createMemo(() => appStore.members().filter((member) => member.groupId === groupId() && member.status === "active"));
-  const payerName = createMemo(() => groupMembers().find((member) => member.userId === payerId())?.displayName ?? "you");
-  const currency = createMemo(() => currentGroup()?.settlementCurrency ?? "USD");
+  const payerSummary = createMemo(() => {
+    if (payerIds().length > 1) return `${payerIds().length} people`;
+    const payerId = payerIds()[0];
+    return payerId === props.actorId ? "you" : groupMembers().find((member) => member.userId === payerId)?.displayName ?? "someone";
+  });
 
   createEffect(() => {
     const open = props.open;
@@ -66,6 +76,8 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       setCategory(editingExpense?.category ?? "General");
       setDate(editingExpense?.expenseDate ?? new Date().toISOString().slice(0, 10));
       setNotes(editingExpense?.notes ?? "");
+      setCurrency(editingExpense?.currency ?? appStore.groups().find((group) => group.id === nextGroupId)?.settlementCurrency ?? "USD");
+      setRecurrence(editingExpense?.recurrence ?? "none");
       setDetailsOpen(false);
       setSplitOpen(false);
       setError("");
@@ -81,13 +93,16 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
           editingExpense.allocations.find(({ participantId }) => participantId === allocation.participantId)?.amountMinor === allocation.amountMinor
         ));
         setParticipants(participantIds);
-        setPayerId(editingExpense.payers[0]?.participantId ?? props.actorId);
+        setPayerIds(editingExpense.payers.map(({ participantId }) => participantId));
+        setPayerValues(Object.fromEntries(editingExpense.payers.map(({ participantId, amountMinor }) => [participantId, minorInput(amountMinor)])));
         setSplitMethod(isEqual ? "equal" : "exact");
         setSplitValues(isEqual ? {} : Object.fromEntries(editingExpense.allocations.map(({ participantId, amountMinor }) => [participantId, minorInput(amountMinor)])));
         initializedGroup = nextGroupId;
       } else {
         setSplitMethod("equal");
         setSplitValues({});
+        setPayerIds([props.actorId]);
+        setPayerValues({});
         initializedGroup = "";
       }
     }
@@ -102,7 +117,9 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
     if (!activeGroupId || initializedGroup === activeGroupId) return;
     initializedGroup = activeGroupId;
     setParticipants(ids);
-    setPayerId(ids.includes(props.actorId) ? props.actorId : ids[0] ?? props.actorId);
+    setPayerIds([ids.includes(props.actorId) ? props.actorId : ids[0] ?? props.actorId]);
+    setPayerValues({});
+    setCurrency(currentGroup()?.settlementCurrency ?? "USD");
     setSplitMethod("equal");
     setSplitValues({});
   });
@@ -115,13 +132,22 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
     }
   });
 
-  const canSave = createMemo(() => description().trim().length > 0 && allocations().length > 0 && !saving());
+  const payers = createMemo(() => {
+    try {
+      return calculateExpensePayers({ amount: amount(), payerIds: payerIds(), payerValues: payerValues() });
+    } catch {
+      return [];
+    }
+  });
+
+  const canSave = createMemo(() => description().trim().length > 0 && allocations().length > 0 && payers().length > 0 && !saving());
   const splitSummary = createMemo(() => {
     const count = participants().length;
     if (splitMethod() === "equal") return `Equally · ${count} ${count === 1 ? "person" : "people"}`;
     if (splitMethod() === "exact") return `By amount · ${count} people`;
     if (splitMethod() === "percentage") return `By percentage · ${count} people`;
-    return `By shares · ${count} people`;
+    if (splitMethod() === "shares") return `By shares · ${count} people`;
+    return `Adjusted · ${count} people`;
   });
 
   function initializeValues(method: SplitMethod): void {
@@ -132,6 +158,10 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
     }
     if (method === "shares") {
       setSplitValues(Object.fromEntries(ids.map((id) => [id, "1"])));
+      return;
+    }
+    if (method === "adjustment") {
+      setSplitValues(Object.fromEntries(ids.map((id) => [id, "0.00"])));
       return;
     }
     if (method === "percentage") {
@@ -153,6 +183,26 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
     } catch {
       setSplitValues(Object.fromEntries(ids.map((id) => [id, "0.00"])));
     }
+  }
+
+  function enableMultiplePayers(): void {
+    const ids = groupMembers().map(({ userId }) => userId);
+    if (payerIds().length > 1) {
+      setPayerIds([payerIds()[0] ?? props.actorId]);
+      setPayerValues({});
+      return;
+    }
+    setPayerIds(ids);
+    try {
+      const equal = calculateExpenseAllocations({ amount: amount(), participantIds: ids, splitMethod: "equal", splitValues: {} });
+      setPayerValues(Object.fromEntries(equal.map((item) => [item.participantId, minorInput(item.amountMinor)])));
+    } catch {
+      setPayerValues(Object.fromEntries(ids.map((id) => [id, "0.00"])));
+    }
+  }
+
+  function togglePayer(userId: string): void {
+    setPayerIds((current) => current.includes(userId) ? current.filter((id) => id !== userId) : [...current, userId]);
   }
 
   function chooseSplitMethod(method: SplitMethod): void {
@@ -183,11 +233,13 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
         currency: currency(),
         category: category(),
         expenseDate: date(),
-        payerId: payerId(),
+        payerIds: payerIds(),
+        payerValues: payerValues(),
         participantIds: participants(),
         splitMethod: splitMethod(),
         splitValues: splitValues(),
         notes: notes(),
+        recurrence: recurrence(),
       };
       if (editingExpense) await updateExpense(editingExpense, input);
       else await createExpense(input);
@@ -219,20 +271,27 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                 <label class="grid gap-2 text-sm font-medium">Group<select class="form-control" value={groupId()} onInput={(event) => setGroupId(event.currentTarget.value)}><For each={appStore.groups()}>{(group) => <option value={group.id}>{group.name}</option>}</For></select></label>
               </Show>
 
-              <label class="grid gap-2 text-sm font-medium">What was it for?<input class="form-control h-12 text-base" autofocus value={description()} onInput={(event) => setDescription(event.currentTarget.value)} placeholder="Dinner, groceries, tickets…" maxlength={200} /></label>
-              <label class="grid gap-2 text-sm font-medium">Amount<div class="relative"><span class="absolute left-3 top-3 text-base text-muted-foreground">$</span><input class="form-control amount-control h-12 pl-7 font-semibold tabular-nums" inputmode="decimal" value={amount()} onInput={(event) => { setAmount(event.currentTarget.value); if (splitMethod() !== "equal") initializeValues(splitMethod()); }} placeholder="0.00" aria-label="Expense amount" /></div></label>
+              <label class="grid gap-2 text-sm font-medium">What was it for?<input class="form-control h-12 text-base" value={description()} onInput={(event) => setDescription(event.currentTarget.value)} placeholder="Dinner, groceries, tickets…" maxlength={200} /></label>
+              <label class="grid gap-2 text-sm font-medium">Amount<div class="relative"><span class="absolute left-3 top-3 text-sm font-semibold text-muted-foreground">{currency()}</span><input class="form-control amount-control h-12 pl-14 font-semibold tabular-nums" inputmode="decimal" value={amount()} onInput={(event) => { setAmount(event.currentTarget.value); if (splitMethod() !== "equal") initializeValues(splitMethod()); }} placeholder="0.00" aria-label="Expense amount" /></div></label>
 
               <button type="button" class="summary-row group grid min-h-16 w-full grid-cols-[1fr_auto] items-center gap-3 rounded-lg border border-border bg-muted/35 px-4 text-left transition-colors hover:bg-muted/60" onClick={() => setSplitOpen((open) => !open)}>
-                <div class="min-w-0"><span class="block text-xs text-muted-foreground">Paid by {payerId() === props.actorId ? "you" : payerName()}</span><strong class="block truncate text-sm font-medium">{splitSummary()}</strong></div>
+                <div class="min-w-0"><span class="block text-xs text-muted-foreground">Paid by {payerSummary()}</span><strong class="block truncate text-sm font-medium">{splitSummary()}</strong></div>
                 <span class="flex items-center gap-1 text-xs font-medium text-primary">Change {splitOpen() ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</span>
               </button>
 
               <Show when={splitOpen()}>
                 <section class="disclosure-panel grid gap-4 rounded-lg border border-border p-4" aria-label="Payer and split options">
-                  <label class="grid gap-2 text-sm font-medium">Paid by<select class="form-control" value={payerId()} onInput={(event) => setPayerId(event.currentTarget.value)}><For each={groupMembers()}>{(member) => <option value={member.userId}>{member.userId === props.actorId ? "You" : member.displayName}</option>}</For></select></label>
+                  <div class="grid gap-3">
+                    <div class="flex items-center justify-between gap-3"><p class="text-sm font-medium">Paid by</p><button type="button" class="flex items-center gap-1.5 text-xs font-semibold text-primary" onClick={enableMultiplePayers}><UsersRound size={14} />{payerIds().length > 1 ? "Use one payer" : "Multiple payers"}</button></div>
+                    <Show when={payerIds().length > 1} fallback={<select class="form-control" value={payerIds()[0]} onInput={(event) => { setPayerIds([event.currentTarget.value]); setPayerValues({}); }}><For each={groupMembers()}>{(member) => <option value={member.userId}>{member.userId === props.actorId ? "You" : member.displayName}</option>}</For></select>}>
+                      <div class="divide-y divide-border rounded-xl border border-border bg-background/55">
+                        <For each={groupMembers()}>{(member) => <div class="flex min-h-14 items-center gap-3 px-3"><button type="button" class="grid size-6 place-items-center rounded-md border border-border" classList={{ "border-primary bg-primary text-primary-foreground": payerIds().includes(member.userId) }} onClick={() => togglePayer(member.userId)} aria-label={`Toggle ${member.displayName} as payer`} aria-pressed={payerIds().includes(member.userId)}><Show when={payerIds().includes(member.userId)}><Check size={14} /></Show></button><Avatar name={member.displayName} class="size-7 text-xs" /><span class="min-w-0 flex-1 truncate text-sm font-medium">{member.userId === props.actorId ? "You" : member.displayName}</span><div class="relative w-24"><input class="form-control h-9 text-right text-sm tabular-nums" disabled={!payerIds().includes(member.userId)} inputmode="decimal" value={payerValues()[member.userId] ?? ""} onInput={(event) => setPayerValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={`Amount paid by ${member.displayName}`} /></div></div>}</For>
+                      </div>
+                    </Show>
+                  </div>
                   <div>
                     <p class="mb-2 text-sm font-medium">Split method</p>
-                    <div class="grid grid-cols-4 rounded-lg bg-muted p-1">
+                    <div class="grid grid-cols-5 rounded-xl bg-muted p-1">
                       <For each={splitMethods}>{(method) => <button type="button" class="h-9 rounded-md text-xs font-medium text-muted-foreground transition-all" classList={{ "bg-card text-foreground shadow-sm": splitMethod() === method.id }} onClick={() => chooseSplitMethod(method.id)}>{method.label}</button>}</For>
                     </div>
                   </div>
@@ -247,8 +306,8 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                           <span class="min-w-0 flex-1 truncate text-sm font-medium">{member.userId === props.actorId ? "You" : member.displayName}</span>
                           <Show when={splitMethod() === "equal"} fallback={
                             <div class="relative w-24">
-                              <Show when={splitMethod() === "exact"}><span class="absolute left-2.5 top-2 text-xs text-muted-foreground">$</span></Show>
-                              <input class="form-control h-9 text-right text-sm tabular-nums" classList={{ "pl-6": splitMethod() === "exact", "pr-7": splitMethod() === "percentage" }} disabled={!selected()} inputmode="decimal" value={splitValues()[member.userId] ?? ""} onInput={(event) => setSplitValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={(splitMethod() === "percentage" ? "Percentage for " : splitMethod() === "shares" ? "Shares for " : "Amount for ") + member.displayName} />
+                              <Show when={splitMethod() === "exact" || splitMethod() === "adjustment"}><span class="absolute left-2.5 top-2 text-xs text-muted-foreground">{splitMethod() === "adjustment" ? "±" : currency()}</span></Show>
+                              <input class="form-control h-9 text-right text-sm tabular-nums" classList={{ "pl-6": splitMethod() === "exact" || splitMethod() === "adjustment", "pr-7": splitMethod() === "percentage" }} disabled={!selected()} inputmode="decimal" value={splitValues()[member.userId] ?? ""} onInput={(event) => setSplitValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={(splitMethod() === "percentage" ? "Percentage for " : splitMethod() === "shares" ? "Shares for " : splitMethod() === "adjustment" ? "Adjustment for " : "Amount for ") + member.displayName} />
                               <Show when={splitMethod() === "percentage"}><span class="absolute right-2.5 top-2 text-xs text-muted-foreground">%</span></Show>
                             </div>
                           }>
@@ -267,8 +326,10 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
               <button type="button" class="flex h-10 items-center justify-between text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" onClick={() => setDetailsOpen((open) => !open)}><span class="flex items-center gap-2"><SlidersHorizontal size={15} /> More details</span>{detailsOpen() ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
               <Show when={detailsOpen()}>
                 <section class="disclosure-panel grid gap-4 rounded-lg border border-border p-4 sm:grid-cols-2">
-                  <label class="grid gap-2 text-sm font-medium">Category<select class="form-control" value={category()} onInput={(event) => setCategory(event.currentTarget.value)}><option>General</option><option>Dining out</option><option>Groceries</option><option>Transportation</option><option>Hotel</option><option>Entertainment</option></select></label>
+                  <label class="grid gap-2 text-sm font-medium">Category<select class="form-control" value={category()} onInput={(event) => setCategory(event.currentTarget.value)}><For each={categories}>{(item) => <option>{item}</option>}</For></select></label>
                   <label class="grid gap-2 text-sm font-medium">Date<input class="form-control" type="date" value={date()} onInput={(event) => setDate(event.currentTarget.value)} /></label>
+                  <label class="grid gap-2 text-sm font-medium">Currency<select class="form-control" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)}><For each={currencies}>{(item) => <option value={item}>{item}</option>}</For></select></label>
+                  <label class="grid gap-2 text-sm font-medium">Repeats<select class="form-control" value={recurrence()} onInput={(event) => setRecurrence(event.currentTarget.value as "none" | "weekly" | "fortnightly" | "monthly" | "yearly")}><option value="none">Just this once</option><option value="weekly">Weekly</option><option value="fortnightly">Fortnightly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label>
                   <label class="grid gap-2 text-sm font-medium sm:col-span-2">Note <span class="sr-only">optional</span><textarea class="form-control min-h-20 resize-y py-2" value={notes()} onInput={(event) => setNotes(event.currentTarget.value)} placeholder="Optional note" maxlength={5000} /></label>
                 </section>
               </Show>
