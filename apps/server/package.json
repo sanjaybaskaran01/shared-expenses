@@ -1,0 +1,21 @@
+{
+  "name": "@expenses/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@expenses/protocol": "workspace:*",
+    "better-auth": "latest",
+    "nodemailer": "latest"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "latest"
+  }
+}
