@@ -85,6 +85,14 @@ a {
   box-shadow: 0 0 0 3px rgb(5 150 105 / 0.12);
 }
 
+.form-control.pl-7 {
+  padding-left: 1.75rem;
+}
+
+.form-control.pl-9 {
+  padding-left: 2.25rem;
+}
+
 select.form-control {
   appearance: auto;
 }
