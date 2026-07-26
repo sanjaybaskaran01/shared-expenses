@@ -1,0 +1,7 @@
+tunnel: replace-with-tunnel-id
+credentials-file: /Users/replace-me/.cloudflared/replace-with-tunnel-id.json
+
+ingress:
+  - hostname: api.expenses.example.com
+    service: http://127.0.0.1:3000
+  - service: http_status:404

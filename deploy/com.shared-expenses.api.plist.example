@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.shared-expenses.api</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>REPLACE_WITH_REPO_PATH/scripts/run-server.sh</string>
+  </array>
+  <key>WorkingDirectory</key><string>REPLACE_WITH_REPO_PATH</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NODE_ENV</key><string>production</string>
+    <key>HOST</key><string>127.0.0.1</string>
+    <key>EXPENSES_ENV_FILE</key><string>REPLACE_WITH_ENV_FILE_PATH</string>
+  </dict>
+  <key>KeepAlive</key><true/>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>REPLACE_WITH_DATA_PATH/logs/api.log</string>
+  <key>StandardErrorPath</key><string>REPLACE_WITH_DATA_PATH/logs/api.error.log</string>
+</dict>
+</plist>

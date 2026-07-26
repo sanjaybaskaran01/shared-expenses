@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Expenses mark</title>
+  <desc id="desc">Three shared ledger tiles meeting around a completed balance.</desc>
+  <rect width="512" height="512" rx="112" fill="#071229"/>
+  <path d="M191 76h130c35 0 63 28 63 63v86c0 12-6 23-16 29l-53 31-59-30-59 30-53-31c-10-6-16-17-16-29v-86c0-35 28-63 63-63Z" fill="#5B6CFF"/>
+  <path d="M80 258l70-41c10-6 23-6 34 0l72 42v69l-4 68c-1 12-8 22-19 27l-76 37c-31 15-68 2-84-29l-43-85c-16-32-4-71 27-89l23-13Z" fill="#24C5B5"/>
+  <path d="M432 258l-70-41c-10-6-23-6-34 0l-72 42v69l4 68c1 12 8 22 19 27l76 37c31 15 68 2 84-29l43-85c16-32 4-71-27-89l-23-13Z" fill="#FF675C"/>
+  <circle cx="256" cy="295" r="73" fill="#071229"/>
+  <path d="m220 296 24 24 50-55" fill="none" stroke="#fff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <g stroke="#071229" stroke-width="14" stroke-linecap="round">
+    <path d="M205 139h102M205 176h73"/>
+    <path d="M109 326v60M145 305v81M181 339v47"/>
+    <path d="M331 326h77M331 363h55"/>
+  </g>
+</svg>
