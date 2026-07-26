@@ -2,18 +2,24 @@ import {
   Activity,
   ArrowDownLeft,
   ArrowUpRight,
+  BadgeCheck,
+  ChevronRight,
   CircleUserRound,
   Cloud,
   CloudOff,
   FolderHeart,
+  House,
+  LockKeyhole,
   LogOut,
   Mail,
   Plus,
   ReceiptText,
   RefreshCw,
   ShieldCheck,
+  Sparkles,
   UsersRound,
   UserPlus,
+  WalletCards,
 } from "lucide-solid";
 import { For, Match, Show, Switch, createMemo, createResource, createSignal, onMount } from "solid-js";
 import { BrandMark } from "./components/BrandMark";
@@ -26,6 +32,11 @@ type Tab = "friends" | "groups" | "activity" | "account";
 
 function money(amountMinor: number, currency = "USD"): string {
   return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(amountMinor / 100);
+}
+
+function signedMoney(amountMinor: number, currency = "USD"): string {
+  if (amountMinor === 0) return money(0, currency);
+  return `${amountMinor > 0 ? "+" : "−"}${money(Math.abs(amountMinor), currency)}`;
 }
 
 function ConnectionBadge() {
@@ -50,13 +61,13 @@ function ConnectionBadge() {
 function ExpenseList() {
   const activeCount = createMemo(() => appStore.expenses().filter((expense) => expense.status === "active").length);
   return (
-    <div class="ledger-card">
+    <section class="ledger-card expense-section">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Ledger</p>
+          <p class="eyebrow">Latest</p>
           <h2>Recent expenses</h2>
         </div>
-        <span>{activeCount()} {activeCount() === 1 ? "entry" : "entries"}</span>
+        <span class="count-label">{activeCount()} {activeCount() === 1 ? "entry" : "entries"}</span>
       </div>
       <Show
         when={appStore.expenses().length > 0}
@@ -72,10 +83,13 @@ function ExpenseList() {
           <For each={appStore.expenses()}>
             {(expense) => (
               <article class="expense-row" classList={{ voided: expense.status === "voided" }}>
-                <div class="category-icon"><ReceiptText size={19} /></div>
+                <div class="date-tile">
+                  <span>{new Intl.DateTimeFormat(undefined, { month: "short" }).format(new Date(`${expense.expenseDate}T12:00:00`))}</span>
+                  <strong>{new Intl.DateTimeFormat(undefined, { day: "numeric" }).format(new Date(`${expense.expenseDate}T12:00:00`))}</strong>
+                </div>
                 <div class="expense-copy">
+                  <span class="category-icon"><ReceiptText size={16} /></span>
                   <div><strong>{expense.description}</strong><span>{expense.category}</span></div>
-                  <small>{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(`${expense.expenseDate}T12:00:00`))}</small>
                 </div>
                 <div class="expense-impact" classList={{ positive: expense.yourNetMinor > 0, negative: expense.yourNetMinor < 0 }}>
                   <strong>{money(expense.amountMinor, expense.currency)}</strong>
@@ -88,41 +102,74 @@ function ExpenseList() {
           </For>
         </div>
       </Show>
-    </div>
+    </section>
   );
 }
 
-function GroupsView() {
+function GroupsView(props: { onAddExpense(): void }) {
   const net = createMemo(() => appStore.expenses().reduce((sum, expense) => expense.status === "active" ? sum + expense.yourNetMinor : sum, 0));
+  const owed = createMemo(() => appStore.expenses().reduce((sum, expense) => expense.status === "active" && expense.yourNetMinor > 0 ? sum + expense.yourNetMinor : sum, 0));
+  const owing = createMemo(() => appStore.expenses().reduce((sum, expense) => expense.status === "active" && expense.yourNetMinor < 0 ? sum - expense.yourNetMinor : sum, 0));
   return (
     <>
-      <section class="balance-hero">
-        <p class="eyebrow light">Across your groups</p>
-        <div class="balance-main">
-          <div>
-            <span>{net() >= 0 ? "You are owed" : "You owe"}</span>
-            <strong>{money(Math.abs(net()))}</strong>
-          </div>
-          <div class="balance-symbol" classList={{ owed: net() >= 0 }}>
-            {net() >= 0 ? <ArrowDownLeft size={28} /> : <ArrowUpRight size={28} />}
-          </div>
+      <header class="page-heading">
+        <div>
+          <p class="eyebrow">Overview</p>
+          <h1>Shared money, sorted.</h1>
+          <p>A calm view of what is settled and what still needs attention.</p>
         </div>
-        <p>Each currency stays separate until you explicitly convert it.</p>
+        <button class="primary-action" onClick={props.onAddExpense}><Plus size={18} /> Add expense</button>
+      </header>
+
+      <section class="balance-overview">
+        <div class="balance-primary">
+          <div class="balance-label"><WalletCards size={18} /><span>Total balance</span></div>
+          <strong classList={{ positive: net() > 0, negative: net() < 0 }}>{signedMoney(net())}</strong>
+          <p>{net() === 0 ? "Everything is settled up." : net() > 0 ? "Overall, your friends owe you." : "Overall, you owe across your groups."}</p>
+        </div>
+        <div class="balance-breakdown">
+          <article>
+            <span class="metric-icon owed"><ArrowDownLeft size={18} /></span>
+            <div><small>You are owed</small><strong>{money(owed())}</strong></div>
+          </article>
+          <article>
+            <span class="metric-icon owe"><ArrowUpRight size={18} /></span>
+            <div><small>You owe</small><strong>{money(owing())}</strong></div>
+          </article>
+        </div>
       </section>
 
       <section class="group-strip">
         <div class="section-heading">
-          <div><p class="eyebrow">Your spaces</p><h2>Groups</h2></div>
+          <div>
+            <p class="eyebrow">Spaces</p>
+            <h2>Your groups</h2>
+          </div>
+          <span class="count-label">{appStore.groups().length} active</span>
         </div>
         <div class="group-grid">
           <For each={appStore.groups()} fallback={<div class="group-skeleton">Preparing your first group…</div>}>
-            {(group) => (
-              <article class="group-card">
-                <span class="group-mark"><FolderHeart size={22} /></span>
-                <div><strong>{group.name}</strong><span>{appStore.members().filter((member) => member.groupId === group.id).length} people</span></div>
-                <b>{group.settlementCurrency}</b>
-              </article>
-            )}
+            {(group) => {
+              const members = createMemo(() => appStore.members().filter((member) => member.groupId === group.id));
+              const groupNet = createMemo(() => appStore.expenses().reduce((sum, expense) => expense.groupId === group.id && expense.status === "active" ? sum + expense.yourNetMinor : sum, 0));
+              return (
+                <article class="group-card">
+                  <div class="group-cover">
+                    <span class="group-mark"><FolderHeart size={22} /></span>
+                    <div class="avatar-stack">
+                      <For each={members().slice(0, 3)}>{(member) => <span>{member.displayName.slice(0, 1).toUpperCase()}</span>}</For>
+                    </div>
+                  </div>
+                  <div class="group-card-body">
+                    <div class="group-copy"><strong>{group.name}</strong><span>{members().length} people · {group.settlementCurrency}</span></div>
+                    <div class="group-balance" classList={{ positive: groupNet() > 0, negative: groupNet() < 0 }}>
+                      <small>{groupNet() === 0 ? "settled" : groupNet() > 0 ? "you get back" : "you owe"}</small>
+                      <strong>{money(Math.abs(groupNet()), group.settlementCurrency)}</strong>
+                    </div>
+                  </div>
+                </article>
+              );
+            }}
           </For>
         </div>
       </section>
@@ -154,11 +201,11 @@ function FriendsView(props: { actorId: string }) {
   }
 
   return (
-    <div class="ledger-card spacious">
-      <div class="section-heading">
-        <div><p class="eyebrow">People</p><h2>Friends</h2></div>
-        <button class="small-action" onClick={() => setInviteOpen((open) => !open)}><UserPlus size={16} /> Invite</button>
-      </div>
+    <section class="page-section">
+      <header class="page-heading compact">
+        <div><p class="eyebrow">People</p><h1>Friends</h1><p>Everyone sharing a ledger with you.</p></div>
+        <button class="primary-action secondary" onClick={() => setInviteOpen((open) => !open)}><UserPlus size={17} /> Invite</button>
+      </header>
       <Show when={inviteOpen()}>
         <form class="invite-form" onSubmit={submitInvitation}>
           <label><span>Name</span><input required maxlength="100" value={inviteName()} onInput={(event) => setInviteName(event.currentTarget.value)} /></label>
@@ -167,52 +214,53 @@ function FriendsView(props: { actorId: string }) {
           <Show when={inviteMessage()}><p class="invite-message">{inviteMessage()}</p></Show>
         </form>
       </Show>
-      <div class="friend-list">
-        <For each={appStore.members().filter((member) => member.userId !== props.actorId)} fallback={<p>No friends yet.</p>}>
+      <div class="ledger-card spacious friend-list">
+        <For each={appStore.members().filter((member) => member.userId !== props.actorId)} fallback={<div class="empty-state"><UsersRound size={28} /><h3>No friends yet</h3><p>Invite someone to begin a shared ledger.</p></div>}>
           {(member) => (
             <article class="friend-row">
-              <span class="avatar large">{member.displayName.slice(0, 1)}</span>
+              <span class="avatar large">{member.displayName.slice(0, 1).toUpperCase()}</span>
               <div><strong>{member.displayName}</strong><span>Shared group member</span></div>
-              <span class="settled">Review ledger</span>
+              <span class="friend-state"><BadgeCheck size={15} /> Active</span>
             </article>
           )}
         </For>
       </div>
-    </div>
+    </section>
   );
 }
 
 function ActivityView() {
   return (
-    <div class="ledger-card spacious">
-      <div class="section-heading"><div><p class="eyebrow">Immutable history</p><h2>Activity</h2></div></div>
-      <div class="timeline">
+    <section class="page-section">
+      <header class="page-heading compact"><div><p class="eyebrow">History</p><h1>Activity</h1><p>Every accepted change, in order.</p></div></header>
+      <div class="ledger-card spacious timeline">
         <For each={appStore.expenses()} fallback={<p class="muted">Activity appears after your first expense.</p>}>
           {(expense) => (
-            <article><span class="timeline-dot" /><div><strong>{expense.description} was added</strong><p>{money(expense.amountMinor, expense.currency)} · {expense.syncStatus === "pending" ? "waiting to sync" : "accepted by ledger"}</p></div></article>
+            <article><span class="timeline-dot" /><div><strong>{expense.description} was added</strong><p>{money(expense.amountMinor, expense.currency)} · {expense.syncStatus === "pending" ? "waiting to sync" : "accepted by ledger"}</p></div><time>{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(`${expense.expenseDate}T12:00:00`))}</time></article>
           )}
         </For>
       </div>
-    </div>
+    </section>
   );
 }
 
-function AccountView() {
+function AccountView(props: { displayName: string }) {
   return (
-    <div class="account-grid">
+    <section class="page-section account-grid">
+      <header class="page-heading compact"><div><p class="eyebrow">Settings</p><h1>Your account</h1><p>Privacy, device trust, and offline storage.</p></div></header>
       <section class="profile-card">
-        <BrandMark size={64} />
-        <div><p class="eyebrow light">Trusted device</p><h2>Your Expenses account</h2><p>This phone can keep recording entries while the Mac is unavailable.</p></div>
+        <span class="profile-avatar">{props.displayName.slice(0, 1).toUpperCase()}</span>
+        <div><p class="eyebrow light">Signed in</p><h2>{props.displayName}</h2><p>This device can keep recording entries while the Mac is unavailable.</p></div>
       </section>
       <section class="ledger-card settings-list">
-        <article><ShieldCheck size={21} /><div><strong>Signed operations</strong><span>P-256 device key active</span></div></article>
-        <article><Cloud size={21} /><div><strong>Local-first storage</strong><span>IndexedDB ledger retained on this device</span></div></article>
-        <article><ReceiptText size={21} /><div><strong>Receipt OCR</strong><span>Deferred for v1</span></div></article>
+        <article><span class="setting-icon"><ShieldCheck size={20} /></span><div><strong>Signed operations</strong><span>P-256 device key active</span></div><ChevronRight size={18} /></article>
+        <article><span class="setting-icon"><Cloud size={20} /></span><div><strong>Local-first storage</strong><span>IndexedDB ledger retained on this device</span></div><ChevronRight size={18} /></article>
+        <article><span class="setting-icon"><ReceiptText size={20} /></span><div><strong>Receipt scanning</strong><span>Planned after the core ledger</span></div><ChevronRight size={18} /></article>
         <Show when={!import.meta.env.DEV}>
           <button class="sign-out" onClick={() => void signOutAndClearLocalLedger()}><LogOut size={19} /> Sign out and clear this device</button>
         </Show>
       </section>
-    </div>
+    </section>
   );
 }
 
@@ -220,26 +268,43 @@ function AuthenticatedApp(props: { actorId: string }) {
   const [tab, setTab] = createSignal<Tab>("groups");
   const [composerOpen, setComposerOpen] = createSignal(false);
   onMount(() => void initializeStore(props.actorId));
+  const displayName = createMemo(() => appStore.members().find((member) => member.userId === props.actorId)?.displayName ?? "Your account");
 
   const tabs = [
-    { id: "friends" as const, label: "Friends", icon: UsersRound },
-    { id: "groups" as const, label: "Groups", icon: FolderHeart },
+    { id: "groups" as const, label: "Home", icon: House },
+    { id: "friends" as const, label: "People", icon: UsersRound },
     { id: "activity" as const, label: "Activity", icon: Activity },
-    { id: "account" as const, label: "Account", icon: CircleUserRound },
+    { id: "account" as const, label: "Settings", icon: CircleUserRound },
   ];
 
   return (
     <div class="app-shell">
-      <header class="topbar">
+      <aside class="side-rail">
+        <a class="brand" href="/" aria-label="Expenses home"><BrandMark /><div><strong>Expenses</strong><span>Shared fairly</span></div></a>
+        <div class="rail-intro"><span>Private shared ledger</span><strong>Money between friends, without the awkward.</strong></div>
+        <nav class="side-nav" aria-label="Primary navigation">
+          <For each={tabs}>
+            {(item) => (
+              <button classList={{ active: tab() === item.id }} onClick={() => setTab(item.id)}>
+                <item.icon size={19} stroke-width={tab() === item.id ? 2.5 : 2} />
+                <span>{item.label}</span>
+              </button>
+            )}
+          </For>
+        </nav>
+        <div class="rail-status"><ConnectionBadge /><p>Entries save to this device first.</p></div>
+      </aside>
+
+      <header class="mobile-topbar">
         <a class="brand" href="/" aria-label="Expenses home"><BrandMark /><div><strong>Expenses</strong><span>Shared fairly</span></div></a>
         <ConnectionBadge />
       </header>
-      <main>
+      <main class="app-content">
         <Switch>
           <Match when={tab() === "friends"}><FriendsView actorId={props.actorId} /></Match>
-          <Match when={tab() === "groups"}><GroupsView /></Match>
+          <Match when={tab() === "groups"}><GroupsView onAddExpense={() => setComposerOpen(true)} /></Match>
           <Match when={tab() === "activity"}><ActivityView /></Match>
-          <Match when={tab() === "account"}><AccountView /></Match>
+          <Match when={tab() === "account"}><AccountView displayName={displayName()} /></Match>
         </Switch>
       </main>
 
@@ -286,17 +351,30 @@ function AuthScreen() {
 
   return (
     <main class="auth-shell">
+      <section class="auth-story">
+        <a class="auth-brand" href="/" aria-label="Expenses home"><BrandMark size={48} /><strong>Expenses</strong></a>
+        <div class="auth-pitch">
+          <p class="eyebrow light">Shared spending, rethought</p>
+          <h1>Money between friends should feel simple.</h1>
+          <p>Log it in seconds, split it fairly, and carry on. Your ledger stays useful even when the server is offline.</p>
+        </div>
+        <div class="auth-proof">
+          <span><LockKeyhole size={17} /> Invite-only</span>
+          <span><Sparkles size={17} /> Fast by design</span>
+          <span><CloudOff size={17} /> Works offline</span>
+        </div>
+      </section>
       <section class="auth-card">
-        <BrandMark size={70} />
-        <p class="eyebrow">Private shared ledger</p>
-        <h1>Sign in to Expenses</h1>
-        <p>Enter the invited email address. We’ll send one secure, single-use link—no password to remember.</p>
+        <span class="auth-lock"><LockKeyhole size={21} /></span>
+        <p class="eyebrow">Welcome back</p>
+        <h2>Open your ledger</h2>
+        <p>Use your invited email. We’ll send one secure, single-use link.</p>
         <form onSubmit={requestLink}>
           <label><span>Email address</span><div class="auth-input"><Mail size={18} /><input required type="email" autocomplete="email" value={email()} onInput={(event) => setEmail(event.currentTarget.value)} /></div></label>
-          <button class="save-expense" type="submit" disabled={busy()}>{busy() ? "Sending…" : "Email me a secure link"}</button>
+          <button class="save-expense" type="submit" disabled={busy()}>{busy() ? "Sending…" : "Send secure link"}</button>
         </form>
         <Show when={message()}><p class="auth-message">{message()}</p></Show>
-        <small>New accounts are invite-only. Previously signed-in devices can keep logging expenses while the server is offline.</small>
+        <small>No password. No ads. New accounts are invite-only.</small>
       </section>
     </main>
   );

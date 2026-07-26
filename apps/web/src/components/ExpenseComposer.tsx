@@ -1,5 +1,5 @@
 import { Dialog } from "@kobalte/core/dialog";
-import { Check, ChevronDown, LoaderCircle, UsersRound, X } from "lucide-solid";
+import { Check, ChevronDown, LoaderCircle, UsersRound } from "lucide-solid";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { appStore, createExpense } from "../lib/store";
 
@@ -73,38 +73,19 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
         <Dialog.Overlay class="composer-overlay" />
         <div class="composer-positioner">
           <Dialog.Content class="composer-panel">
+            <span class="sheet-grabber" aria-hidden="true" />
             <header class="composer-header">
-              <div>
-                <p class="eyebrow">New ledger entry</p>
-                <Dialog.Title class="composer-title">Add an expense</Dialog.Title>
-              </div>
-              <Dialog.CloseButton class="icon-button" aria-label="Close expense form">
-                <X size={20} />
+              <Dialog.CloseButton class="composer-cancel" aria-label="Close expense form">
+                Cancel
               </Dialog.CloseButton>
+              <Dialog.Title class="composer-title">New expense</Dialog.Title>
+              <span class="composer-header-spacer" />
             </header>
 
             <form class="composer-form" onSubmit={(event) => void submit(event)}>
-              <label class="field-label" for="expense-group">Group</label>
-              <div class="select-wrap">
-                <select id="expense-group" value={groupId()} onInput={(event) => setGroupId(event.currentTarget.value)}>
-                  <For each={appStore.groups()}>{(group) => <option value={group.id}>{group.name}</option>}</For>
-                </select>
-                <ChevronDown size={17} aria-hidden="true" />
-              </div>
-
-              <div class="amount-row">
-                <label class="description-field">
-                  <span class="field-label">Description</span>
-                  <input
-                    autofocus
-                    value={description()}
-                    onInput={(event) => setDescription(event.currentTarget.value)}
-                    placeholder="Dinner, tickets, groceries…"
-                    maxlength={200}
-                  />
-                </label>
+              <section class="composer-primary-fields">
                 <label class="amount-field">
-                  <span class="field-label">Amount</span>
+                  <span class="field-label">How much?</span>
                   <span class="money-input">
                     <b>$</b>
                     <input
@@ -116,9 +97,29 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                     />
                   </span>
                 </label>
-              </div>
+                <label class="description-field">
+                  <span class="field-label">What was it for?</span>
+                  <input
+                    autofocus
+                    value={description()}
+                    onInput={(event) => setDescription(event.currentTarget.value)}
+                    placeholder="Dinner, groceries, tickets…"
+                    maxlength={200}
+                  />
+                </label>
+              </section>
 
-              <div class="two-column-fields">
+              <label class="form-row" for="expense-group">
+                <span><small>Group</small><strong>{appStore.groups().find((group) => group.id === groupId())?.name ?? "Choose a group"}</strong></span>
+                <span class="select-wrap inline-select">
+                  <select id="expense-group" aria-label="Group" value={groupId()} onInput={(event) => setGroupId(event.currentTarget.value)}>
+                    <For each={appStore.groups()}>{(group) => <option value={group.id}>{group.name}</option>}</For>
+                  </select>
+                  <ChevronDown size={17} aria-hidden="true" />
+                </span>
+              </label>
+
+              <section class="form-surface two-column-fields">
                 <label>
                   <span class="field-label">Category</span>
                   <div class="select-wrap">
@@ -137,11 +138,12 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                   <span class="field-label">Date</span>
                   <input type="date" value={date()} onInput={(event) => setDate(event.currentTarget.value)} />
                 </label>
-              </div>
+              </section>
 
-              <fieldset class="people-fieldset">
+              <fieldset class="people-fieldset form-surface">
                 <legend>
-                  <UsersRound size={17} /> Split equally between
+                  <span><UsersRound size={17} /> Split equally</span>
+                  <small>{participants().length} selected</small>
                 </legend>
                 <div class="people-grid">
                   <For each={groupMembers()}>
@@ -162,33 +164,37 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                 </div>
               </fieldset>
 
-              <label>
-                <span class="field-label">Paid by</span>
-                <div class="select-wrap">
-                  <select value={payerId()} onInput={(event) => setPayerId(event.currentTarget.value)}>
-                    <For each={groupMembers()}>{(member) => <option value={member.userId}>{member.displayName}</option>}</For>
-                  </select>
-                  <ChevronDown size={17} aria-hidden="true" />
-                </div>
-              </label>
+              <section class="form-surface composer-details">
+                <label>
+                  <span class="field-label">Paid by</span>
+                  <div class="select-wrap">
+                    <select value={payerId()} onInput={(event) => setPayerId(event.currentTarget.value)}>
+                      <For each={groupMembers()}>{(member) => <option value={member.userId}>{member.displayName}</option>}</For>
+                    </select>
+                    <ChevronDown size={17} aria-hidden="true" />
+                  </div>
+                </label>
 
-              <label>
-                <span class="field-label">Notes <em>optional</em></span>
-                <textarea
-                  value={notes()}
-                  onInput={(event) => setNotes(event.currentTarget.value)}
-                  placeholder="Anything the group should know"
-                  maxlength={5000}
-                />
-              </label>
+                <label>
+                  <span class="field-label">Notes <em>optional</em></span>
+                  <textarea
+                    value={notes()}
+                    onInput={(event) => setNotes(event.currentTarget.value)}
+                    placeholder="Add a note"
+                    maxlength={5000}
+                  />
+                </label>
+              </section>
 
               <Show when={error()}><p class="form-error" role="alert">{error()}</p></Show>
-              <button class="save-expense" type="submit" disabled={saving()}>
-                <Show when={saving()} fallback={<><Check size={19} /> Save expense</>}>
-                  <LoaderCircle class="spin" size={19} /> Saving locally…
-                </Show>
-              </button>
-              <p class="offline-note">Saved to this device first. Sync happens automatically when available.</p>
+              <footer class="composer-actions">
+                <button class="save-expense" type="submit" disabled={saving()}>
+                  <Show when={saving()} fallback={<><Check size={19} /> Add expense</>}>
+                    <LoaderCircle class="spin" size={19} /> Saving locally…
+                  </Show>
+                </button>
+                <p class="offline-note">Saves to this device first, then syncs automatically.</p>
+              </footer>
             </form>
           </Dialog.Content>
         </div>
