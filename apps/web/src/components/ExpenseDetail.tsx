@@ -83,7 +83,7 @@ export function ExpenseDetail(props: ExpenseDetailProps) {
               </section>
 
               <section class="surface-panel overflow-hidden rounded-2xl border border-border/70">
-                <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-border/70 p-4"><div><span class="text-xs text-muted-foreground">Paid by</span><strong class="mt-1 block text-sm">{expense.payers.map((payer) => memberName(payer.participantId)).join(", ")}</strong></div><ArrowRight size={16} class="text-muted-foreground" /><div class="text-right"><span class="text-xs text-muted-foreground">Split with</span><strong class="mt-1 block text-sm">{expense.allocations.length} people</strong></div></div>
+                <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-border/70 p-4"><div><span class="text-xs text-muted-foreground">Paid by</span><strong class="mt-1 block text-sm">{expense.payers.map((payer) => memberName(payer.participantId)).join(", ")}</strong></div><ArrowRight size={16} class="text-muted-foreground" /><div class="text-right"><span class="text-xs text-muted-foreground">Split with</span><strong class="mt-1 block text-sm">{expense.allocations.length} {expense.allocations.length === 1 ? "person" : "people"}</strong></div></div>
                 <For each={expense.allocations}>{(allocation) => <div class="flex items-center gap-3 border-b border-border/60 px-4 py-3 last:border-0"><Avatar name={memberName(allocation.participantId)} class="size-8 text-xs" /><span class="min-w-0 flex-1 truncate text-sm font-medium">{memberName(allocation.participantId)}</span><span class="text-sm tabular-nums text-muted-foreground">{money(allocation.amountMinor, expense.currency)}</span></div>}</For>
               </section>
 
