@@ -43,7 +43,7 @@ export async function registerDevice(input: {
   await apiFetch("/api/v1/devices/register", { method: "POST", body: JSON.stringify(input) });
 }
 
-export async function inviteGroupMember(groupId: string, input: { email: string; displayName: string }): Promise<void> {
+export async function inviteGroupMember(groupId: string, input: { email: string }): Promise<void> {
   await apiFetch(`/api/v1/groups/${encodeURIComponent(groupId)}/invitations`, {
     method: "POST",
     body: JSON.stringify(input),
