@@ -18,4 +18,5 @@ if [[ -n "${SMTP_APP_PASSWORD_KEYCHAIN_SERVICE:-}" ]]; then
 fi
 
 repository_root="${0:A:h:h}"
-exec "$EXPENSES_BUN_PATH" "$repository_root/apps/server/dist/index.js"
+server_entry="${EXPENSES_SERVER_ENTRY:-$repository_root/apps/server/dist/index.js}"
+exec "$EXPENSES_BUN_PATH" "$server_entry"

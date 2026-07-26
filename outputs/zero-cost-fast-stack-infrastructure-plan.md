@@ -8,7 +8,7 @@ Product: offline-first shared-expense PWA
 
 Build the product as a local-first SolidJS PWA with a Bun/SQLite synchronization server running on the existing M1 MacBook Pro.
 
-The production PWA shell is deployed as static assets to Cloudflare Pages at `expenses.sanjaybaskaran.com`. The Mac exposes only the API through Cloudflare Tunnel at `api.expenses.sanjaybaskaran.com`. Consequently, the interface can still open quickly when the Mac is unavailable, and a previously authenticated phone can continue creating signed ledger operations in IndexedDB. Synchronization resumes when the Mac returns.
+The production PWA shell is deployed as static assets to Cloudflare Pages at `expenses.sanjaybaskaran.com`. The Mac exposes only the API through Cloudflare Tunnel at `api.sanjaybaskaran.com`. Consequently, the interface can still open quickly when the Mac is unavailable, and a previously authenticated phone can continue creating signed ledger operations in IndexedDB. Synchronization resumes when the Mac returns.
 
 The intended incremental infrastructure cost for v1 is **$0/month**, excluding costs already being paid for the domain, home internet, electricity, and existing iCloud storage. The design deliberately accepts manual recovery after a cold reboot and has no paid uptime SLA.
 
