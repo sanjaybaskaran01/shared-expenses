@@ -9,6 +9,44 @@ function emailKey(kind: string, recipient: string, token: string): string {
   return createHash("sha256").update(`${kind}:${recipient}:${token}`).digest("hex");
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;",
+  })[character]!);
+}
+
+export function deriveDisplayNameFromEmail(email: string): string {
+  const localPart = email.split("@")[0]?.trim() || "Friend";
+  const words = localPart.replace(/[._+-]+/g, " ").trim().split(/\s+/).filter(Boolean);
+  const displayName = words.map((word) => word.slice(0, 1).toUpperCase() + word.slice(1)).join(" ");
+  return (displayName || "Friend").slice(0, 100);
+}
+
+function claimPendingInvitations(db: Database, userId: string, email: string): void {
+  const normalized = email.trim().toLowerCase();
+  const now = new Date().toISOString();
+  db.transaction(() => {
+    const placeholders = db.query<{ group_id: string; display_name: string }, [string]>(
+      "SELECT group_id, display_name FROM group_members WHERE lower(email) = ? AND status = 'placeholder'",
+    ).all(normalized);
+    for (const placeholder of placeholders) {
+      db.query("DELETE FROM group_members WHERE group_id = ? AND lower(email) = ? AND status = 'placeholder'")
+        .run(placeholder.group_id, normalized);
+      db.query(
+        `INSERT OR IGNORE INTO group_members(group_id, user_id, display_name, email, status, joined_at)
+         VALUES (?, ?, ?, ?, 'active', ?)`,
+      ).run(placeholder.group_id, userId, placeholder.display_name, normalized, now);
+    }
+    db.query(
+      "UPDATE group_invitations SET status = 'accepted', accepted_at = ? WHERE lower(email) = ? AND status = 'pending'",
+    ).run(now, normalized);
+  })();
+}
+
 export function createAuth(db: Database, config: AppConfig) {
   const ownerEmail = config.ownerEmail;
   const canCreateAccount = (email: string): boolean => {
@@ -39,14 +77,33 @@ export function createAuth(db: Database, config: AppConfig) {
         expiresIn: 10 * 60,
         storeToken: "hashed",
         rateLimit: { window: 60, max: 5 },
-        sendMagicLink: async ({ email, url, token }) => {
+        sendMagicLink: async ({ email, url, token, metadata }) => {
           if (!config.devAuthBypass && !canCreateAccount(email)) return;
+          const invitationId = typeof metadata?.invitationId === "string" ? metadata.invitationId : "";
+          const invitation = invitationId
+            ? db.query<{ groupName: string; inviterName: string }, [string, string]>(
+                `SELECT g.name AS groupName, COALESCE(u.name, 'A friend') AS inviterName
+                 FROM group_invitations gi
+                 JOIN groups g ON g.id = gi.group_id
+                 LEFT JOIN "user" u ON u.id = gi.invited_by
+                 WHERE gi.id = ? AND lower(gi.email) = ? AND gi.status = 'pending'`,
+              ).get(invitationId, email.trim().toLowerCase())
+            : null;
+          const subject = invitation
+            ? `${invitation.inviterName} invited you to ${invitation.groupName}`
+            : "Your secure Expenses sign-in link";
+          const text = invitation
+            ? `${invitation.inviterName} invited you to join ${invitation.groupName} on Expenses. Open this single-use link to join and sign in: ${url}`
+            : `Open this single-use link to sign in to Expenses: ${url}`;
+          const html = invitation
+            ? `<p><strong>${escapeHtml(invitation.inviterName)}</strong> invited you to join <strong>${escapeHtml(invitation.groupName)}</strong> on Expenses.</p><p><a href="${escapeHtml(url)}">Join ${escapeHtml(invitation.groupName)}</a></p><p>This single-use link verifies your email and signs you in. It expires in 10 minutes.</p>`
+            : `<p>Use this single-use link to sign in to Expenses:</p><p><a href="${escapeHtml(url)}">Open Expenses</a></p><p>This link expires in 10 minutes.</p>`;
           enqueueEmail(db, {
             idempotencyKey: emailKey("magic-link", email, token),
             recipient: email,
-            subject: "Your secure Expenses sign-in link",
-            text: `Open this single-use link to sign in to Expenses: ${url}`,
-            html: `<p>Use this single-use link to sign in to Expenses:</p><p><a href="${url}">Open Expenses</a></p><p>This link expires in 10 minutes.</p>`,
+            subject,
+            text,
+            html,
           });
         },
       }),
@@ -62,22 +119,8 @@ export function createAuth(db: Database, config: AppConfig) {
           after: async (user) => {
             const email = user.email.trim().toLowerCase();
             const now = new Date().toISOString();
+            claimPendingInvitations(db, user.id, email);
             db.transaction(() => {
-              const placeholders = db.query<{ group_id: string; display_name: string }, [string]>(
-                "SELECT group_id, display_name FROM group_members WHERE lower(email) = ? AND status = 'placeholder'",
-              ).all(email);
-              for (const placeholder of placeholders) {
-                db.query("DELETE FROM group_members WHERE group_id = ? AND lower(email) = ? AND status = 'placeholder'")
-                  .run(placeholder.group_id, email);
-                db.query(
-                  `INSERT OR IGNORE INTO group_members(group_id, user_id, display_name, email, status, joined_at)
-                   VALUES (?, ?, ?, ?, 'active', ?)`,
-                ).run(placeholder.group_id, user.id, placeholder.display_name, email, now);
-              }
-              db.query(
-                "UPDATE group_invitations SET status = 'accepted', accepted_at = ? WHERE lower(email) = ? AND status = 'pending'",
-              ).run(now, email);
-
               if (ownerEmail && email === ownerEmail) {
                 const membership = db.query<{ one: number }, [string]>(
                   "SELECT 1 AS one FROM group_members WHERE user_id = ? LIMIT 1",
@@ -94,6 +137,16 @@ export function createAuth(db: Database, config: AppConfig) {
                 }
               }
             })();
+          },
+        },
+      },
+      session: {
+        create: {
+          after: async (session) => {
+            const user = db.query<{ email: string }, [string]>(
+              `SELECT email FROM "user" WHERE id = ? LIMIT 1`,
+            ).get(session.userId);
+            if (user) claimPendingInvitations(db, session.userId, user.email);
           },
         },
       },

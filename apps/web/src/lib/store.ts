@@ -1,4 +1,12 @@
-import { allocateEqually, parseDecimalToMinor, type JsonValue, type UnsignedOperation } from "@expenses/protocol";
+import {
+  allocateByWeights,
+  allocateEqually,
+  parseDecimalToMinor,
+  validateExactAllocation,
+  type JsonValue,
+  type ParticipantAmount,
+  type UnsignedOperation,
+} from "@expenses/protocol";
 import { createSignal } from "solid-js";
 import { liveQuery } from "dexie";
 import { localDb, type LocalExpense, type LocalGroup, type LocalMember } from "./db";
@@ -14,7 +22,48 @@ export interface NewExpenseInput {
   expenseDate: string;
   payerId: string;
   participantIds: string[];
+  splitMethod: SplitMethod;
+  splitValues: Record<string, string>;
   notes: string;
+}
+
+export type SplitMethod = "equal" | "exact" | "percentage" | "shares";
+
+function nonNegativeMoneyToMinor(value: string): number {
+  const normalized = value.trim();
+  if (normalized === "" || /^0+(?:\.0{0,2})?$/.test(normalized)) return 0;
+  return parseDecimalToMinor(normalized);
+}
+
+function percentageToBasisPoints(value: string): number {
+  const normalized = value.trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) throw new RangeError("Use percentages with at most two decimal places");
+  const basisPoints = Math.round(Number(normalized) * 100);
+  if (!Number.isSafeInteger(basisPoints) || basisPoints < 0) throw new RangeError("Enter a valid percentage");
+  return basisPoints;
+}
+
+export function calculateExpenseAllocations(input: Pick<NewExpenseInput, "amount" | "participantIds" | "splitMethod" | "splitValues">): ParticipantAmount[] {
+  const amountMinor = parseDecimalToMinor(input.amount);
+  if (input.participantIds.length === 0) throw new RangeError("Select at least one participant");
+  if (input.splitMethod === "equal") return allocateEqually(amountMinor, input.participantIds);
+  if (input.splitMethod === "exact") {
+    return validateExactAllocation(amountMinor, input.participantIds.map((participantId) => ({
+      participantId,
+      amountMinor: nonNegativeMoneyToMinor(input.splitValues[participantId] ?? ""),
+    })));
+  }
+  if (input.splitMethod === "percentage") {
+    return allocateByWeights(amountMinor, input.participantIds.map((participantId) => ({
+      participantId,
+      weight: percentageToBasisPoints(input.splitValues[participantId] ?? "0"),
+    })), 10_000);
+  }
+  return allocateByWeights(amountMinor, input.participantIds.map((participantId) => {
+    const weight = Number(input.splitValues[participantId] ?? "0");
+    if (!Number.isSafeInteger(weight) || weight < 0) throw new RangeError("Shares must be whole numbers");
+    return { participantId, weight };
+  }));
 }
 
 const [groups, setGroups] = createSignal<LocalGroup[]>([]);
@@ -53,7 +102,7 @@ export async function createExpense(input: NewExpenseInput): Promise<string> {
   if (!input.description.trim()) throw new RangeError("Description is required");
   if (input.participantIds.length === 0) throw new RangeError("Select at least one participant");
   const amountMinor = parseDecimalToMinor(input.amount);
-  const allocations = allocateEqually(amountMinor, input.participantIds);
+  const allocations = calculateExpenseAllocations(input);
   const operationId = crypto.randomUUID();
   const expenseId = crypto.randomUUID();
   const payers = [{ participantId: input.payerId, amountMinor }];

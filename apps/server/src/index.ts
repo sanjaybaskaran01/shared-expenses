@@ -3,10 +3,10 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type { JsonValue, OperationEnvelope, SyncPushRequest } from "@expenses/protocol";
 import { getMigrations } from "better-auth/db/migration";
-import { createAuth } from "./auth";
+import { createAuth, deriveDisplayNameFromEmail } from "./auth";
 import { loadConfig } from "./config";
 import { openDatabase, runDomainMigrations } from "./database";
-import { enqueueEmail, startEmailWorker } from "./email";
+import { startEmailWorker } from "./email";
 import { LedgerStore } from "./ledger";
 
 const config = loadConfig();
@@ -167,15 +167,15 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
       "SELECT 1 AS one FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'active'",
     ).get(groupId, actorId);
     if (!membership) return errorResponse(request, 403, "NOT_A_GROUP_MEMBER", "Active group membership is required");
-    const body = await bodyJson<{ email?: string; displayName?: string }>(request);
+    const body = await bodyJson<{ email?: string }>(request);
     const email = body.email?.trim().toLowerCase() ?? "";
-    const displayName = body.displayName?.trim() ?? "";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 320) {
       return errorResponse(request, 400, "INVALID_EMAIL", "Enter a valid email address");
     }
-    if (!displayName || displayName.length > 100) {
-      return errorResponse(request, 400, "INVALID_NAME", "Display name is required and must be at most 100 characters");
-    }
+    const existingUser = db.query<{ name: string }, [string]>(
+      `SELECT name FROM "user" WHERE lower(email) = ? LIMIT 1`,
+    ).get(email);
+    const displayName = existingUser?.name.trim() || deriveDisplayNameFromEmail(email);
     const duplicate = db.query<{ one: number }, [string, string]>(
       `SELECT 1 AS one FROM group_members
        WHERE group_id = ? AND lower(email) = ? AND status IN ('placeholder', 'active') LIMIT 1`,
@@ -184,6 +184,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
 
     const invitationId = randomUUID();
     const now = new Date().toISOString();
+    const placeholderUserId = `invite:${invitationId}`;
     db.transaction(() => {
       db.query(
         `INSERT INTO group_invitations(id, group_id, email, display_name, invited_by, status, created_at)
@@ -192,16 +193,27 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
       db.query(
         `INSERT INTO group_members(group_id, user_id, display_name, email, status, joined_at)
          VALUES (?, ?, ?, ?, 'placeholder', ?)`,
-      ).run(groupId, `invite:${invitationId}`, displayName, email, now);
-      const inviteUrl = `${config.webOrigin}/?email=${encodeURIComponent(email)}`;
-      enqueueEmail(db, {
-        idempotencyKey: `group-invite:${invitationId}`,
-        recipient: email,
-        subject: `${displayName}, you were invited to Expenses`,
-        text: `Open Expenses and request your secure sign-in link: ${inviteUrl}`,
-        html: `<p>You were invited to share expenses.</p><p><a href="${inviteUrl}">Accept invitation</a></p>`,
-      });
+      ).run(groupId, placeholderUserId, displayName, email, now);
     })();
+    try {
+      await auth.api.signInMagicLink({
+        headers: request.headers,
+        body: {
+          email,
+          name: displayName,
+          callbackURL: config.webOrigin,
+          newUserCallbackURL: config.webOrigin,
+          errorCallbackURL: `${config.webOrigin}/?auth=failed`,
+          metadata: { invitationId },
+        },
+      });
+    } catch {
+      db.transaction(() => {
+        db.query("DELETE FROM group_members WHERE group_id = ? AND user_id = ?").run(groupId, placeholderUserId);
+        db.query("DELETE FROM group_invitations WHERE id = ?").run(invitationId);
+      })();
+      return errorResponse(request, 503, "INVITE_EMAIL_FAILED", "The invitation could not be sent. Try again.");
+    }
     return json(request, { id: invitationId, email, status: "pending" }, 201);
   }
 

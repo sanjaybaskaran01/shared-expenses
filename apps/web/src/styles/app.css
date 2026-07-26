@@ -93,6 +93,95 @@ a {
   padding-left: 2.25rem;
 }
 
+.form-control.pl-6 {
+  padding-left: 1.5rem;
+}
+
+.form-control.pr-7 {
+  padding-right: 1.75rem;
+}
+
+.ui-button:active,
+.nav-item:active,
+.group-row:active,
+.summary-row:active {
+  transform: scale(0.98);
+}
+
+.ui-card {
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+@media (hover: hover) {
+  .ui-card:hover {
+    border-color: #d4d4d8;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.055);
+  }
+}
+
+.page-enter {
+  animation: page-enter 180ms cubic-bezier(0.22, 0.8, 0.25, 1) both;
+}
+
+.composer-overlay {
+  animation: overlay-enter 140ms ease-out both;
+}
+
+.composer-dialog {
+  animation: sheet-enter 220ms cubic-bezier(0.22, 0.8, 0.25, 1) both;
+  transform-origin: center bottom;
+}
+
+.disclosure-panel {
+  animation: disclosure-enter 180ms cubic-bezier(0.22, 0.8, 0.25, 1) both;
+  transform-origin: top;
+}
+
+.toast-enter {
+  animation: toast-enter 220ms cubic-bezier(0.22, 0.8, 0.25, 1) both;
+}
+
+.nav-item svg {
+  transition: transform 180ms cubic-bezier(0.22, 0.8, 0.25, 1);
+}
+
+.nav-item.text-primary svg,
+.nav-item.bg-muted svg {
+  transform: scale(1.08);
+}
+
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes overlay-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes sheet-enter {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (min-width: 640px) {
+  @keyframes sheet-enter {
+    from { opacity: 0; transform: scale(0.98) translateY(5px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+}
+
+@keyframes disclosure-enter {
+  from { opacity: 0; transform: translateY(-4px) scaleY(0.98); }
+  to { opacity: 1; transform: translateY(0) scaleY(1); }
+}
+
+@keyframes toast-enter {
+  from { opacity: 0; transform: translate(-50%, 10px) scale(0.98); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
 select.form-control {
   appearance: auto;
 }
