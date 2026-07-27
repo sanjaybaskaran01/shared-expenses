@@ -1,6 +1,6 @@
 import type { JsonValue, OperationEnvelope } from "@expenses/protocol";
 import { apiBaseUrl, bootstrapDevelopment, getSnapshot, pullOperations, pushOperations, registerDevice } from "./api";
-import { localDb, type LocalExpense, type LocalOperation } from "./db";
+import { localDb, type LocalExpense, type LocalOperation, type LocalPayment } from "./db";
 import { ensureDevice } from "./device";
 
 export function expenseFromOperation(
@@ -34,16 +34,52 @@ export function expenseFromOperation(
   };
 }
 
+export function paymentFromOperation(
+  operation: OperationEnvelope,
+  syncStatus: LocalOperation["syncStatus"],
+): LocalPayment | null {
+  if (operation.type !== "PaymentRecorded") return null;
+  const payload = operation.payload as Record<string, JsonValue>;
+  return {
+    id: operation.targetId,
+    groupId: operation.groupId,
+    payerId: String(payload.payerId),
+    recipientId: String(payload.recipientId),
+    amountMinor: Number(payload.amountMinor),
+    currency: String(payload.currency),
+    paymentDate: String(payload.paymentDate),
+    note: String(payload.note ?? ""),
+    status: "active",
+    version: operation.baseVersion + 1,
+    recordedBy: operation.actorId,
+    updatedAt: operation.receivedAt ?? operation.clientTimestamp,
+    syncStatus,
+  };
+}
+
 async function applyRemote(operation: OperationEnvelope, currentActorId: string): Promise<void> {
   const localOperation: LocalOperation = { ...operation, syncStatus: "accepted" };
   await localDb.operations.put(localOperation);
+  const updatedAt = operation.receivedAt ?? operation.clientTimestamp;
+
   const expense = expenseFromOperation(operation, "accepted", currentActorId);
   if (expense) await localDb.expenses.put(expense);
   if (operation.type === "ExpenseVoided") {
     await localDb.expenses.update(operation.targetId, {
       status: "voided",
       version: operation.baseVersion + 1,
-      updatedAt: operation.receivedAt ?? operation.clientTimestamp,
+      updatedAt,
+      syncStatus: "accepted",
+    });
+  }
+
+  const payment = paymentFromOperation(operation, "accepted");
+  if (payment) await localDb.payments.put(payment);
+  if (operation.type === "PaymentReversed") {
+    await localDb.payments.update(operation.targetId, {
+      status: "reversed",
+      version: operation.baseVersion + 1,
+      updatedAt,
       syncStatus: "accepted",
     });
   }
@@ -87,37 +123,54 @@ export class SyncEngine {
         : await localDb.operations.where("syncStatus").equals("pending").toArray();
       for (let offset = 0; offset < outbound.length; offset += 100) {
         const result = await pushOperations(outbound.slice(offset, offset + 100));
-        await localDb.transaction("rw", localDb.operations, localDb.expenses, async () => {
+        await localDb.transaction("rw", localDb.operations, localDb.expenses, localDb.payments, async () => {
           for (const accepted of [...result.accepted, ...result.duplicates]) {
             await localDb.operations.update(accepted.id, {
               syncStatus: "accepted",
               serverSequence: accepted.serverSequence,
             });
             const operation = await localDb.operations.get(accepted.id);
-            if (operation) {
-              const expense = expenseFromOperation(operation, "accepted", device.actorId);
-              if (expense) await localDb.expenses.put(expense);
+            if (!operation) continue;
+            const expense = expenseFromOperation(operation, "accepted", device.actorId);
+            if (expense) await localDb.expenses.put(expense);
+            const payment = paymentFromOperation(operation, "accepted");
+            if (payment) await localDb.payments.put(payment);
+          }
+          for (const [ids, syncStatus, errorCode] of [
+            [result.conflicts.map(({ id }) => id), "conflicted", "CONFLICT"],
+            [result.rejected.map(({ id }) => id), "rejected", undefined],
+          ] as const) {
+            for (const id of ids) {
+              const code = errorCode ?? result.rejected.find((entry) => entry.id === id)?.code;
+              await localDb.operations.update(id, { syncStatus, ...(code ? { errorCode: code } : {}) });
+              const operation = await localDb.operations.get(id);
+              if (!operation) continue;
+              await localDb.expenses.update(operation.targetId, { syncStatus });
+              await localDb.payments.update(operation.targetId, { syncStatus });
             }
-          }
-          for (const conflict of result.conflicts) {
-            await localDb.operations.update(conflict.id, { syncStatus: "conflicted", errorCode: "CONFLICT" });
-            const operation = await localDb.operations.get(conflict.id);
-            if (operation) await localDb.expenses.update(operation.targetId, { syncStatus: "conflicted" });
-          }
-          for (const rejected of result.rejected) {
-            await localDb.operations.update(rejected.id, { syncStatus: "rejected", errorCode: rejected.code });
-            const operation = await localDb.operations.get(rejected.id);
-            if (operation) await localDb.expenses.update(operation.targetId, { syncStatus: "rejected" });
           }
         });
       }
 
-      const cursor = recovering ? 0 : Number((await localDb.settings.get("serverSequence"))?.value ?? 0);
-      const pulled = await pullOperations(cursor);
-      for (const operation of pulled.operations) await applyRemote(operation, device.actorId);
+      let cursor = recovering ? 0 : Number((await localDb.settings.get("serverSequence"))?.value ?? 0);
+      let generation = "";
+      // `pull` is capped server-side, so advance by what actually arrived and keep
+      // going. Trusting the reported head here silently strands the overflow.
+      for (;;) {
+        const pulled = await pullOperations(cursor);
+        generation = pulled.generation;
+        for (const operation of pulled.operations) await applyRemote(operation, device.actorId);
+        const received = pulled.operations.reduce(
+          (highest, operation) => Math.max(highest, operation.serverSequence ?? 0),
+          cursor,
+        );
+        if (received <= cursor) break;
+        cursor = received;
+        if (cursor >= pulled.latestServerSequence) break;
+      }
       await localDb.settings.bulkPut([
-        { key: "serverSequence", value: pulled.latestServerSequence },
-        { key: "generation", value: pulled.generation },
+        { key: "serverSequence", value: cursor },
+        { key: "generation", value: generation },
       ]);
       this.onState("online");
       this.ensureEvents();

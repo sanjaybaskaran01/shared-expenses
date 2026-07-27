@@ -171,4 +171,175 @@ describe("ledger ingestion", () => {
       store.registerDevice({ id: "device-1", userId: "user-1", publicKeyJwk, name: "Replacement" }),
     ).toThrow("Device public key cannot be replaced");
   });
+
+  test("rejects an expense whose currency differs from the group settlement currency", async () => {
+    const operation = await signedOperation(privateKey, {
+      payload: {
+        description: "Dinner",
+        category: "Dining out",
+        amountMinor: 1000,
+        currency: "EUR",
+        expenseDate: "2026-07-25",
+        notes: "",
+        payers: [{ participantId: "user-1", amountMinor: 1000 }],
+        allocations: [{ participantId: "user-1", amountMinor: 1000 }],
+      },
+    });
+    const result = await store.push("user-1", [operation]);
+    expect(result.rejected).toEqual([
+      expect.objectContaining({ message: expect.stringContaining("must match the group settlement currency") }),
+    ]);
+  });
+
+  test("does not let an amended expense resurrect a voided one", async () => {
+    await store.push("user-1", [await signedOperation(privateKey)]);
+    await store.push("user-1", [
+      await signedOperation(privateKey, { id: crypto.randomUUID(), type: "ExpenseVoided", baseVersion: 1, payload: {} }),
+    ]);
+    const revive = await signedOperation(privateKey, {
+      id: crypto.randomUUID(),
+      type: "ExpenseAmended",
+      baseVersion: 2,
+      payload: {
+        description: "Back from the dead",
+        category: "Dining out",
+        amountMinor: 1001,
+        currency: "USD",
+        expenseDate: "2026-07-25",
+        notes: "",
+        payers: [{ participantId: "user-1", amountMinor: 1001 }],
+        allocations: [{ participantId: "user-1", amountMinor: 1001 }],
+      } as JsonValue,
+    });
+    const result = await store.push("user-1", [revive]);
+    expect(result.rejected).toEqual([
+      expect.objectContaining({ message: "A voided expense cannot be amended" }),
+    ]);
+    expect(store.snapshot("user-1").expenses).toEqual([expect.objectContaining({ status: "voided" })]);
+  });
+
+  describe("cross-group isolation", () => {
+    beforeEach(async () => {
+      store.bootstrapGroup({
+        id: "group-2",
+        name: "Other trip",
+        settlementCurrency: "USD",
+        userId: "user-1",
+        displayName: "Alex",
+      });
+      await store.push("user-1", [await signedOperation(privateKey)]);
+    });
+
+    test("does not let a member of another group void an expense they cannot see", async () => {
+      const attack = await signedOperation(privateKey, {
+        id: crypto.randomUUID(),
+        groupId: "group-2",
+        type: "ExpenseVoided",
+        targetId: "expense-1",
+        baseVersion: 0,
+        payload: {},
+      });
+      const result = await store.push("user-1", [attack]);
+      expect(result.rejected).toEqual([
+        expect.objectContaining({ message: "Target belongs to another group" }),
+      ]);
+      expect(store.snapshot("user-1").expenses).toEqual([
+        expect.objectContaining({ id: "expense-1", status: "active" }),
+      ]);
+    });
+
+    test("does not let a member of another group rewrite an expense they cannot see", async () => {
+      const attack = await signedOperation(privateKey, {
+        id: crypto.randomUUID(),
+        groupId: "group-2",
+        type: "ExpenseAmended",
+        targetId: "expense-1",
+        baseVersion: 0,
+        payload: {
+          description: "Hijacked",
+          category: "Dining out",
+          amountMinor: 5000,
+          currency: "USD",
+          expenseDate: "2026-07-25",
+          notes: "",
+          payers: [{ participantId: "user-1", amountMinor: 5000 }],
+          allocations: [{ participantId: "user-1", amountMinor: 5000 }],
+        } as JsonValue,
+      });
+      const result = await store.push("user-1", [attack]);
+      expect(result.rejected).toEqual([
+        expect.objectContaining({ message: "Target belongs to another group" }),
+      ]);
+      expect(store.snapshot("user-1").expenses).toEqual([
+        expect.objectContaining({ description: "Dinner", amountMinor: 1001 }),
+      ]);
+    });
+  });
+
+  describe("settlements", () => {
+    const paymentPayload = (overrides: Record<string, JsonValue> = {}): JsonValue => ({
+      payerId: "user-2",
+      recipientId: "user-1",
+      amountMinor: 500,
+      currency: "USD",
+      paymentDate: "2026-07-26",
+      note: "Bank transfer",
+      ...overrides,
+    });
+
+    test("records a payment between two active members", async () => {
+      const operation = await signedOperation(privateKey, {
+        type: "PaymentRecorded",
+        targetId: "payment-1",
+        payload: paymentPayload(),
+      });
+      const result = await store.push("user-1", [operation]);
+      expect(result.accepted).toHaveLength(1);
+      expect(db.query("SELECT payer_id, amount_minor, status FROM payments WHERE id = 'payment-1'").get()).toEqual({
+        payer_id: "user-2",
+        amount_minor: 500,
+        status: "active",
+      });
+    });
+
+    test("rejects a payment to yourself", async () => {
+      const operation = await signedOperation(privateKey, {
+        type: "PaymentRecorded",
+        targetId: "payment-2",
+        payload: paymentPayload({ recipientId: "user-2" }),
+      });
+      const result = await store.push("user-1", [operation]);
+      expect(result.rejected).toEqual([
+        expect.objectContaining({ message: "A payment cannot have the same payer and recipient" }),
+      ]);
+    });
+
+    test("rejects a payment whose currency is not an ISO code", async () => {
+      const operation = await signedOperation(privateKey, {
+        type: "PaymentRecorded",
+        targetId: "payment-3",
+        payload: paymentPayload({ currency: "$$" }),
+      });
+      const result = await store.push("user-1", [operation]);
+      expect(result.rejected).toEqual([
+        expect.objectContaining({ message: "currency must be a three-letter ISO code" }),
+      ]);
+    });
+  });
+
+  test("scopes the reported sequence to groups the caller belongs to", async () => {
+    await store.push("user-1", [await signedOperation(privateKey)]);
+    db.query(
+      "INSERT INTO groups(id, name, settlement_currency, created_by, created_at) VALUES ('group-x', 'Not mine', 'USD', 'user-9', ?)",
+    ).run(new Date().toISOString());
+    db.query(
+      `INSERT INTO operations(
+        id, group_id, actor_id, device_id, type, target_id, base_version,
+        client_timestamp, payload_json, content_hash, signature, received_at, status
+      ) VALUES ('op-x', 'group-x', 'user-9', 'device-9', 'ExpenseCreated', 'expense-x', 0, ?, '{}', 'hash', 'sig', ?, 'accepted')`,
+    ).run(new Date().toISOString(), new Date().toISOString());
+
+    expect(store.latestSequence).toBeGreaterThan(store.latestSequenceFor("user-1"));
+    expect(store.latestSequenceFor("user-1")).toBe(1);
+  });
 });
