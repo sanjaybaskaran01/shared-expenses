@@ -52,11 +52,11 @@ bun run check
 
 The accepted zero-incremental-cost deployment is:
 
-- `expenses.example.com`: Cloudflare Pages, built from `apps/web/dist`.
-- `api.example.com`: Cloudflare Tunnel to `127.0.0.1:3000` on the existing Mac.
+- `expenses.example.com` (pick your own domain): Cloudflare Pages, built from `apps/web/dist`.
+- `api.expenses.example.com` (pick your own subdomain): Cloudflare Tunnel to `127.0.0.1:3000` on the existing Mac.
 - SQLite and attachments: a non-iCloud local data directory.
 - Encrypted completed backups only: copied into iCloud Drive.
-- Email: Gmail SMTP with an app password and `expenses@example.com` as the requested From address.
+- Email: Gmail SMTP with an app password and an address at your own domain as the requested From address.
 
 ### 1. Production environment
 
@@ -70,9 +70,10 @@ PORT=3000
 DATABASE_PATH=/absolute/private/path/expenses.sqlite
 ATTACHMENTS_PATH=/absolute/private/path/attachments
 WEB_ORIGIN=https://expenses.example.com
-PUBLIC_API_URL=https://api.example.com
+PUBLIC_API_URL=https://api.expenses.example.com
 BETTER_AUTH_SECRET=
 BETTER_AUTH_SECRET_KEYCHAIN_SERVICE=shared-expenses-auth
+COOKIE_DOMAIN=
 DEV_AUTH_BYPASS=false
 OWNER_EMAIL=your-real-invited-email@example.com
 BOOTSTRAP_GROUP_NAME=Shared expenses
@@ -82,7 +83,7 @@ SMTP_APP_PASSWORD_KEYCHAIN_SERVICE=shared-expenses-smtp
 SMTP_FROM=expenses@example.com
 ```
 
-`OWNER_EMAIL` is the only email allowed to create the first account. Invited placeholder members may then create accounts. Sign-in uses a verified, single-use link and does not require a password.
+`OWNER_EMAIL` is the only email allowed to create the first account. Invited placeholder members may then create accounts. Sign-in uses a verified, single-use link and does not require a password. `COOKIE_DOMAIN` is optional; set it (e.g. `.expenses.example.com`) only if the web app and API share a parent domain and you want the session cookie shared across both subdomains.
 
 Keep this environment file out of Git, backups, shell history, and launch-agent XML. Restrict it with `chmod 600`; the included `scripts/run-server.sh` loads it for `launchd` through the non-secret `EXPENSES_ENV_FILE` path. When either Keychain service variable is set, the runner reads that secret from the macOS login Keychain and overrides the corresponding plaintext variable, so production does not need either secret in the env file.
 
@@ -100,15 +101,15 @@ The example `launchd` files in `deploy/` contain placeholders on purpose. Copy t
 
 Create a Cloudflare Pages project with:
 
-- Build command: `bun install --frozen-lockfile && VITE_API_URL=https://api.example.com bun --cwd apps/web run build`
+- Build command: `bun install --frozen-lockfile && VITE_API_URL=https://api.expenses.example.com bun --cwd apps/web run build` (substitute your real API hostname)
 - Output directory: `apps/web/dist`
-- Custom domain: `expenses.example.com`
+- Custom domain: your chosen web hostname (e.g. `expenses.example.com`)
 
-The repository includes static-host security and cache headers. Do not proxy the PWA through the home Mac; that would defeat offline app-shell availability.
+The repository includes static-host security and cache headers. Before deploying, update the `connect-src` origin in `apps/web/public/_headers` from the placeholder `https://api.expenses.example.com` to your real API hostname — it must match `PUBLIC_API_URL`/`VITE_API_URL` or the browser will block API requests under CSP. Do not proxy the PWA through the home Mac; that would defeat offline app-shell availability.
 
 ### 4. Expose only the API
 
-Install `cloudflared`, create a named tunnel, and route only `api.example.com` to `http://127.0.0.1:3000`. Do not add a router port-forward. For a token-managed tunnel, store the token in macOS Keychain under service `shared-expenses-tunnel`, then adapt `deploy/com.shared-expenses.tunnel.plist.example`; its runner reads the token at startup without putting it in the plist or process arguments. `deploy/cloudflared-config.example.yml` remains available for credential-file installations.
+Install `cloudflared`, create a named tunnel, and route only your API hostname (e.g. `api.expenses.example.com`) to `http://127.0.0.1:3000`. Do not add a router port-forward. For a token-managed tunnel, store the token in macOS Keychain under service `shared-expenses-tunnel`, then adapt `deploy/com.shared-expenses.tunnel.plist.example`; its runner reads the token at startup without putting it in the plist or process arguments. `deploy/cloudflared-config.example.yml` remains available for credential-file installations.
 
 ### 5. Validate Gmail delivery
 

@@ -61,6 +61,10 @@ export function pushOperations(operations: OperationEnvelope[]): Promise<SyncPus
   });
 }
 
+export function sendFeedback(input: { category: "bug" | "idea"; message: string; pageUrl?: string }): Promise<void> {
+  return apiFetch("/api/v1/feedback", { method: "POST", body: JSON.stringify(input) });
+}
+
 export function pullOperations(after: number): Promise<{
   operations: OperationEnvelope[];
   generation: string;
