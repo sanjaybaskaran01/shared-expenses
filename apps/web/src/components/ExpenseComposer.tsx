@@ -1,5 +1,5 @@
 import { Dialog } from "@kobalte/core/dialog";
-import { Check, ChevronDown, ChevronRight, ChevronUp, LoaderCircle, SlidersHorizontal, UsersRound } from "lucide-solid";
+import { CalendarDays, Check, ChevronDown, ChevronRight, ChevronUp, LoaderCircle, Scale, SlidersHorizontal, UsersRound } from "lucide-solid";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { LocalExpense } from "../lib/db";
 import { isLocalToday, localDateValue } from "../lib/dates";
@@ -27,6 +27,7 @@ const splitMethods: Array<{ id: SplitMethod; label: string }> = [
 
 const categories = ["General", "Dining out", "Groceries", "Liquor", "Rent", "Household supplies", "Utilities", "Transportation", "Gas/fuel", "Taxi", "Plane", "Hotel", "Entertainment", "Games", "Medical expenses", "Gifts", "Education", "Pets"];
 const currencies = ["USD", "CAD", "EUR", "GBP", "INR", "AUD", "JPY", "SGD", "CHF", "CNY"];
+type ComposerPanel = "none" | "payer" | "split" | "date" | "details";
 
 function formatMinor(amountMinor: number, currency = "USD"): string {
   return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(amountMinor / 100);
@@ -50,8 +51,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   const [notes, setNotes] = createSignal("");
   const [currency, setCurrency] = createSignal("USD");
   const [recurrence, setRecurrence] = createSignal<"none" | "weekly" | "fortnightly" | "monthly" | "yearly">("none");
-  const [detailsOpen, setDetailsOpen] = createSignal(false);
-  const [splitOpen, setSplitOpen] = createSignal(false);
+  const [activePanel, setActivePanel] = createSignal<ComposerPanel>("none");
   const [activeSplitParticipantId, setActiveSplitParticipantId] = createSignal<string>();
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal("");
@@ -82,8 +82,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       setNotes(editingExpense?.notes ?? "");
       setCurrency(editingExpense?.currency ?? appStore.groups().find((group) => group.id === nextGroupId)?.settlementCurrency ?? "USD");
       setRecurrence(editingExpense?.recurrence ?? "none");
-      setDetailsOpen(false);
-      setSplitOpen(false);
+      setActivePanel("none");
       setActiveSplitParticipantId(undefined);
       setError("");
       if (editingExpense) {
@@ -238,9 +237,9 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
     if (splitMethod() !== "equal") initializeValues(splitMethod());
   }
 
-  function openSplitOptions(): void {
+  function togglePanel(panel: Exclude<ComposerPanel, "none">): void {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    setSplitOpen(true);
+    setActivePanel((current) => current === panel ? "none" : panel);
   }
 
   function changeShares(userId: string, delta: number): void {
@@ -336,29 +335,40 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
 
               <label class="description-field"><span class="sr-only">What was it for?</span><input value={description()} onInput={(event) => setDescription(event.currentTarget.value)} placeholder="What was it for?" maxlength={200} autocomplete="off" /></label>
 
-              <div class="expense-quick-controls">
-                <button type="button" class="quick-control" aria-expanded={splitOpen()} onClick={() => splitOpen() ? setSplitOpen(false) : openSplitOptions()}><span class="micro-label">Split</span><strong>{splitSummary()}</strong></button>
-                <button type="button" class="quick-control" aria-expanded={splitOpen()} onClick={openSplitOptions}><span class="micro-label">Paid by</span><strong>{payerSummary()}</strong></button>
-                <button type="button" class="quick-control" aria-expanded={detailsOpen()} onClick={() => setDetailsOpen(true)}><span class="micro-label">When</span><strong>{isLocalToday(date()) ? "Today" : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(`${date()}T12:00:00`))}</strong></button>
+              <div class="expense-quick-controls" aria-label="Expense options">
+                <button type="button" class="quick-control tone-payer" aria-expanded={activePanel() === "payer"} aria-controls="payer-panel" onClick={() => togglePanel("payer")}>
+                  <span class="quick-control-icon"><UsersRound size={16} /></span><span><span class="micro-label">Paid by</span><strong>{payerSummary()}</strong></span><ChevronDown size={15} />
+                </button>
+                <button type="button" class="quick-control tone-split" aria-expanded={activePanel() === "split"} aria-controls="split-panel" onClick={() => togglePanel("split")}>
+                  <span class="quick-control-icon"><Scale size={16} /></span><span><span class="micro-label">Split</span><strong>{splitSummary()}</strong></span><ChevronDown size={15} />
+                </button>
+                <button type="button" class="quick-control tone-date" aria-expanded={activePanel() === "date"} aria-controls="date-panel" onClick={() => togglePanel("date")}>
+                  <span class="quick-control-icon"><CalendarDays size={16} /></span><span><span class="micro-label">When</span><strong>{isLocalToday(date()) ? "Today" : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(`${date()}T12:00:00`))}</strong></span><ChevronDown size={15} />
+                </button>
               </div>
 
-              <Show when={splitOpen()}>
-                <section class="disclosure-panel split-panel grid gap-4 border border-border p-4" aria-label="Payer and split options">
-                  <div class="grid gap-3">
-                    <div class="flex items-center justify-between gap-3"><p class="text-sm font-medium">Paid by</p><Show when={groupMembers().length > 1}><button type="button" class="flex items-center gap-1.5 text-xs font-semibold text-primary" onClick={enableMultiplePayers}><UsersRound size={14} />{payerIds().length > 1 ? "Use one payer" : "Multiple payers"}</button></Show></div>
-                    <Show when={payerIds().length > 1} fallback={<div class="payer-avatar-rail"><For each={groupMembers()}>{(member) => <button type="button" class="payer-avatar-choice" classList={{ active: payerIds()[0] === member.userId }} aria-pressed={payerIds()[0] === member.userId} onClick={() => { setPayerIds([member.userId]); setPayerValues({}); }}><Avatar name={member.displayName} class="size-9 text-xs" /><span>{member.userId === props.actorId ? "You" : member.displayName}</span></button>}</For></div>}>
-                      <div class="divide-y divide-border rounded-xl border border-border bg-background/55">
-                        <For each={groupMembers()}>{(member) => <div class="flex min-h-14 items-center gap-3 px-3"><button type="button" class="grid size-6 place-items-center rounded-md border border-border" classList={{ "border-primary bg-primary text-primary-foreground": payerIds().includes(member.userId) }} onClick={() => togglePayer(member.userId)} aria-label={`Toggle ${member.displayName} as payer`} aria-pressed={payerIds().includes(member.userId)}><Show when={payerIds().includes(member.userId)}><Check size={14} /></Show></button><Avatar name={member.displayName} class="size-7 text-xs" /><span class="min-w-0 flex-1 truncate text-sm font-medium">{member.userId === props.actorId ? "You" : member.displayName}</span><div class="relative w-24"><input class="form-control h-9 text-right text-sm tabular-nums" disabled={!payerIds().includes(member.userId)} inputmode="decimal" value={payerValues()[member.userId] ?? ""} onInput={(event) => setPayerValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={`Amount paid by ${member.displayName}`} /></div></div>}</For>
-                      </div>
-                    </Show>
-                  </div>
+              <Show when={activePanel() === "payer"}>
+                <section id="payer-panel" class="disclosure-panel split-panel grid gap-3 border border-border p-4" aria-label="Choose who paid">
+                  <div class="disclosure-heading"><div><p>Who paid?</p><small>Choose one person, or use multiple payers.</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
+                  <div class="flex items-center justify-end"><Show when={groupMembers().length > 1}><button type="button" class="flex items-center gap-1.5 text-xs font-semibold text-primary" onClick={enableMultiplePayers}><UsersRound size={14} />{payerIds().length > 1 ? "Use one payer" : "Multiple payers"}</button></Show></div>
+                  <Show when={payerIds().length > 1} fallback={<div class="payer-avatar-rail"><For each={groupMembers()}>{(member) => <button type="button" class="payer-avatar-choice" classList={{ active: payerIds()[0] === member.userId }} aria-pressed={payerIds()[0] === member.userId} onClick={() => { setPayerIds([member.userId]); setPayerValues({}); }}><Avatar name={member.displayName} class="size-9 text-xs" /><span>{member.userId === props.actorId ? "You" : member.displayName}</span></button>}</For></div>}>
+                    <div class="divide-y divide-border rounded-xl border border-border bg-background/55">
+                      <For each={groupMembers()}>{(member) => <div class="flex min-h-14 items-center gap-3 px-3"><button type="button" class="grid size-6 place-items-center rounded-md border border-border" classList={{ "border-primary bg-primary text-primary-foreground": payerIds().includes(member.userId) }} onClick={() => togglePayer(member.userId)} aria-label={`Toggle ${member.displayName} as payer`} aria-pressed={payerIds().includes(member.userId)}><Show when={payerIds().includes(member.userId)}><Check size={14} /></Show></button><Avatar name={member.displayName} class="size-7 text-xs" /><span class="min-w-0 flex-1 truncate text-sm font-medium">{member.userId === props.actorId ? "You" : member.displayName}</span><div class="relative w-24"><input class="form-control h-9 text-right text-sm tabular-nums" disabled={!payerIds().includes(member.userId)} inputmode="decimal" value={payerValues()[member.userId] ?? ""} onInput={(event) => setPayerValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={`Amount paid by ${member.displayName}`} /></div></div>}</For>
+                    </div>
+                  </Show>
+                </section>
+              </Show>
+
+              <Show when={activePanel() === "split"}>
+                <section id="split-panel" class="disclosure-panel split-panel grid gap-4 border border-border p-4" aria-label="Choose how to split">
+                  <div class="disclosure-heading"><div><p>How is it split?</p><small>Evenly is the fastest default. Adjust only if needed.</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
                   <div>
                     <p class="mb-2 text-sm font-medium">Split method</p>
                     <div class="split-mode-tabs grid grid-cols-4">
                       <For each={splitMethods}>{(method) => <button type="button" class="h-9 rounded-md text-xs font-medium text-muted-foreground transition-all" classList={{ "bg-card text-foreground shadow-sm": splitMethod() === method.id }} aria-pressed={splitMethod() === method.id} onClick={() => chooseSplitMethod(method.id)}>{method.label}</button>}</For>
                     </div>
                   </div>
-                  <div class="divide-y divide-border border border-border">
+                  <div class="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
                     <For each={groupMembers()}>{(member) => {
                       const selected = createMemo(() => participants().includes(member.userId));
                       const allocation = createMemo(() => allocations().find((item) => item.participantId === member.userId));
@@ -384,11 +394,21 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                 </section>
               </Show>
 
-              <button type="button" class="flex h-10 items-center justify-between text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" aria-expanded={detailsOpen()} onClick={() => setDetailsOpen((open) => !open)}><span class="flex items-center gap-2"><SlidersHorizontal size={15} /> {detailsOpen() ? "Less details" : "More details"}</span>{detailsOpen() ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
-              <Show when={detailsOpen()}>
-                <section class="disclosure-panel grid gap-4 rounded-lg border border-border p-4 sm:grid-cols-2">
+              <Show when={activePanel() === "date"}>
+                <section id="date-panel" class="disclosure-panel split-panel grid gap-3 border border-border p-4" aria-label="Choose expense date">
+                  <div class="disclosure-heading"><div><p>When was it?</p><small>Today is selected by default.</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
+                  <div class="date-choice-row">
+                    <button type="button" classList={{ active: isLocalToday(date()) }} onClick={() => setDate(localDateValue())}>Today</button>
+                    <label><span class="sr-only">Expense date</span><input class="form-control" type="date" value={date()} onInput={(event) => setDate(event.currentTarget.value)} /></label>
+                  </div>
+                </section>
+              </Show>
+
+              <button type="button" class="details-disclosure" aria-expanded={activePanel() === "details"} onClick={() => togglePanel("details")}><span class="flex items-center gap-2"><SlidersHorizontal size={15} /> {activePanel() === "details" ? "Hide details" : "More details"}</span>{activePanel() === "details" ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
+              <Show when={activePanel() === "details"}>
+                <section class="disclosure-panel grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2" aria-label="More expense details">
+                  <div class="disclosure-heading sm:col-span-2"><div><p>More details</p><small>Optional fields for bookkeeping.</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
                   <label class="grid gap-2 text-sm font-medium">Category<select class="form-control" value={category()} onInput={(event) => setCategory(event.currentTarget.value)}><For each={categories}>{(item) => <option>{item}</option>}</For></select></label>
-                  <label class="grid gap-2 text-sm font-medium">Date<input class="form-control" type="date" value={date()} onInput={(event) => setDate(event.currentTarget.value)} /></label>
                   <label class="grid gap-2 text-sm font-medium">Currency<select class="form-control" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)}><For each={currencies}>{(item) => <option value={item}>{item}</option>}</For></select></label>
                   <label class="grid gap-2 text-sm font-medium sm:col-span-2">Note <span class="sr-only">optional</span><textarea class="form-control min-h-20 resize-y py-2" value={notes()} onInput={(event) => setNotes(event.currentTarget.value)} placeholder="Optional note" maxlength={5000} /></label>
                 </section>
