@@ -194,18 +194,33 @@ function ExpenseList(props: {
   groupId: string;
   actorId: string;
   onOpen(expense: LocalExpense): void;
+  onAdd?(): void;
 }) {
-  const expenses = createMemo(() =>
-    appStore.expenses().filter((expense) => expense.groupId === props.groupId),
-  );
+  const expenses = createMemo(() => {
+    const items = appStore
+      .expenses()
+      .filter((expense) => expense.groupId === props.groupId);
+    return items.sort(
+      (left, right) =>
+        right.expenseDate.localeCompare(left.expenseDate) ||
+        right.updatedAt.localeCompare(left.updatedAt),
+    );
+  });
   const activeCount = createMemo(
     () => expenses().filter((item) => item.status === "active").length,
   );
   return (
     <Card class="overflow-hidden">
       <SectionHeading
-        title="Latest"
+        title="Expense timeline"
         detail={`${activeCount()} active ${activeCount() === 1 ? "expense" : "expenses"}`}
+        action={
+          <Show when={props.onAdd}>
+            <button class="list-add-action" type="button" onClick={() => props.onAdd?.()}>
+              <Plus size={14} /> Add
+            </button>
+          </Show>
+        }
       />
       <Show
         when={expenses().length}
@@ -307,7 +322,16 @@ function GroupsView(props: {
   const [chartMode, setChartMode] = createSignal<"category" | "month">(
     "category",
   );
-  createEffect(() => setCurrency(group()?.settlementCurrency ?? "USD"));
+  const [groupSection, setGroupSection] = createSignal<"expenses" | "balances" | "insights">("expenses");
+  let sectionGroupId = "";
+  createEffect(() => {
+    const nextGroupId = group()?.id ?? "";
+    setCurrency(group()?.settlementCurrency ?? "USD");
+    if (nextGroupId && nextGroupId !== sectionGroupId) {
+      sectionGroupId = nextGroupId;
+      setGroupSection("expenses");
+    }
+  });
   const balances = createMemo(() =>
     group()
       ? computeBalances(
@@ -360,9 +384,9 @@ function GroupsView(props: {
   return (
     <div class="page-enter space-y-5 sm:space-y-6">
       <header>
-        <p class="eyebrow">Balances</p>
+        <p class="eyebrow">Group</p>
         <h1 class="page-title">{group()?.name ?? "Groups"}</h1>
-        <p class="mt-2 text-sm text-muted-foreground">Who owes who</p>
+        <p class="mt-2 text-sm text-muted-foreground">{activeExpenses().length} {activeExpenses().length === 1 ? "expense" : "expenses"} · newest first</p>
       </header>
       <Show when={appStore.groups().length > 0}>
         <GroupRail
@@ -391,204 +415,64 @@ function GroupsView(props: {
       >
         {(activeGroup) => (
           <>
-            <section
-              class="balance-strip"
-              aria-label={`${activeGroup.name} balance summary`}
-            >
-              <div class="balance-cell balance-cell-in">
-                <span class="micro-label">Coming in</span>
-                <strong class="money-type">
-                  {money(incoming(), currency())}
-                </strong>
-              </div>
-              <div class="balance-cell balance-cell-out">
-                <span class="micro-label">Going out</span>
-                <strong class="money-type">
-                  {money(outgoing(), currency())}
-                </strong>
-              </div>
-              <div class="balance-cell balance-cell-net">
-                <span class="micro-label">Net balance</span>
-                <strong class="money-type">
-                  {yourBalance() === 0
-                    ? money(0, currency())
-                    : `${yourBalance() > 0 ? "+" : "−"}${money(Math.abs(yourBalance()), currency())}`}
-                </strong>
-              </div>
-              <select
-                class="balance-currency"
-                value={currency()}
-                onInput={(event) => setCurrency(event.currentTarget.value)}
-                aria-label="Balance currency"
-              >
-                <For each={currenciesFor(activeGroup.id)}>
-                  {(item) => <option value={item}>{item}</option>}
-                </For>
-              </select>
-            </section>
+            <div class="group-view-tabs" role="tablist" aria-label={`${activeGroup.name} views`}>
+              <button type="button" role="tab" aria-selected={groupSection() === "expenses"} classList={{ active: groupSection() === "expenses" }} onClick={() => setGroupSection("expenses")}><ReceiptText size={16} /><span>Expenses</span></button>
+              <button type="button" role="tab" aria-selected={groupSection() === "balances"} classList={{ active: groupSection() === "balances" }} onClick={() => setGroupSection("balances")}><Scale size={16} /><span>Balances</span></button>
+              <button type="button" role="tab" aria-selected={groupSection() === "insights"} classList={{ active: groupSection() === "insights" }} onClick={() => setGroupSection("insights")}><Activity size={16} /><span>Insights</span></button>
+            </div>
 
-            <section
-              class="people-balance-list"
-              aria-label={`Balances in ${activeGroup.name}`}
-            >
-              <For
-                each={people()}
-                fallback={
-                  <Card class="p-6 text-sm text-muted-foreground">
-                    Invite someone to {activeGroup.name} to start splitting.
-                  </Card>
-                }
-              >
-                {(member) => {
-                  const balance = createMemo(
-                    () => balances()[member.userId] ?? 0,
-                  );
-                  const settlement = createMemo<Settlement | undefined>(() =>
-                    balance() < 0
-                      ? {
-                          payerId: member.userId,
-                          recipientId: props.actorId,
-                          amountMinor: -balance(),
-                        }
-                      : balance() > 0
-                        ? {
-                            payerId: props.actorId,
-                            recipientId: member.userId,
-                            amountMinor: balance(),
-                          }
-                        : undefined,
-                  );
-                  const related = createMemo(() =>
-                    activeExpenses()
-                      .filter((expense) =>
-                        expense.allocations.some(
-                          (allocation) =>
-                            allocation.participantId === member.userId,
-                        ),
-                      )
-                      .slice(0, 2)
-                      .map((expense) => expense.description)
-                      .join(", "),
-                  );
-                  return (
-                    <article
-                      class="person-balance-block"
-                      classList={{
-                        "tone-mint": balance() < 0,
-                        "tone-coral": balance() > 0,
-                        "tone-butter": balance() === 0,
-                      }}
-                    >
-                      <Avatar name={member.displayName} class="person-avatar" />
-                      <div class="min-w-0 flex-1">
-                        <strong class="block truncate">
-                          {member.displayName}
-                        </strong>
-                        <span class="micro-label block truncate">
-                          {related() || activeGroup.name}
-                        </span>
-                      </div>
-                      <div class="shrink-0 text-right">
-                        <strong
-                          class="money-type block"
-                          classList={{
-                            "money-in": balance() < 0,
-                            "money-out": balance() > 0,
-                          }}
-                        >
-                          {balance() === 0
-                            ? money(0, currency())
-                            : `${balance() < 0 ? "+" : "−"}${money(Math.abs(balance()), currency())}`}
-                        </strong>
-                        <span class="micro-label">
-                          {balance() < 0
-                            ? "owes you"
-                            : balance() > 0
-                              ? "you owe"
-                              : "settled"}
-                        </span>
-                      </div>
-                      <button
-                        class="ink-action"
-                        type="button"
-                        disabled={!settlement()}
-                        onClick={() => props.onSettle(settlement(), currency())}
-                      >
-                        {balance() > 0 ? "Pay" : "Settle"}
-                      </button>
-                    </article>
-                  );
-                }}
-              </For>
-            </section>
-
-            <div class="grid items-start gap-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(19rem,.7fr)]">
+            <Show when={groupSection() === "expenses"}>
               <ExpenseList
                 groupId={activeGroup.id}
                 actorId={props.actorId}
                 onOpen={props.onOpenExpense}
+                onAdd={() => props.onAddExpense(activeGroup.id)}
               />
-              <div class="space-y-5">
-                <Card id="insights" class="overflow-hidden">
-                  <SectionHeading
-                    title="Spending insights"
-                    detail={`${money(total(), currency())} total`}
-                    action={
-                      <div class="segmented-control">
-                        <button
-                          classList={{ active: chartMode() === "category" }}
-                          aria-pressed={chartMode() === "category"}
-                          onClick={() => setChartMode("category")}
-                        >
-                          Category
-                        </button>
-                        <button
-                          classList={{ active: chartMode() === "month" }}
-                          aria-pressed={chartMode() === "month"}
-                          onClick={() => setChartMode("month")}
-                        >
-                          Months
-                        </button>
-                      </div>
-                    }
-                  />
-                  <div class="p-4">
-                    <div class="mb-1 grid grid-cols-2 gap-3">
-                      <div class="metric-tile">
-                        <span>Total spent</span>
-                        <strong>{money(total(), currency(), true)}</strong>
-                      </div>
-                      <div class="metric-tile">
-                        <span>Your share</span>
-                        <strong>{money(yourShare(), currency(), true)}</strong>
-                      </div>
-                    </div>
-                    <Show
-                      when={total() > 0}
-                      fallback={
-                        <div class="grid h-48 place-items-center text-sm text-muted-foreground">
-                          Charts appear after your first expense.
-                        </div>
-                      }
-                    >
-                      <Suspense
-                        fallback={
-                          <div class="grid h-52 place-items-center text-xs text-muted-foreground">
-                            Preparing chart…
-                          </div>
-                        }
-                      >
-                        <SpendingChart
-                          expenses={expenses()}
-                          currency={currency()}
-                          mode={chartMode()}
-                        />
-                      </Suspense>
-                    </Show>
-                  </div>
-                </Card>
+            </Show>
+
+            <Show when={groupSection() === "balances"}>
+              <div class="page-enter space-y-3" role="tabpanel" aria-label="Group balances">
+                <section class="balance-strip" aria-label={`${activeGroup.name} balance summary`}>
+                  <div class="balance-cell balance-cell-in"><span class="micro-label">Coming in</span><strong class="money-type">{money(incoming(), currency())}</strong></div>
+                  <div class="balance-cell balance-cell-out"><span class="micro-label">Going out</span><strong class="money-type">{money(outgoing(), currency())}</strong></div>
+                  <div class="balance-cell balance-cell-net"><span class="micro-label">Net balance</span><strong class="money-type">{yourBalance() === 0 ? money(0, currency()) : `${yourBalance() > 0 ? "+" : "−"}${money(Math.abs(yourBalance()), currency())}`}</strong></div>
+                  <select class="balance-currency" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)} aria-label="Balance currency"><For each={currenciesFor(activeGroup.id)}>{(item) => <option value={item}>{item}</option>}</For></select>
+                </section>
+                <section class="people-balance-list" aria-label={`Balances in ${activeGroup.name}`}>
+                  <For each={people()} fallback={<Card class="p-6 text-sm text-muted-foreground">Invite someone to {activeGroup.name} to start splitting.</Card>}>
+                    {(member) => {
+                      const balance = createMemo(() => balances()[member.userId] ?? 0);
+                      const settlement = createMemo<Settlement | undefined>(() => balance() < 0 ? { payerId: member.userId, recipientId: props.actorId, amountMinor: -balance() } : balance() > 0 ? { payerId: props.actorId, recipientId: member.userId, amountMinor: balance() } : undefined);
+                      const related = createMemo(() => activeExpenses().filter((expense) => expense.allocations.some((allocation) => allocation.participantId === member.userId)).slice(0, 2).map((expense) => expense.description).join(", "));
+                      return (
+                        <article class="person-balance-block" classList={{ "tone-mint": balance() < 0, "tone-coral": balance() > 0, "tone-butter": balance() === 0 }}>
+                          <Avatar name={member.displayName} class="person-avatar" />
+                          <div class="min-w-0 flex-1"><strong class="block truncate">{member.displayName}</strong><span class="micro-label block truncate">{related() || activeGroup.name}</span></div>
+                          <div class="shrink-0 text-right"><strong class="money-type block" classList={{ "money-in": balance() < 0, "money-out": balance() > 0 }}>{balance() === 0 ? money(0, currency()) : `${balance() < 0 ? "+" : "−"}${money(Math.abs(balance()), currency())}`}</strong><span class="micro-label">{balance() < 0 ? "owes you" : balance() > 0 ? "you owe" : "settled"}</span></div>
+                          <button class="ink-action" type="button" disabled={!settlement()} onClick={() => props.onSettle(settlement(), currency())}>{balance() > 0 ? "Pay" : "Settle"}</button>
+                        </article>
+                      );
+                    }}
+                  </For>
+                </section>
               </div>
-            </div>
+            </Show>
+
+            <Show when={groupSection() === "insights"}>
+              <Card id="insights" class="page-enter overflow-hidden" role="tabpanel">
+                <SectionHeading
+                  title="Spending insights"
+                  detail={`${money(total(), currency())} total`}
+                  action={<div class="flex items-center gap-2"><select class="insight-currency" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)} aria-label="Insights currency"><For each={currenciesFor(activeGroup.id)}>{(item) => <option value={item}>{item}</option>}</For></select><div class="segmented-control"><button classList={{ active: chartMode() === "category" }} aria-pressed={chartMode() === "category"} onClick={() => setChartMode("category")}>Category</button><button classList={{ active: chartMode() === "month" }} aria-pressed={chartMode() === "month"} onClick={() => setChartMode("month")}>Months</button></div></div>}
+                />
+                <div class="p-4">
+                  <div class="mb-1 grid grid-cols-2 gap-3"><div class="metric-tile"><span>Total spent</span><strong>{money(total(), currency(), true)}</strong></div><div class="metric-tile"><span>Your share</span><strong>{money(yourShare(), currency(), true)}</strong></div></div>
+                  <Show when={total() > 0} fallback={<div class="grid h-48 place-items-center text-sm text-muted-foreground">Charts appear after your first expense.</div>}>
+                    <Suspense fallback={<div class="grid h-52 place-items-center text-xs text-muted-foreground">Preparing chart…</div>}><SpendingChart expenses={expenses()} currency={currency()} mode={chartMode()} /></Suspense>
+                  </Show>
+                </div>
+              </Card>
+            </Show>
           </>
         )}
       </Show>
@@ -1031,7 +915,6 @@ function AuthenticatedApp(props: { actorId: string }) {
     { id: "activity" as const, label: "Activity", icon: Activity },
     { id: "account" as const, label: "Account", icon: CircleUserRound },
   ];
-  const activeTabIndex = createMemo(() => Math.max(0, tabs.findIndex((item) => item.id === tab())));
   function notify(message: string) {
     setToast(message);
     clearTimeout(toastTimer);
@@ -1183,18 +1066,9 @@ function AuthenticatedApp(props: { actorId: string }) {
           </Switch>
         </main>
       </div>
-      <button
-        class="floating-add md:hidden"
-        onClick={() => addExpense()}
-        aria-label="Add expense"
-      >
-        <Plus size={18} />
-        <span>Add expense</span>
-      </button>
       <nav
         class="mobile-tabbar glass-nav md:hidden"
         aria-label="Primary navigation"
-        style={`--active-index:${activeTabIndex()}`}
       >
         <For each={tabs}>
           {(item) => (
@@ -1209,6 +1083,10 @@ function AuthenticatedApp(props: { actorId: string }) {
             </button>
           )}
         </For>
+        <button class="nav-add-item" type="button" onClick={() => addExpense()} aria-label="Add expense">
+          <Plus size={20} stroke-width={2.5} />
+          <span>Add</span>
+        </button>
       </nav>
       <Show when={toast()}>
         <div class="toast-enter toast-pill">
