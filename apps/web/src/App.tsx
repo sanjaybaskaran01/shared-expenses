@@ -37,6 +37,7 @@ import { BrandMark } from "./components/BrandMark";
 import { ExpenseComposer } from "./components/ExpenseComposer";
 import { ExpenseDetail } from "./components/ExpenseDetail";
 import { ExpenseTargetPicker } from "./components/ExpenseTargetPicker";
+import { FeedbackButton } from "./components/FeedbackDialog";
 import { GroupComposer } from "./components/GroupComposer";
 import { PaymentComposer } from "./components/PaymentComposer";
 import { Avatar, Button, Card } from "./components/ui";
@@ -959,6 +960,9 @@ function AccountView(props: { displayName: string }) {
           )}
         </For>
         <Show when={!import.meta.env.DEV}>
+          <div class="border-t border-border/60 p-3">
+            <FeedbackButton />
+          </div>
           <div class="border-t border-border/60 p-4">
             <Button
               variant="destructive"
@@ -1128,6 +1132,7 @@ function AuthenticatedApp(props: { actorId: string }) {
           </For>
         </div>
         <div class="mt-auto p-4">
+          <FeedbackButton class="mb-2" />
           <ConnectionPill />
           <p class="mt-2 text-xs leading-5 text-muted-foreground">
             Ledger changes save locally before syncing.

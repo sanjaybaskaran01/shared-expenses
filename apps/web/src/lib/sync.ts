@@ -133,13 +133,23 @@ export class SyncEngine {
         });
       }
 
-      const cursor = recovering ? 0 : Number((await localDb.settings.get("serverSequence"))?.value ?? 0);
-      const pulled = await pullOperations(cursor);
-      for (const operation of pulled.operations) await applyRemote(operation, device.actorId);
-      await localDb.settings.bulkPut([
-        { key: "serverSequence", value: pulled.latestServerSequence },
-        { key: "generation", value: pulled.generation },
-      ]);
+      let cursor = recovering ? 0 : Number((await localDb.settings.get("serverSequence"))?.value ?? 0);
+      let generation = snapshot.manifest.generation;
+      while (true) {
+        const pulled = await pullOperations(cursor);
+        generation = pulled.generation;
+        for (const operation of pulled.operations) await applyRemote(operation, device.actorId);
+        const receivedCursor = pulled.operations.reduce(
+          (maximum, operation) => Math.max(maximum, operation.serverSequence ?? 0),
+          cursor,
+        );
+        cursor = receivedCursor > cursor ? receivedCursor : pulled.latestServerSequence;
+        await localDb.settings.bulkPut([
+          { key: "serverSequence", value: cursor },
+          { key: "generation", value: generation },
+        ]);
+        if (cursor >= pulled.latestServerSequence || pulled.operations.length === 0) break;
+      }
       this.onState("online");
       this.ensureEvents();
     } catch (error) {
