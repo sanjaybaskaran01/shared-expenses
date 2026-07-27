@@ -23,6 +23,7 @@ export interface AppConfig {
   authSecret: string;
   devAuthBypass: boolean;
   ownerEmail?: string;
+  cookieDomain?: string;
   bootstrapGroupName: string;
   smtp: {
     host: string;
@@ -48,6 +49,7 @@ export function loadConfig(): AppConfig {
   const smtpUser = process.env.SMTP_USER;
   const smtpPassword = process.env.SMTP_APP_PASSWORD;
   const ownerEmail = process.env.OWNER_EMAIL?.trim().toLowerCase();
+  const cookieDomain = process.env.COOKIE_DOMAIN?.trim().toLowerCase();
   if (nodeEnv === "production" && !ownerEmail) {
     throw new Error("OWNER_EMAIL is required in production");
   }
@@ -62,6 +64,7 @@ export function loadConfig(): AppConfig {
     authSecret,
     devAuthBypass,
     ...(ownerEmail ? { ownerEmail } : {}),
+    ...(cookieDomain ? { cookieDomain } : {}),
     bootstrapGroupName: process.env.BOOTSTRAP_GROUP_NAME ?? "Shared expenses",
     smtp: {
       host: process.env.SMTP_HOST ?? "smtp.gmail.com",

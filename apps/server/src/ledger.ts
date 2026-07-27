@@ -48,6 +48,7 @@ const versionedTypes = new Set([
   "ExpenseCreated",
   "ExpenseAmended",
   "ExpenseVoided",
+  "ExpenseRestored",
   "PaymentRecorded",
   "PaymentReversed",
   "ConflictResolved",
@@ -90,6 +91,12 @@ function requiredMinor(payload: Record<string, JsonValue>, key: string, allowZer
   return Number(value);
 }
 
+function requiredCurrency(payload: Record<string, JsonValue>, key: string): string {
+  const currency = requiredString(payload, key, 3).toUpperCase();
+  if (!/^[A-Z]{3}$/.test(currency)) throw new TypeError(`${key} must be a three-letter ISO code`);
+  return currency;
+}
+
 function participantAmounts(payload: Record<string, JsonValue>, key: string): ParticipantAmount[] {
   const value = payload[key];
   if (!Array.isArray(value) || value.length === 0) throw new TypeError(`${key} must be a non-empty array`);
@@ -107,8 +114,7 @@ function parseExpensePayload(value: JsonValue): ExpensePayload {
   const amountMinor = requiredMinor(payload, "amountMinor");
   const payers = validateExactAllocation(amountMinor, participantAmounts(payload, "payers"));
   const allocations = validateExactAllocation(amountMinor, participantAmounts(payload, "allocations"));
-  const currency = requiredString(payload, "currency", 3).toUpperCase();
-  if (!/^[A-Z]{3}$/.test(currency)) throw new TypeError("currency must be a three-letter ISO code");
+  const currency = requiredCurrency(payload, "currency");
   return {
     description: requiredString(payload, "description", 200),
     category: requiredString(payload, "category", 100),
@@ -134,6 +140,22 @@ export class LedgerStore {
     return (
       this.db.query<{ sequence: number }, []>("SELECT COALESCE(MAX(server_sequence), 0) AS sequence FROM operations").get()
         ?.sequence ?? 0
+    );
+  }
+
+  /**
+   * The global sequence leaks the existence and write rate of groups the caller
+   * is not in, so every actor-facing response uses this scoped maximum instead.
+   */
+  latestSequenceFor(actorId: string): number {
+    return (
+      this.db
+        .query<{ sequence: number }, [string]>(
+          `SELECT COALESCE(MAX(o.server_sequence), 0) AS sequence FROM operations o
+           JOIN group_members gm ON gm.group_id = o.group_id
+           WHERE gm.user_id = ? AND gm.status = 'active' AND o.status = 'accepted'`,
+        )
+        .get(actorId)?.sequence ?? 0
     );
   }
 
@@ -231,7 +253,7 @@ export class LedgerStore {
     }
     if (operation.actorId !== actorId) return "ACTOR_MISMATCH";
     if (!isOperationType(operation.type)) return "UNKNOWN_OPERATION_TYPE";
-    if (!this.isActiveMember(operation.groupId, actorId)) return "NOT_A_GROUP_MEMBER";
+    if (operation.type !== "GroupCreated" && !this.isActiveMember(operation.groupId, actorId)) return "NOT_A_GROUP_MEMBER";
     const device = this.db
       .query<DeviceRow, [string]>("SELECT id, user_id, public_key_jwk, status FROM devices WHERE id = ?")
       .get(operation.deviceId);
@@ -276,7 +298,7 @@ export class LedgerStore {
       duplicates: [],
       conflicts: [],
       rejected: [],
-      latestServerSequence: this.latestSequence,
+      latestServerSequence: this.latestSequenceFor(actorId),
       generation: this.generation,
     };
 
@@ -320,7 +342,7 @@ export class LedgerStore {
       }
     }
 
-    result.latestServerSequence = this.latestSequence;
+    result.latestServerSequence = this.latestSequenceFor(actorId);
     return result;
   }
 
@@ -401,11 +423,62 @@ export class LedgerStore {
     return Number(result.lastInsertRowid);
   }
 
+  /**
+   * Membership is checked against the group the operation *declares*, so without
+   * this every active member of any group could mutate an expense in any other
+   * group by targeting its id. Confines the write to the row's real owner group.
+   */
+  private assertTargetGroup(table: "expenses" | "payments", targetId: string, groupId: string): { status: string } | null {
+    const existing = this.db
+      .query<{ group_id: string; status: string }, [string]>(`SELECT group_id, status FROM ${table} WHERE id = ?`)
+      .get(targetId);
+    if (!existing) return null;
+    if (existing.group_id !== groupId) throw new Error("Target belongs to another group");
+    return { status: existing.status };
+  }
+
   private applyProjection(operation: OperationEnvelope, version: number, receivedAt: string): void {
+    if (operation.type === "GroupCreated") {
+      if (operation.groupId !== operation.targetId) throw new TypeError("A new group must target its own group id");
+      const payload = jsonObject(operation.payload);
+      const name = requiredString(payload, "name", 100);
+      const settlementCurrency = requiredString(payload, "settlementCurrency", 3).toUpperCase();
+      if (!/^[A-Z]{3}$/.test(settlementCurrency)) throw new TypeError("settlementCurrency must be a three-letter ISO code");
+      const profile = this.db.query<{ displayName: string; email: string | null }, [string]>(
+        `SELECT display_name AS displayName, email
+         FROM group_members WHERE user_id = ? ORDER BY joined_at LIMIT 1`,
+      ).get(operation.actorId);
+      this.db.query(
+        "INSERT INTO groups(id, name, settlement_currency, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
+      ).run(operation.groupId, name, settlementCurrency, operation.actorId, receivedAt);
+      this.db.query(
+        `INSERT INTO group_members(group_id, user_id, display_name, email, status, joined_at)
+         VALUES (?, ?, ?, ?, 'active', ?)`,
+      ).run(operation.groupId, operation.actorId, profile?.displayName ?? operation.actorId, profile?.email ?? null, receivedAt);
+      return;
+    }
+
     if (operation.type === "ExpenseCreated" || operation.type === "ExpenseAmended") {
       const payload = parseExpensePayload(operation.payload);
       this.assertActiveParticipants(operation.groupId, "payers", payload.payers);
       this.assertActiveParticipants(operation.groupId, "allocations", payload.allocations);
+
+      const settlementCurrency = this.db
+        .query<{ settlement_currency: string }, [string]>("SELECT settlement_currency FROM groups WHERE id = ?")
+        .get(operation.groupId)?.settlement_currency;
+      if (!settlementCurrency) throw new Error("Group does not exist");
+      if (payload.currency !== settlementCurrency) {
+        throw new Error(`Expense currency must match the group settlement currency (${settlementCurrency})`);
+      }
+
+      const existing = this.assertTargetGroup("expenses", operation.targetId, operation.groupId);
+      if (operation.type === "ExpenseCreated") {
+        if (existing) throw new Error("Expense already exists");
+      } else {
+        if (!existing) throw new Error("Expense does not exist");
+        if (existing.status !== "active") throw new Error("A voided expense cannot be amended");
+      }
+
       this.db
         .query(
           `INSERT INTO expenses(
@@ -419,7 +492,6 @@ export class LedgerStore {
             currency = excluded.currency,
             expense_date = excluded.expense_date,
             notes = excluded.notes,
-            status = 'active',
             version = excluded.version,
             updated_at = excluded.updated_at`,
         )
@@ -453,14 +525,29 @@ export class LedgerStore {
     }
 
     if (operation.type === "ExpenseVoided") {
+      this.assertTargetGroup("expenses", operation.targetId, operation.groupId);
       const result = this.db
-        .query("UPDATE expenses SET status = 'voided', version = ?, updated_at = ? WHERE id = ?")
-        .run(version, receivedAt, operation.targetId);
+        .query("UPDATE expenses SET status = 'voided', version = ?, updated_at = ? WHERE id = ? AND group_id = ?")
+        .run(version, receivedAt, operation.targetId, operation.groupId);
+      if (result.changes !== 1) throw new Error("Expense does not exist");
+      return;
+    }
+
+    if (operation.type === "ExpenseRestored") {
+      const existing = this.assertTargetGroup("expenses", operation.targetId, operation.groupId);
+      if (!existing) throw new Error("Expense does not exist");
+      if (existing.status !== "voided") throw new Error("Only a voided expense can be restored");
+      const result = this.db
+        .query("UPDATE expenses SET status = 'active', version = ?, updated_at = ? WHERE id = ? AND group_id = ?")
+        .run(version, receivedAt, operation.targetId, operation.groupId);
       if (result.changes !== 1) throw new Error("Expense does not exist");
       return;
     }
 
     if (operation.type === "CommentAdded") {
+      if (!this.assertTargetGroup("expenses", operation.targetId, operation.groupId)) {
+        throw new Error("Expense does not exist");
+      }
       const payload = jsonObject(operation.payload);
       this.db
         .query("INSERT INTO comments(id, group_id, target_id, actor_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)")
@@ -479,10 +566,22 @@ export class LedgerStore {
       const payload = jsonObject(operation.payload);
       const payerId = requiredString(payload, "payerId", 100);
       const recipientId = requiredString(payload, "recipientId", 100);
+      if (payerId === recipientId) throw new TypeError("A payment cannot have the same payer and recipient");
       this.assertActiveParticipants(operation.groupId, "payment", [
         { participantId: payerId, amountMinor: 0 },
         { participantId: recipientId, amountMinor: 0 },
       ]);
+      const settlementCurrency = this.db
+        .query<{ settlement_currency: string }, [string]>("SELECT settlement_currency FROM groups WHERE id = ?")
+        .get(operation.groupId)?.settlement_currency;
+      if (!settlementCurrency) throw new Error("Group does not exist");
+      const currency = requiredCurrency(payload, "currency");
+      if (currency !== settlementCurrency) {
+        throw new Error(`Payment currency must match the group settlement currency (${settlementCurrency})`);
+      }
+      if (this.assertTargetGroup("payments", operation.targetId, operation.groupId)) {
+        throw new Error("Payment already exists");
+      }
       this.db
         .query(
           `INSERT INTO payments(
@@ -496,7 +595,7 @@ export class LedgerStore {
           payerId,
           recipientId,
           requiredMinor(payload, "amountMinor"),
-          requiredString(payload, "currency", 3).toUpperCase(),
+          currency,
           requiredString(payload, "paymentDate", 32),
           optionalString(payload, "note"),
           version,
@@ -507,9 +606,12 @@ export class LedgerStore {
     }
 
     if (operation.type === "PaymentReversed") {
+      const existing = this.assertTargetGroup("payments", operation.targetId, operation.groupId);
+      if (!existing) throw new Error("Payment does not exist");
+      if (existing.status !== "active") throw new Error("Payment is already reversed");
       const result = this.db
-        .query("UPDATE payments SET status = 'reversed', version = ?, updated_at = ? WHERE id = ?")
-        .run(version, receivedAt, operation.targetId);
+        .query("UPDATE payments SET status = 'reversed', version = ?, updated_at = ? WHERE id = ? AND group_id = ?")
+        .run(version, receivedAt, operation.targetId, operation.groupId);
       if (result.changes !== 1) throw new Error("Payment does not exist");
     }
   }
@@ -551,7 +653,7 @@ export class LedgerStore {
          GROUP BY o.group_id ORDER BY o.group_id`,
       )
       .all(actorId);
-    return { generation: this.generation, latestServerSequence: this.latestSequence, groups };
+    return { generation: this.generation, latestServerSequence: this.latestSequenceFor(actorId), groups };
   }
 
   snapshot(actorId: string): { groups: unknown[]; expenses: unknown[]; members: unknown[] } {

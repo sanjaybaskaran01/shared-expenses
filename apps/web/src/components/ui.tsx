@@ -3,7 +3,7 @@ import { splitProps, type JSX } from "solid-js";
 import { cn } from "../lib/cn";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+  "ui-button inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       variant: {
@@ -31,7 +31,7 @@ export function Button(props: ButtonProps) {
 
 export function Card(props: JSX.HTMLAttributes<HTMLElement>) {
   const [local, rest] = splitProps(props, ["class"]);
-  return <section class={cn("rounded-xl border border-border bg-card text-card-foreground shadow-sm", local.class)} {...rest} />;
+  return <section class={cn("ui-card rounded-xl border border-border bg-card text-card-foreground shadow-sm", local.class)} {...rest} />;
 }
 
 export function Badge(props: JSX.HTMLAttributes<HTMLSpanElement>) {

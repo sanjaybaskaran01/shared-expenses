@@ -43,7 +43,7 @@ export async function registerDevice(input: {
   await apiFetch("/api/v1/devices/register", { method: "POST", body: JSON.stringify(input) });
 }
 
-export async function inviteGroupMember(groupId: string, input: { email: string; displayName: string }): Promise<void> {
+export async function inviteGroupMember(groupId: string, input: { email: string }): Promise<void> {
   await apiFetch(`/api/v1/groups/${encodeURIComponent(groupId)}/invitations`, {
     method: "POST",
     body: JSON.stringify(input),
@@ -59,6 +59,10 @@ export function pushOperations(operations: OperationEnvelope[]): Promise<SyncPus
     method: "POST",
     body: JSON.stringify({ operations }),
   });
+}
+
+export function sendFeedback(input: { category: "bug" | "idea"; message: string; pageUrl?: string }): Promise<void> {
+  return apiFetch("/api/v1/feedback", { method: "POST", body: JSON.stringify(input) });
 }
 
 export function pullOperations(after: number): Promise<{

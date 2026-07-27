@@ -1,0 +1,146 @@
+import { Dialog } from "@kobalte/core/dialog";
+import { Bug, Check, LoaderCircle, Lightbulb, MessageCircle, X } from "lucide-solid";
+import { Show, createSignal, onCleanup } from "solid-js";
+import { sendFeedback } from "../lib/api";
+import { cn } from "../lib/cn";
+import { Button } from "./ui";
+
+type FeedbackCategory = "bug" | "idea";
+
+export function FeedbackButton(props: { compact?: boolean; class?: string }) {
+  const [open, setOpen] = createSignal(false);
+  const [category, setCategory] = createSignal<FeedbackCategory>("bug");
+  const [message, setMessage] = createSignal("");
+  const [sending, setSending] = createSignal(false);
+  const [sent, setSent] = createSignal(false);
+  const [error, setError] = createSignal("");
+  let resetTimer: number | undefined;
+  let closeTimer: number | undefined;
+
+  onCleanup(() => {
+    if (resetTimer !== undefined) window.clearTimeout(resetTimer);
+    if (closeTimer !== undefined) window.clearTimeout(closeTimer);
+  });
+
+  function handleOpenChange(next: boolean): void {
+    if (resetTimer !== undefined) window.clearTimeout(resetTimer);
+    setOpen(next);
+    if (!next) {
+      resetTimer = window.setTimeout(() => {
+        setCategory("bug");
+        setMessage("");
+        setSending(false);
+        setSent(false);
+        setError("");
+        resetTimer = undefined;
+      }, 200);
+    }
+  }
+
+  async function submit(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    setSending(true);
+    setError("");
+    try {
+      await sendFeedback({ category: category(), message: message().trim(), pageUrl: window.location.href });
+      setSent(true);
+      if (closeTimer !== undefined) window.clearTimeout(closeTimer);
+      closeTimer = window.setTimeout(() => {
+        closeTimer = undefined;
+        handleOpenChange(false);
+      }, 1400);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Could not send this — try again");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size={props.compact ? "icon" : "sm"}
+        class={cn(props.compact ? "" : "w-full justify-start gap-2", props.class)}
+        onClick={() => handleOpenChange(true)}
+        aria-label="Send feedback"
+      >
+        <MessageCircle size={16} /> <Show when={!props.compact}>Feedback</Show>
+      </Button>
+      <Dialog open={open()} onOpenChange={handleOpenChange}>
+        <Dialog.Portal>
+          <Dialog.Overlay class="fixed inset-0 z-40 bg-black/45 data-[expanded]:animate-in data-[closed]:animate-out" />
+          <div class="fixed inset-0 z-50 grid items-end sm:place-items-center sm:p-6">
+            <Dialog.Content class="w-full overflow-y-auto rounded-t-xl border border-border bg-card shadow-xl outline-none sm:max-w-md sm:rounded-xl">
+              <header class="flex h-14 items-center justify-between border-b border-border px-5">
+                <Dialog.Title class="text-base font-semibold">Send feedback</Dialog.Title>
+                <Dialog.CloseButton
+                  class="grid size-9 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label="Close feedback form"
+                >
+                  <X size={17} />
+                </Dialog.CloseButton>
+              </header>
+              <Show
+                when={!sent()}
+                fallback={
+                  <div class="grid place-items-center gap-3 px-6 py-12 text-center">
+                    <span class="grid size-11 place-items-center rounded-full bg-emerald-50 text-emerald-700">
+                      <Check size={20} />
+                    </span>
+                    <p class="text-sm font-medium">Thanks — we got it.</p>
+                  </div>
+                }
+              >
+                <form class="grid gap-4 p-5 sm:p-6" onSubmit={(event) => void submit(event)}>
+                  <div class="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      class="flex items-center justify-center gap-2 rounded-md border border-border px-3 py-2.5 text-sm font-medium transition-colors hover:bg-muted"
+                      classList={{ "border-primary bg-primary/5 ring-1 ring-primary": category() === "bug" }}
+                      onClick={() => setCategory("bug")}
+                      aria-pressed={category() === "bug"}
+                    >
+                      <Bug size={16} /> Bug
+                    </button>
+                    <button
+                      type="button"
+                      class="flex items-center justify-center gap-2 rounded-md border border-border px-3 py-2.5 text-sm font-medium transition-colors hover:bg-muted"
+                      classList={{ "border-primary bg-primary/5 ring-1 ring-primary": category() === "idea" }}
+                      onClick={() => setCategory("idea")}
+                      aria-pressed={category() === "idea"}
+                    >
+                      <Lightbulb size={16} /> Idea
+                    </button>
+                  </div>
+                  <label class="grid gap-2 text-sm font-medium">
+                    {category() === "bug" ? "What went wrong?" : "What would help?"}
+                    <textarea
+                      class="form-control min-h-28 resize-y py-2"
+                      autofocus
+                      required
+                      maxlength={4000}
+                      value={message()}
+                      onInput={(event) => setMessage(event.currentTarget.value)}
+                      placeholder={category() === "bug" ? "Tell us what happened…" : "Tell us what you'd like to see…"}
+                    />
+                  </label>
+                  <Show when={error()}>
+                    <p class="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700" role="alert">
+                      {error()}
+                    </p>
+                  </Show>
+                  <Button type="submit" disabled={sending() || !message().trim()}>
+                    <Show when={sending()} fallback={<><Check size={16} /> Send</>}>
+                      <LoaderCircle class="animate-spin" size={16} /> Sending…
+                    </Show>
+                  </Button>
+                </form>
+              </Show>
+            </Dialog.Content>
+          </div>
+        </Dialog.Portal>
+      </Dialog>
+    </>
+  );
+}
