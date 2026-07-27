@@ -1,7 +1,7 @@
 # Shared-expense app — product audit, PRD, and build prompt
 
 Date: July 25, 2026
-Reference product: Splitwise for iPhone, inspected through iPhone Mirroring in an authenticated account
+Reference product: an established shared-expense iPhone app, inspected through iPhone Mirroring in an authenticated account
 Scope: A functionally close shared-expense product with original branding and original visual assets
 
 ## 1. Research method and confidence labels
@@ -9,7 +9,7 @@ Scope: A functionally close shared-expense product with original branding and or
 This document combines:
 
 - **Observed:** directly inspected in the signed-in iPhone app by opening screens and non-destructive controls.
-- **Documented:** corroborated by Splitwise's current official site, official help center, or App Store listing.
+- **Documented:** corroborated by the reference product's current official site, official help center, or App Store listing.
 - **Inferred:** required to make an observed flow complete, but inaccessible because the account was authenticated, the free daily expense cap had been reached, a camera was unavailable through iPhone Mirroring, or a Pro subscription was not purchased.
 
 No Pro purchase or free trial was started. No expense, payment, comment, reminder, invite, account change, group change, deletion, QR reset, notification change, or security change was submitted. Destructive controls were identified but not activated.
@@ -283,7 +283,7 @@ Status: observed for recording; documented for regional integrations.
 - **Record payment** records a transfer that happened outside the app and clearly states that no money will move.
 - A recorded payment is a ledger event and should be editable/commentable/restorable according to permissions.
 - Regional real-money integrations may include:
-  - Splitwise Pay in the US;
+  - a first-party wallet in the US;
   - Venmo and PayPal where supported;
   - Pay by Bank in select European countries;
   - additional local integrations behind feature flags.
@@ -597,7 +597,7 @@ At minimum, automate these:
 
 ## 13. Risks and deliberate boundaries
 
-- **Trademark/UI risk:** use original branding and artwork; reproduce workflows, not Splitwise's identity.
+- **Trademark/UI risk:** use original branding and artwork; reproduce workflows, not another product's identity.
 - **Financial correctness:** calculations and auditability are more important than animation polish.
 - **Permissions parity:** open group editing is surprising; explain it and provide audit/notification safeguards.
 - **Currency conversion:** it mutates historical monetary meaning; gate it with warnings and an audit batch.
@@ -609,7 +609,7 @@ At minimum, automate these:
 ## 14. Copy/paste implementation prompt
 
 ```text
-You are a senior product engineer and product designer. Build a production-quality, mobile-first shared-expense application inspired by the functional behavior of Splitwise, but use an original product name, logo, visual system, illustrations, icons, category artwork, and copy. Do not copy Splitwise source code or proprietary assets.
+You are a senior product engineer and product designer. Build a production-quality, mobile-first shared-expense application inspired by the functional behavior of established shared-expense apps, but use an original product name, logo, visual system, illustrations, icons, category artwork, and copy. Do not copy any third-party source code or proprietary assets.
 
 Start by reading the full PRD in this prompt and convert it into a tracked implementation plan. Make reasonable decisions without asking routine questions. If the repository already has a stack, preserve it; otherwise use:
 
@@ -714,13 +714,9 @@ Before declaring completion, run lint, typecheck, unit tests, end-to-end tests, 
 
 ## 15. Sources
 
-- [Splitwise official homepage and feature inventory](https://www.splitwise.com/)
-- [Splitwise official Pro feature page](https://www.splitwise.com/pro)
-- [Splitwise Help: How do I use Splitwise?](https://kb.splitwise.com/getting-started/how-do-i-use-splitwise)
-- [Splitwise Help: What is Splitwise Pro?](https://kb.splitwise.com/pro/what-is-splitwise-pro)
-- [Splitwise Help: Ways to split an expense](https://kb.splitwise.com/balances-and-expenses/what-are-different-ways-i-can-split-an-expense)
-- [Splitwise Help: Multiple currencies](https://kb.splitwise.com/balances-and-expenses/how-can-i-manage-a-friendship-or-group-with-multiple-currencies)
-- [Splitwise Help: Payment integrations](https://kb.splitwise.com/payment-integrations/how-do-i-send-money-to-someone-on-splitwise)
-- [Splitwise Help: Group permissions](https://kb.splitwise.com/groups/can-i-prevent-group-members-from-changing-expenses-or-set-permissions)
-- [Splitwise Help: Delete or undelete a group](https://kb.splitwise.com/groups/how-do-i-delete-or-undelete-a-group)
-- [Splitwise App Store listing](https://apps.apple.com/us/app/splitwise/id458023433)
+This audit was compiled from the reference product's public marketing site, its
+public help centre, its App Store listing, and a hands-on inspection of the
+installed iPhone app in an authenticated account. Specific vendors and URLs are
+deliberately omitted: this document describes the shared-expense product
+category, and nothing here reproduces any third party's branding, copy, or code.
+

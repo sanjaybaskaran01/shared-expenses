@@ -43,6 +43,22 @@ export interface LocalExpense {
   syncStatus: SyncStatus;
 }
 
+export interface LocalPayment {
+  id: string;
+  groupId: string;
+  payerId: string;
+  recipientId: string;
+  amountMinor: number;
+  currency: string;
+  paymentDate: string;
+  note: string;
+  status: "active" | "reversed";
+  version: number;
+  recordedBy: string;
+  updatedAt: string;
+  syncStatus: SyncStatus;
+}
+
 export interface DeviceRecord {
   id: "current";
   deviceId: string;
@@ -61,6 +77,7 @@ export class ExpensesDatabase extends Dexie {
   groups!: EntityTable<LocalGroup, "id">;
   members!: EntityTable<LocalMember, "id">;
   expenses!: EntityTable<LocalExpense, "id">;
+  payments!: EntityTable<LocalPayment, "id">;
   devices!: EntityTable<DeviceRecord, "id">;
   settings!: EntityTable<SettingRecord, "key">;
 
@@ -73,6 +90,9 @@ export class ExpensesDatabase extends Dexie {
       expenses: "id, groupId, expenseDate, status, syncStatus, updatedAt",
       devices: "id, deviceId, actorId",
       settings: "key",
+    });
+    this.version(2).stores({
+      payments: "id, groupId, paymentDate, status, syncStatus, updatedAt",
     });
   }
 }

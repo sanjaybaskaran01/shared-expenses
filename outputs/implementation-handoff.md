@@ -29,9 +29,9 @@ Verification at handoff:
 
 ## Asset generation
 
-The creative direction began with ImageGen and was deliberately constrained away from Splitwise branding. The exact prompt was:
+The creative direction began with ImageGen and was deliberately constrained away from existing finance-app branding. The exact prompt was:
 
-> Create an original app icon and compact brand-mark concept for a privacy-minded, offline-first shared-expense ledger called “Expenses.” Use a dark midnight-navy rounded-square background. Center three small interlocking ledger tiles or cards that suggest shared records and reconciliation: one indigo, one teal, one coral. Add minimal abstract line marks suggesting entries and a subtle central check/reconciliation motif. Crisp vector-like geometry, high contrast, friendly but serious fintech feel, excellent legibility at 32px and 512px. No words, letters, currency symbols, people, mascot, gradient-heavy gloss, coins, arrows copied from existing finance apps, or resemblance to the Splitwise logo. Square 1:1 composition with generous safe-area padding, suitable for an iOS/PWA app icon and as the basis of a simple SVG brand mark.
+> Create an original app icon and compact brand-mark concept for a privacy-minded, offline-first shared-expense ledger called “Expenses.” Use a dark midnight-navy rounded-square background. Center three small interlocking ledger tiles or cards that suggest shared records and reconciliation: one indigo, one teal, one coral. Add minimal abstract line marks suggesting entries and a subtle central check/reconciliation motif. Crisp vector-like geometry, high contrast, friendly but serious fintech feel, excellent legibility at 32px and 512px. No words, letters, currency symbols, people, mascot, gradient-heavy gloss, coins, arrows copied from existing finance apps, or resemblance to any existing shared-expense app logo. Square 1:1 composition with generous safe-area padding, suitable for an iOS/PWA app icon and as the basis of a simple SVG brand mark.
 
 That raster concept is retained as design provenance. Production icons do not depend on a nondeterministic generation step: `apps/web/public/brand-mark.svg` is an original, hand-defined geometric mark, and `apps/web/scripts/generate-assets.ts` uses Sharp to reproduce the 192px, 512px, maskable, Apple touch, and Open Graph PNG assets.
 

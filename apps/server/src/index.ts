@@ -251,7 +251,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     return json(request, {
       operations: ledger.pull(actorId, after),
       generation: ledger.generation,
-      latestServerSequence: ledger.latestSequence,
+      latestServerSequence: ledger.latestSequenceFor(actorId),
     });
   }
 
@@ -268,7 +268,9 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
         const actorSubscribers = subscribers.get(actorId) ?? new Set();
         actorSubscribers.add(nextController);
         subscribers.set(actorId, actorSubscribers);
-        nextController.enqueue(encoder.encode(`event: ready\ndata: ${JSON.stringify({ sequence: ledger.latestSequence })}\n\n`));
+        nextController.enqueue(
+          encoder.encode(`event: ready\ndata: ${JSON.stringify({ sequence: ledger.latestSequenceFor(actorId) })}\n\n`),
+        );
         heartbeat = setInterval(() => {
           try {
             nextController.enqueue(encoder.encode(": keepalive\n\n"));

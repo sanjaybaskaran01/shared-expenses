@@ -2,7 +2,7 @@
 
 Expenses is an installable, offline-first shared-expense ledger. A phone writes each expense to IndexedDB before any network request, signs the operation with a per-device P-256 key, and reconciles it with a Bun/SQLite server whenever the server is reachable.
 
-This repository is an original implementation inspired by the shared-expense product category. It does not use Splitwise branding, source code, or proprietary assets.
+This repository is an original implementation inspired by the shared-expense product category. It does not use any third-party branding, source code, or proprietary assets.
 
 ## Current milestone
 
@@ -168,7 +168,7 @@ The default bindings expose the API and web container on localhost only. Put you
 
 ## Product and infrastructure documents
 
-- [Product requirements and build prompt](outputs/splitwise-replica-prd-and-build-prompt.md)
+- [Product requirements and build prompt](outputs/shared-expense-prd-and-build-prompt.md)
 - [Accepted zero-cost infrastructure plan](outputs/zero-cost-fast-stack-infrastructure-plan.md)
 
 ## License
