@@ -1,9 +1,9 @@
 import { mkdirSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type { JsonValue, OperationEnvelope, SyncPushRequest } from "@expenses/protocol";
 import { getMigrations } from "better-auth/db/migration";
-import { createAuth } from "./auth";
+import { createAuth, deriveDisplayNameFromEmail } from "./auth";
 import { loadConfig } from "./config";
 import { openDatabase, runDomainMigrations } from "./database";
 import { enqueueEmail, startEmailWorker } from "./email";
@@ -48,6 +48,10 @@ function json(request: Request, value: unknown, status = 200): Response {
 
 function errorResponse(request: Request, status: number, code: string, message: string): Response {
   return json(request, { error: { code, message } }, status);
+}
+
+function safeSubjectLabel(value: string): string {
+  return value.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) || "an Expenses user";
 }
 
 async function currentActor(request: Request): Promise<string | null> {
@@ -167,15 +171,15 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
       "SELECT 1 AS one FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'active'",
     ).get(groupId, actorId);
     if (!membership) return errorResponse(request, 403, "NOT_A_GROUP_MEMBER", "Active group membership is required");
-    const body = await bodyJson<{ email?: string; displayName?: string }>(request);
+    const body = await bodyJson<{ email?: string }>(request);
     const email = body.email?.trim().toLowerCase() ?? "";
-    const displayName = body.displayName?.trim() ?? "";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 320) {
       return errorResponse(request, 400, "INVALID_EMAIL", "Enter a valid email address");
     }
-    if (!displayName || displayName.length > 100) {
-      return errorResponse(request, 400, "INVALID_NAME", "Display name is required and must be at most 100 characters");
-    }
+    const existingUser = db.query<{ name: string }, [string]>(
+      `SELECT name FROM "user" WHERE lower(email) = ? LIMIT 1`,
+    ).get(email);
+    const displayName = existingUser?.name.trim() || deriveDisplayNameFromEmail(email);
     const duplicate = db.query<{ one: number }, [string, string]>(
       `SELECT 1 AS one FROM group_members
        WHERE group_id = ? AND lower(email) = ? AND status IN ('placeholder', 'active') LIMIT 1`,
@@ -184,6 +188,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
 
     const invitationId = randomUUID();
     const now = new Date().toISOString();
+    const placeholderUserId = `invite:${invitationId}`;
     db.transaction(() => {
       db.query(
         `INSERT INTO group_invitations(id, group_id, email, display_name, invited_by, status, created_at)
@@ -192,17 +197,68 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
       db.query(
         `INSERT INTO group_members(group_id, user_id, display_name, email, status, joined_at)
          VALUES (?, ?, ?, ?, 'placeholder', ?)`,
-      ).run(groupId, `invite:${invitationId}`, displayName, email, now);
-      const inviteUrl = `${config.webOrigin}/?email=${encodeURIComponent(email)}`;
-      enqueueEmail(db, {
-        idempotencyKey: `group-invite:${invitationId}`,
-        recipient: email,
-        subject: `${displayName}, you were invited to Expenses`,
-        text: `Open Expenses and request your secure sign-in link: ${inviteUrl}`,
-        html: `<p>You were invited to share expenses.</p><p><a href="${inviteUrl}">Accept invitation</a></p>`,
-      });
+      ).run(groupId, placeholderUserId, displayName, email, now);
     })();
+    try {
+      await auth.api.signInMagicLink({
+        headers: request.headers,
+        body: {
+          email,
+          name: displayName,
+          callbackURL: config.webOrigin,
+          newUserCallbackURL: config.webOrigin,
+          errorCallbackURL: `${config.webOrigin}/?auth=failed`,
+          metadata: { invitationId },
+        },
+      });
+    } catch {
+      db.transaction(() => {
+        db.query("DELETE FROM group_members WHERE group_id = ? AND user_id = ?").run(groupId, placeholderUserId);
+        db.query("DELETE FROM group_invitations WHERE id = ?").run(invitationId);
+      })();
+      return errorResponse(request, 503, "INVITE_EMAIL_FAILED", "The invitation could not be sent. Try again.");
+    }
     return json(request, { id: invitationId, email, status: "pending" }, 201);
+  }
+
+  if (url.pathname === "/api/v1/feedback" && request.method === "POST") {
+    const body = await bodyJson<{ category?: string; message?: string; pageUrl?: string }>(request);
+    const category = body.category === "bug" || body.category === "idea" ? body.category : null;
+    const message = body.message?.trim() ?? "";
+    if (!category) return errorResponse(request, 400, "INVALID_CATEGORY", 'category must be "bug" or "idea"');
+    if (!message || message.length > 4_000) {
+      return errorResponse(request, 400, "INVALID_MESSAGE", "Enter a message of at most 4000 characters");
+    }
+    const pageUrl = typeof body.pageUrl === "string" ? body.pageUrl.slice(0, 300) : "";
+    if (config.ownerEmail) {
+      const actorKey = createHash("sha256").update(actorId).digest("hex").slice(0, 24);
+      const recentCutoff = new Date(Date.now() - 15 * 60_000).toISOString();
+      const recentCount = db
+        .query<{ count: number }, [string, string]>(
+          "SELECT COUNT(*) AS count FROM email_outbox WHERE idempotency_key LIKE ? AND created_at >= ?",
+        )
+        .get(`feedback:${actorKey}:%`, recentCutoff)?.count ?? 0;
+      if (recentCount >= 5) {
+        return errorResponse(request, 429, "FEEDBACK_RATE_LIMITED", "Too many feedback messages. Try again shortly.");
+      }
+      const reporter = db
+        .query<{ email: string | null; name: string | null }, [string]>('SELECT email, name FROM "user" WHERE id = ?')
+        .get(actorId);
+      const reporterLabel = safeSubjectLabel(reporter?.name || reporter?.email || actorId);
+      const label = category === "bug" ? "Bug report" : "Feature request";
+      const contentKey = createHash("sha256")
+        .update(JSON.stringify({ actorId, category, message, pageUrl }))
+        .digest("hex");
+      enqueueEmail(db, {
+        idempotencyKey: `feedback:${actorKey}:${contentKey}`,
+        recipient: config.ownerEmail,
+        subject: `${label} from ${reporterLabel}`,
+        text: [message, "", `— ${reporterLabel}${reporter?.email ? ` (${reporter.email})` : ""}`, pageUrl ? `Page: ${pageUrl}` : ""]
+          .filter(Boolean)
+          .join("\n"),
+      });
+    }
+    return json(request, { status: "received" }, 201);
   }
 
   if (url.pathname === "/api/v1/snapshot" && request.method === "GET") {
@@ -224,7 +280,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     return json(request, {
       operations: ledger.pull(actorId, after),
       generation: ledger.generation,
-      latestServerSequence: ledger.latestSequence,
+      latestServerSequence: ledger.latestSequenceFor(actorId),
     });
   }
 
@@ -241,7 +297,9 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
         const actorSubscribers = subscribers.get(actorId) ?? new Set();
         actorSubscribers.add(nextController);
         subscribers.set(actorId, actorSubscribers);
-        nextController.enqueue(encoder.encode(`event: ready\ndata: ${JSON.stringify({ sequence: ledger.latestSequence })}\n\n`));
+        nextController.enqueue(
+          encoder.encode(`event: ready\ndata: ${JSON.stringify({ sequence: ledger.latestSequenceFor(actorId) })}\n\n`),
+        );
         heartbeat = setInterval(() => {
           try {
             nextController.enqueue(encoder.encode(": keepalive\n\n"));

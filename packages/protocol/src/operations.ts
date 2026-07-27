@@ -4,6 +4,7 @@ export const operationTypes = [
   "ExpenseCreated",
   "ExpenseAmended",
   "ExpenseVoided",
+  "ExpenseRestored",
   "CommentAdded",
   "PaymentRecorded",
   "PaymentReversed",
