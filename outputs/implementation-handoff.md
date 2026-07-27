@@ -46,7 +46,7 @@ No secret was requested or stored during implementation. Deployment needs:
 5. A private local data directory and an age backup identity/recipient.
 6. A decision to create and push the public GitHub repository; the code is committed locally first and contains no detected secret material.
 
-The Gmail From address remains `expenses@sanjaybaskaran.com` as requested. Because it is a Cloudflare-forwarded alias, Gmail/Outlook/iCloud delivery and DMARC alignment testing remain a launch gate.
+The Gmail From address remains `expenses@example.com` as requested. Because it is a Cloudflare-forwarded alias, Gmail/Outlook/iCloud delivery and DMARC alignment testing remain a launch gate.
 
 ## Scope boundary
 

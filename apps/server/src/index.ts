@@ -205,6 +205,33 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     return json(request, { id: invitationId, email, status: "pending" }, 201);
   }
 
+  if (url.pathname === "/api/v1/feedback" && request.method === "POST") {
+    const body = await bodyJson<{ category?: string; message?: string; pageUrl?: string }>(request);
+    const category = body.category === "bug" || body.category === "idea" ? body.category : null;
+    const message = body.message?.trim() ?? "";
+    if (!category) return errorResponse(request, 400, "INVALID_CATEGORY", 'category must be "bug" or "idea"');
+    if (!message || message.length > 4_000) {
+      return errorResponse(request, 400, "INVALID_MESSAGE", "Enter a message of at most 4000 characters");
+    }
+    const pageUrl = typeof body.pageUrl === "string" ? body.pageUrl.slice(0, 300) : "";
+    if (config.ownerEmail) {
+      const reporter = db
+        .query<{ email: string | null; name: string | null }, [string]>('SELECT email, name FROM "user" WHERE id = ?')
+        .get(actorId);
+      const reporterLabel = reporter?.name || reporter?.email || actorId;
+      const label = category === "bug" ? "Bug report" : "Feature request";
+      enqueueEmail(db, {
+        idempotencyKey: `feedback:${randomUUID()}`,
+        recipient: config.ownerEmail,
+        subject: `${label} from ${reporterLabel}`,
+        text: [message, "", `— ${reporterLabel}${reporter?.email ? ` (${reporter.email})` : ""}`, pageUrl ? `Page: ${pageUrl}` : ""]
+          .filter(Boolean)
+          .join("\n"),
+      });
+    }
+    return json(request, { status: "received" }, 201);
+  }
+
   if (url.pathname === "/api/v1/snapshot" && request.method === "GET") {
     return json(request, { ...ledger.snapshot(actorId), manifest: ledger.manifest(actorId) });
   }

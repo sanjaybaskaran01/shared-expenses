@@ -103,11 +103,11 @@ export function createAuth(db: Database, config: AppConfig) {
       ...(config.nodeEnv === "production"
         ? { ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] } }
         : {}),
-      ...(config.nodeEnv === "production"
+      ...(config.nodeEnv === "production" && config.cookieDomain
         ? {
             crossSubDomainCookies: {
               enabled: true,
-              domain: ".expenses.sanjaybaskaran.com",
+              domain: config.cookieDomain,
             },
           }
         : {}),

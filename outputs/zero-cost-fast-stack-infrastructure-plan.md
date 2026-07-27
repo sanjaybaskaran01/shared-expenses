@@ -8,7 +8,7 @@ Product: offline-first shared-expense PWA
 
 Build the product as a local-first SolidJS PWA with a Bun/SQLite synchronization server running on the existing M1 MacBook Pro.
 
-The production PWA shell is deployed as static assets to Cloudflare Pages at `expenses.sanjaybaskaran.com`. The Mac exposes only the API through Cloudflare Tunnel at `api.sanjaybaskaran.com`. Consequently, the interface can still open quickly when the Mac is unavailable, and a previously authenticated phone can continue creating signed ledger operations in IndexedDB. Synchronization resumes when the Mac returns.
+The production PWA shell is deployed as static assets to Cloudflare Pages at `expenses.example.com`. The Mac exposes only the API through Cloudflare Tunnel at `api.expenses.example.com`. Consequently, the interface can still open quickly when the Mac is unavailable, and a previously authenticated phone can continue creating signed ledger operations in IndexedDB. Synchronization resumes when the Mac returns.
 
 The intended incremental infrastructure cost for v1 is **$0/month**, excluding costs already being paid for the domain, home internet, electricity, and existing iCloud storage. The design deliberately accepts manual recovery after a cold reboot and has no paid uptime SLA.
 
@@ -17,7 +17,7 @@ The intended incremental infrastructure cost for v1 is **$0/month**, excluding c
 ```mermaid
 flowchart LR
     Phone["Installed SolidJS PWA\nIndexedDB ledger + receipt queue"]
-    Pages["Cloudflare Pages\nexpenses.sanjaybaskaran.com\nstatic assets"]
+    Pages["Cloudflare Pages\nexpenses.example.com\nstatic assets"]
     Edge["Cloudflare edge\nTLS, DNS, DDoS protection"]
     Tunnel["Cloudflare Tunnel\noutbound-only cloudflared"]
     API["Bun API on macOS\n127.0.0.1 only\nlaunchd managed"]
@@ -152,14 +152,14 @@ Required behavior:
 - Signed single-use link with a short-code fallback.
 - Successful verification claims the placeholder participant and joins the invited group.
 - Automatic sign-in after verification, followed by name/password setup.
-- Cookie sessions shared only across the required `expenses.sanjaybaskaran.com` subtree.
+- Cookie sessions shared only across the required `expenses.example.com` subtree.
 - Exact trusted-origin allowlist; never disable CSRF or origin checks.
 - Previously verified devices retain an offline device grant.
 - Explicit sign-out removes the grant and locally cached financial data.
 
 ### Gmail SMTP decision
 
-Gmail SMTP is configured through `smtp.gmail.com:465` with TLS and a Google app password. The `From` header is `expenses@sanjaybaskaran.com`, which is currently a Cloudflare-forwarded alias to a personal Gmail account. This was an explicit accepted choice.
+Gmail SMTP is configured through `smtp.gmail.com:465` with TLS and a Google app password. The `From` header is `expenses@example.com`, which is currently a Cloudflare-forwarded alias to a personal Gmail account. This was an explicit accepted choice.
 
 Important launch gate: a forwarding alias is not an authenticated outgoing mailbox, and the domain currently uses strict DMARC alignment. Before inviting users, send test messages to Gmail, Outlook, and iCloud and inspect `Authentication-Results` for SPF, DKIM, and DMARC behavior. The admin UI must display delivery failure rather than claiming an email was sent successfully. Google may expose the underlying Gmail address or reject the alias From behavior.
 

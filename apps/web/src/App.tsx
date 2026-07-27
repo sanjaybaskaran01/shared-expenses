@@ -21,6 +21,7 @@ import {
 import { For, Match, Show, Switch, createMemo, createResource, createSignal, onMount } from "solid-js";
 import { BrandMark } from "./components/BrandMark";
 import { ExpenseComposer } from "./components/ExpenseComposer";
+import { FeedbackButton } from "./components/FeedbackDialog";
 import { Avatar, Badge, Button, Card } from "./components/ui";
 import { inviteGroupMember } from "./lib/api";
 import { authClient, getOfflineActorId, signOutAndClearLocalLedger } from "./lib/auth";
@@ -308,13 +309,13 @@ function AuthenticatedApp(props: { actorId: string }) {
             </Button>
           )}</For>
         </nav>
-        <div class="mt-auto border-t border-border p-3"><ConnectionBadge /><p class="px-2 pt-1 text-xs leading-5 text-muted-foreground">Expenses save on this device before syncing.</p></div>
+        <div class="mt-auto border-t border-border p-3"><ConnectionBadge /><FeedbackButton class="mt-1" /><p class="px-2 pt-1 text-xs leading-5 text-muted-foreground">Expenses save on this device before syncing.</p></div>
       </aside>
 
       <div class="min-w-0">
         <header class="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-border bg-background/95 px-4 backdrop-blur md:hidden">
           <div class="flex items-center gap-2"><BrandMark size={28} /><strong class="text-sm font-semibold">Expenses</strong></div>
-          <ConnectionBadge />
+          <div class="flex items-center gap-1"><FeedbackButton compact /><ConnectionBadge /></div>
         </header>
         <main class="mx-auto w-full max-w-6xl px-4 py-6 pb-24 sm:px-6 sm:py-8 md:px-8 md:pb-10 lg:px-10">
           <Switch>
