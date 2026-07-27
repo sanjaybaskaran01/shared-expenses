@@ -1,7 +1,8 @@
 import { Dialog } from "@kobalte/core/dialog";
-import { Check, ChevronDown, ChevronRight, ChevronUp, LoaderCircle, SlidersHorizontal, UsersRound, X } from "lucide-solid";
+import { Check, ChevronDown, ChevronRight, ChevronUp, LoaderCircle, SlidersHorizontal, UsersRound } from "lucide-solid";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { LocalExpense } from "../lib/db";
+import { isLocalToday, localDateValue } from "../lib/dates";
 import { appStore, calculateExpenseAllocations, calculateExpensePayers, createExpense, updateExpense, type SplitMethod } from "../lib/store";
 import { Avatar, Button } from "./ui";
 
@@ -18,11 +19,10 @@ interface ExpenseComposerProps {
 }
 
 const splitMethods: Array<{ id: SplitMethod; label: string }> = [
-  { id: "equal", label: "Equal" },
-  { id: "exact", label: "Amounts" },
-  { id: "percentage", label: "%" },
+  { id: "equal", label: "Evenly" },
   { id: "shares", label: "Shares" },
-  { id: "adjustment", label: "Adjust" },
+  { id: "exact", label: "Exact" },
+  { id: "percentage", label: "%" },
 ];
 
 const categories = ["General", "Dining out", "Groceries", "Liquor", "Rent", "Household supplies", "Utilities", "Transportation", "Gas/fuel", "Taxi", "Plane", "Hotel", "Entertainment", "Games", "Medical expenses", "Gifts", "Education", "Pets"];
@@ -41,7 +41,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   const [description, setDescription] = createSignal("");
   const [amount, setAmount] = createSignal("");
   const [category, setCategory] = createSignal("General");
-  const [date, setDate] = createSignal(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = createSignal(localDateValue());
   const [payerIds, setPayerIds] = createSignal<string[]>([props.actorId]);
   const [payerValues, setPayerValues] = createSignal<Record<string, string>>({});
   const [participants, setParticipants] = createSignal<string[]>([]);
@@ -52,6 +52,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   const [recurrence, setRecurrence] = createSignal<"none" | "weekly" | "fortnightly" | "monthly" | "yearly">("none");
   const [detailsOpen, setDetailsOpen] = createSignal(false);
   const [splitOpen, setSplitOpen] = createSignal(false);
+  const [activeSplitParticipantId, setActiveSplitParticipantId] = createSignal<string>();
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal("");
   let wasOpen = false;
@@ -77,12 +78,13 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       setDescription(editingExpense?.description ?? "");
       setAmount(editingExpense ? minorInput(editingExpense.amountMinor) : "");
       setCategory(editingExpense?.category ?? "General");
-      setDate(editingExpense?.expenseDate ?? new Date().toISOString().slice(0, 10));
+      setDate(editingExpense?.expenseDate ?? localDateValue());
       setNotes(editingExpense?.notes ?? "");
       setCurrency(editingExpense?.currency ?? appStore.groups().find((group) => group.id === nextGroupId)?.settlementCurrency ?? "USD");
       setRecurrence(editingExpense?.recurrence ?? "none");
       setDetailsOpen(false);
       setSplitOpen(false);
+      setActiveSplitParticipantId(undefined);
       setError("");
       if (editingExpense) {
         const participantIds = editingExpense.allocations.map(({ participantId }) => participantId);
@@ -149,11 +151,12 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   const canSave = createMemo(() => description().trim().length > 0 && allocations().length > 0 && payers().length > 0 && !saving());
   const splitSummary = createMemo(() => {
     const count = participants().length;
-    if (splitMethod() === "equal") return `Equally · ${count} ${count === 1 ? "person" : "people"}`;
-    if (splitMethod() === "exact") return `By amount · ${count} people`;
-    if (splitMethod() === "percentage") return `By percentage · ${count} people`;
-    if (splitMethod() === "shares") return `By shares · ${count} people`;
-    return `Adjusted · ${count} people`;
+    const people = `${count} ${count === 1 ? "person" : "people"}`;
+    if (splitMethod() === "equal") return `Evenly · ${people}`;
+    if (splitMethod() === "exact") return `Exact · ${people}`;
+    if (splitMethod() === "percentage") return `Percentage · ${people}`;
+    if (splitMethod() === "shares") return `Shares · ${people}`;
+    return `Adjusted · ${people}`;
   });
 
   function initializeValues(method: SplitMethod): void {
@@ -214,6 +217,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   function chooseSplitMethod(method: SplitMethod): void {
     setSplitMethod(method);
     initializeValues(method);
+    setActiveSplitParticipantId(method === "exact" || method === "percentage" ? participants()[0] : undefined);
   }
 
   function toggleParticipant(userId: string): void {
@@ -224,6 +228,39 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       }
       return [...current, userId];
     });
+  }
+
+  function updateAmount(value: string): void {
+    const normalized = value.replace(/,/g, ".").replace(/[^\d.]/g, "");
+    const [whole = "", ...decimalParts] = normalized.split(".");
+    const next = decimalParts.length ? `${whole.slice(0, 7)}.${decimalParts.join("").slice(0, 2)}` : whole.slice(0, 7);
+    setAmount(next);
+    if (splitMethod() !== "equal") initializeValues(splitMethod());
+  }
+
+  function openSplitOptions(): void {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    setSplitOpen(true);
+  }
+
+  function changeShares(userId: string, delta: number): void {
+    const current = Number(splitValues()[userId] ?? "1");
+    setSplitValues((values) => ({ ...values, [userId]: String(Math.max(0, current + delta)) }));
+  }
+
+  const exactLeftoverMinor = createMemo(() => {
+    if (splitMethod() !== "exact") return 0;
+    const totalMinor = Math.round((Number(amount()) || 0) * 100);
+    const assigned = participants().reduce((sum, id) => sum + Math.round((Number(splitValues()[id]) || 0) * 100), 0);
+    return totalMinor - assigned;
+  });
+
+  function assignExactRemainder(): void {
+    const target = activeSplitParticipantId() ?? participants().at(-1);
+    if (!target || exactLeftoverMinor() <= 0) return;
+    const next = (Number(splitValues()[target] ?? "0") * 100 + exactLeftoverMinor()) / 100;
+    setSplitValues((values) => ({ ...values, [target]: next.toFixed(2) }));
+    setActiveSplitParticipantId(target);
   }
 
   async function submit(event: SubmitEvent): Promise<void> {
@@ -263,35 +300,53 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       <Dialog.Portal>
         <Dialog.Overlay class="composer-overlay fixed inset-0 z-40 bg-black/45" />
         <div class="fixed inset-0 z-50 grid items-end sm:place-items-center sm:p-6">
-          <Dialog.Content class="composer-dialog max-h-[96dvh] w-full overflow-y-auto rounded-t-2xl border border-border bg-card shadow-2xl outline-none sm:max-w-xl sm:rounded-xl">
-            <header class="sticky top-0 z-20 flex min-h-14 items-center justify-between border-b border-border bg-card/95 px-5 backdrop-blur">
-              <div class="min-w-0">
-                <Dialog.Title class="truncate text-base font-semibold">{props.expense ? "Edit expense" : "New expense"}</Dialog.Title>
+          <Dialog.Content class="composer-dialog max-h-[100dvh] w-full overflow-y-auto border border-border bg-card outline-none sm:max-h-[94dvh] sm:max-w-xl">
+            <header class="composer-header sticky top-0 z-20 grid min-h-14 grid-cols-[1fr_auto_1fr] items-center border-b border-border bg-card px-4">
+              <Dialog.CloseButton class="justify-self-start text-sm font-medium text-muted-foreground" aria-label="Cancel expense form">Cancel</Dialog.CloseButton>
+              <div class="min-w-0 text-center">
+                <Dialog.Title class="truncate text-base font-semibold">{props.expense ? "Edit expense" : "Add an expense"}</Dialog.Title>
                 <Dialog.Description class="sr-only">{props.expense ? "Update this shared expense." : "Record a shared expense."}</Dialog.Description>
               </div>
-              <Dialog.CloseButton class="grid size-9 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label="Close expense form"><X size={17} /></Dialog.CloseButton>
+              <span />
             </header>
 
-            <form class="grid gap-5 p-5 pb-0 sm:p-6 sm:pb-0" onSubmit={(event) => void submit(event)}>
+            <form class="grid gap-4 p-4 pb-0 sm:p-6 sm:pb-0" onSubmit={(event) => void submit(event)}>
               <div class="expense-context-row">
                 <span class="target-icon"><UsersRound size={17} /></span>
                 <span class="min-w-0 flex-1"><small>{props.expense ? "Group" : "With"}</small><strong>{props.targetLabel ?? currentGroup()?.name ?? "Choose a group"}</strong><Show when={!props.expense && props.targetLabel && props.targetLabel !== currentGroup()?.name}><em>in {currentGroup()?.name}</em></Show></span>
                 <Show when={!props.expense && props.onChangeTarget}><button type="button" onClick={props.onChangeTarget}>Change <ChevronRight size={14} /></button></Show>
               </div>
 
-              <label class="grid gap-2 text-sm font-medium">What was it for?<input class="form-control h-12 text-base" value={description()} onInput={(event) => setDescription(event.currentTarget.value)} placeholder="Dinner, groceries, tickets…" maxlength={200} /></label>
-              <label class="grid gap-2 text-sm font-medium">Amount<div class="relative"><span class="absolute left-3 top-3 text-sm font-semibold text-muted-foreground">{currency()}</span><input class="form-control amount-control h-12 pl-14 font-semibold tabular-nums" inputmode="decimal" value={amount()} onInput={(event) => { setAmount(event.currentTarget.value); if (splitMethod() !== "equal") initializeValues(splitMethod()); }} placeholder="0.00" aria-label="Expense amount" /></div></label>
+              <label class="amount-stage">
+                <span class="micro-label">Total · {currency()}</span>
+                <span class="amount-native-row">
+                  <span aria-hidden="true">{new Intl.NumberFormat(undefined, { style: "currency", currency: currency(), currencyDisplay: "narrowSymbol" }).formatToParts(0).find((part) => part.type === "currency")?.value ?? currency()}</span>
+                  <input
+                    class="money-type amount-native-input"
+                    value={amount()}
+                    onInput={(event) => updateAmount(event.currentTarget.value)}
+                    inputmode="decimal"
+                    enterkeyhint="next"
+                    autocomplete="off"
+                    placeholder="0.00"
+                    aria-label={`Total in ${currency()}`}
+                  />
+                </span>
+              </label>
 
-              <button type="button" class="summary-row group grid min-h-16 w-full grid-cols-[1fr_auto] items-center gap-3 rounded-lg border border-border bg-muted/35 px-4 text-left transition-colors hover:bg-muted/60" onClick={() => setSplitOpen((open) => !open)}>
-                <div class="min-w-0"><span class="block text-xs text-muted-foreground">Paid by {payerSummary()}</span><strong class="block truncate text-sm font-medium">{splitSummary()}</strong></div>
-                <span class="flex items-center gap-1 text-xs font-medium text-primary">Change {splitOpen() ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</span>
-              </button>
+              <label class="description-field"><span class="sr-only">What was it for?</span><input value={description()} onInput={(event) => setDescription(event.currentTarget.value)} placeholder="What was it for?" maxlength={200} autocomplete="off" /></label>
+
+              <div class="expense-quick-controls">
+                <button type="button" class="quick-control" aria-expanded={splitOpen()} onClick={() => splitOpen() ? setSplitOpen(false) : openSplitOptions()}><span class="micro-label">Split</span><strong>{splitSummary()}</strong></button>
+                <button type="button" class="quick-control" aria-expanded={splitOpen()} onClick={openSplitOptions}><span class="micro-label">Paid by</span><strong>{payerSummary()}</strong></button>
+                <button type="button" class="quick-control" aria-expanded={detailsOpen()} onClick={() => setDetailsOpen(true)}><span class="micro-label">When</span><strong>{isLocalToday(date()) ? "Today" : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(`${date()}T12:00:00`))}</strong></button>
+              </div>
 
               <Show when={splitOpen()}>
-                <section class="disclosure-panel grid gap-4 rounded-lg border border-border p-4" aria-label="Payer and split options">
+                <section class="disclosure-panel split-panel grid gap-4 border border-border p-4" aria-label="Payer and split options">
                   <div class="grid gap-3">
-                    <div class="flex items-center justify-between gap-3"><p class="text-sm font-medium">Paid by</p><button type="button" class="flex items-center gap-1.5 text-xs font-semibold text-primary" onClick={enableMultiplePayers}><UsersRound size={14} />{payerIds().length > 1 ? "Use one payer" : "Multiple payers"}</button></div>
-                    <Show when={payerIds().length > 1} fallback={<select class="form-control" value={payerIds()[0]} onInput={(event) => { setPayerIds([event.currentTarget.value]); setPayerValues({}); }}><For each={groupMembers()}>{(member) => <option value={member.userId}>{member.userId === props.actorId ? "You" : member.displayName}</option>}</For></select>}>
+                    <div class="flex items-center justify-between gap-3"><p class="text-sm font-medium">Paid by</p><Show when={groupMembers().length > 1}><button type="button" class="flex items-center gap-1.5 text-xs font-semibold text-primary" onClick={enableMultiplePayers}><UsersRound size={14} />{payerIds().length > 1 ? "Use one payer" : "Multiple payers"}</button></Show></div>
+                    <Show when={payerIds().length > 1} fallback={<div class="payer-avatar-rail"><For each={groupMembers()}>{(member) => <button type="button" class="payer-avatar-choice" classList={{ active: payerIds()[0] === member.userId }} aria-pressed={payerIds()[0] === member.userId} onClick={() => { setPayerIds([member.userId]); setPayerValues({}); }}><Avatar name={member.displayName} class="size-9 text-xs" /><span>{member.userId === props.actorId ? "You" : member.displayName}</span></button>}</For></div>}>
                       <div class="divide-y divide-border rounded-xl border border-border bg-background/55">
                         <For each={groupMembers()}>{(member) => <div class="flex min-h-14 items-center gap-3 px-3"><button type="button" class="grid size-6 place-items-center rounded-md border border-border" classList={{ "border-primary bg-primary text-primary-foreground": payerIds().includes(member.userId) }} onClick={() => togglePayer(member.userId)} aria-label={`Toggle ${member.displayName} as payer`} aria-pressed={payerIds().includes(member.userId)}><Show when={payerIds().includes(member.userId)}><Check size={14} /></Show></button><Avatar name={member.displayName} class="size-7 text-xs" /><span class="min-w-0 flex-1 truncate text-sm font-medium">{member.userId === props.actorId ? "You" : member.displayName}</span><div class="relative w-24"><input class="form-control h-9 text-right text-sm tabular-nums" disabled={!payerIds().includes(member.userId)} inputmode="decimal" value={payerValues()[member.userId] ?? ""} onInput={(event) => setPayerValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={`Amount paid by ${member.displayName}`} /></div></div>}</For>
                       </div>
@@ -299,55 +354,52 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                   </div>
                   <div>
                     <p class="mb-2 text-sm font-medium">Split method</p>
-                    <div class="grid grid-cols-5 rounded-xl bg-muted p-1">
-                      <For each={splitMethods}>{(method) => <button type="button" class="h-9 rounded-md text-xs font-medium text-muted-foreground transition-all" classList={{ "bg-card text-foreground shadow-sm": splitMethod() === method.id }} onClick={() => chooseSplitMethod(method.id)}>{method.label}</button>}</For>
+                    <div class="split-mode-tabs grid grid-cols-4">
+                      <For each={splitMethods}>{(method) => <button type="button" class="h-9 rounded-md text-xs font-medium text-muted-foreground transition-all" classList={{ "bg-card text-foreground shadow-sm": splitMethod() === method.id }} aria-pressed={splitMethod() === method.id} onClick={() => chooseSplitMethod(method.id)}>{method.label}</button>}</For>
                     </div>
                   </div>
-                  <div class="divide-y divide-border rounded-lg border border-border">
+                  <div class="divide-y divide-border border border-border">
                     <For each={groupMembers()}>{(member) => {
                       const selected = createMemo(() => participants().includes(member.userId));
                       const allocation = createMemo(() => allocations().find((item) => item.participantId === member.userId));
                       return (
-                        <div class="flex min-h-14 items-center gap-3 px-3">
-                          <button type="button" class="grid size-6 shrink-0 place-items-center rounded-md border border-border transition-colors" classList={{ "border-primary bg-primary text-primary-foreground": selected() }} onClick={() => toggleParticipant(member.userId)} aria-label={(selected() ? "Exclude " : "Include ") + member.displayName} aria-pressed={selected()}><Show when={selected()}><Check size={14} /></Show></button>
+                        <div class="split-person-row flex min-h-14 items-center gap-3 px-3" classList={{ active: activeSplitParticipantId() === member.userId }} onClick={() => selected() && (splitMethod() === "exact" || splitMethod() === "percentage") && setActiveSplitParticipantId(member.userId)}>
+                          <button type="button" class="grid size-6 shrink-0 place-items-center rounded-md border border-border transition-colors" classList={{ "border-primary bg-primary text-primary-foreground": selected() }} disabled={selected() && participants().length === 1} onClick={() => toggleParticipant(member.userId)} aria-label={(selected() && participants().length === 1 ? "Keep " : selected() ? "Exclude " : "Include ") + member.displayName} aria-pressed={selected()}><Show when={selected()}><Check size={14} /></Show></button>
                           <Avatar name={member.displayName} class="size-7 text-xs" />
                           <span class="min-w-0 flex-1 truncate text-sm font-medium">{member.userId === props.actorId ? "You" : member.displayName}</span>
-                          <Show when={splitMethod() === "equal"} fallback={
+                          <Show when={splitMethod() === "equal"} fallback={<Show when={splitMethod() === "shares"} fallback={
                             <div class="relative w-24">
                               <Show when={splitMethod() === "exact" || splitMethod() === "adjustment"}><span class="absolute left-2.5 top-2 text-xs text-muted-foreground">{splitMethod() === "adjustment" ? "±" : currency()}</span></Show>
-                              <input class="form-control h-9 text-right text-sm tabular-nums" classList={{ "pl-6": splitMethod() === "exact" || splitMethod() === "adjustment", "pr-7": splitMethod() === "percentage" }} disabled={!selected()} inputmode="decimal" value={splitValues()[member.userId] ?? ""} onInput={(event) => setSplitValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={(splitMethod() === "percentage" ? "Percentage for " : splitMethod() === "shares" ? "Shares for " : splitMethod() === "adjustment" ? "Adjustment for " : "Amount for ") + member.displayName} />
+                              <input class="form-control h-9 text-right text-sm tabular-nums" classList={{ "pl-6": splitMethod() === "exact" || splitMethod() === "adjustment", "pr-7": splitMethod() === "percentage" }} disabled={!selected()} inputmode="decimal" value={splitValues()[member.userId] ?? ""} onFocus={() => setActiveSplitParticipantId(member.userId)} onInput={(event) => setSplitValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={(splitMethod() === "percentage" ? "Percentage for " : splitMethod() === "adjustment" ? "Adjustment for " : "Amount for ") + member.displayName} />
                               <Show when={splitMethod() === "percentage"}><span class="absolute right-2.5 top-2 text-xs text-muted-foreground">%</span></Show>
                             </div>
-                          }>
+                          }><div class="share-stepper"><button type="button" onClick={() => changeShares(member.userId, -1)} aria-label={`Remove a share from ${member.displayName}`}>−</button><strong>{splitValues()[member.userId] ?? "1"}×</strong><button type="button" onClick={() => changeShares(member.userId, 1)} aria-label={`Add a share to ${member.displayName}`}>+</button></div></Show>}>
                             <span class="text-sm tabular-nums text-muted-foreground">{allocation() ? formatMinor(allocation()!.amountMinor, currency()) : "—"}</span>
                           </Show>
                         </div>
                       );
                     }}</For>
                   </div>
-                  <p class="text-xs text-muted-foreground">
-                    <Show when={allocations().length > 0} fallback="The split must assign the full amount.">Ready · {formatMinor(allocations().reduce((sum, item) => sum + item.amountMinor, 0), currency())} assigned</Show>
-                  </p>
+                  <div class="split-status"><span class="micro-label"><Show when={splitMethod() === "exact" && exactLeftoverMinor() !== 0} fallback={<Show when={allocations().length > 0} fallback="The split must assign the full amount.">Fully split · {formatMinor(allocations().reduce((sum, item) => sum + item.amountMinor, 0), currency())}</Show>}>{formatMinor(Math.abs(exactLeftoverMinor()), currency())} {exactLeftoverMinor() > 0 ? "left over" : "over assigned"}</Show></span><Show when={splitMethod() === "exact" && exactLeftoverMinor() > 0}><button type="button" onClick={assignExactRemainder}>Give it to {groupMembers().find((member) => member.userId === (activeSplitParticipantId() ?? participants().at(-1)))?.displayName ?? "last person"}</button></Show></div>
                 </section>
               </Show>
 
-              <button type="button" class="flex h-10 items-center justify-between text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" onClick={() => setDetailsOpen((open) => !open)}><span class="flex items-center gap-2"><SlidersHorizontal size={15} /> More details</span>{detailsOpen() ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
+              <button type="button" class="flex h-10 items-center justify-between text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" aria-expanded={detailsOpen()} onClick={() => setDetailsOpen((open) => !open)}><span class="flex items-center gap-2"><SlidersHorizontal size={15} /> {detailsOpen() ? "Less details" : "More details"}</span>{detailsOpen() ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
               <Show when={detailsOpen()}>
                 <section class="disclosure-panel grid gap-4 rounded-lg border border-border p-4 sm:grid-cols-2">
                   <label class="grid gap-2 text-sm font-medium">Category<select class="form-control" value={category()} onInput={(event) => setCategory(event.currentTarget.value)}><For each={categories}>{(item) => <option>{item}</option>}</For></select></label>
                   <label class="grid gap-2 text-sm font-medium">Date<input class="form-control" type="date" value={date()} onInput={(event) => setDate(event.currentTarget.value)} /></label>
                   <label class="grid gap-2 text-sm font-medium">Currency<select class="form-control" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)}><For each={currencies}>{(item) => <option value={item}>{item}</option>}</For></select></label>
-                  <label class="grid gap-2 text-sm font-medium">Repeats<select class="form-control" value={recurrence()} onInput={(event) => setRecurrence(event.currentTarget.value as "none" | "weekly" | "fortnightly" | "monthly" | "yearly")}><option value="none">Just this once</option><option value="weekly">Weekly</option><option value="fortnightly">Fortnightly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label>
                   <label class="grid gap-2 text-sm font-medium sm:col-span-2">Note <span class="sr-only">optional</span><textarea class="form-control min-h-20 resize-y py-2" value={notes()} onInput={(event) => setNotes(event.currentTarget.value)} placeholder="Optional note" maxlength={5000} /></label>
                 </section>
               </Show>
 
               <Show when={error()}><p class="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700" role="alert">{error()}</p></Show>
-              <footer class="sticky bottom-0 z-10 -mx-5 mt-1 grid gap-2 border-t border-border bg-card/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur sm:-mx-6 sm:px-6">
+              <footer class="sticky bottom-0 z-10 -mx-4 mt-1 grid gap-2 border-t border-border bg-card/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur sm:-mx-6 sm:px-6">
                 <Button class="h-11 w-full" type="submit" disabled={!canSave()}>
-                  <Show when={saving()} fallback={<><Check size={16} /> {props.expense ? "Save changes" : "Save expense"}</>}><LoaderCircle class="animate-spin" size={16} /> Saving…</Show>
+                  <Show when={saving()} fallback={<><Check size={16} /> {props.expense ? "Save changes" : `Add ${formatMinor(Math.round((Number(amount()) || 0) * 100), currency())}`}</>}><LoaderCircle class="animate-spin" size={16} /> Saving…</Show>
                 </Button>
-                <p class="text-center text-xs text-muted-foreground">Saves on this device first, then syncs automatically.</p>
+                <p class="micro-label text-center">Saved on this device first · syncs automatically</p>
               </footer>
             </form>
           </Dialog.Content>

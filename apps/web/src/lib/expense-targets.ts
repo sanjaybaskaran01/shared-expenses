@@ -32,16 +32,26 @@ export function buildExpenseTargets(
   });
 
   const groupNames = new Map(groups.map((group) => [group.id, group.name]));
-  const peopleTargets = activeMembers
-    .filter((member) => member.userId !== actorId && groupNames.has(member.groupId))
-    .map((member) => ({
-      key: `person:${member.groupId}:${member.userId}`,
-      kind: "person" as const,
-      groupId: member.groupId,
-      label: member.displayName,
-      detail: groupNames.get(member.groupId)!,
-      participantIds: [actorId, member.userId],
-    }))
+  const membershipsByPerson = new Map<string, LocalMember[]>();
+  for (const member of activeMembers) {
+    if (member.userId === actorId || !groupNames.has(member.groupId)) continue;
+    membershipsByPerson.set(member.userId, [...(membershipsByPerson.get(member.userId) ?? []), member]);
+  }
+  const groupPriority = new Map(groupTargets.map((target, index) => [target.groupId, index]));
+  const peopleTargets = [...membershipsByPerson.entries()]
+    .map(([userId, memberships]) => {
+      const membership = memberships.find((item) => item.groupId === preferredGroupId)
+        ?? [...memberships].sort((left, right) => (groupPriority.get(left.groupId) ?? 0) - (groupPriority.get(right.groupId) ?? 0))[0]!;
+      const groupName = groupNames.get(membership.groupId)!;
+      return {
+        key: `person:${userId}`,
+        kind: "person" as const,
+        groupId: membership.groupId,
+        label: membership.displayName,
+        detail: memberships.length > 1 ? `${groupName} · ${memberships.length} shared groups` : groupName,
+        participantIds: [actorId, userId],
+      };
+    })
     .sort((left, right) => left.label.localeCompare(right.label) || left.detail.localeCompare(right.detail));
 
   return [...groupTargets, ...peopleTargets];

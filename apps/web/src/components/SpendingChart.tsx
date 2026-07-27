@@ -25,9 +25,9 @@ export function SpendingChart(props: SpendingChartProps) {
     if (!chart) return;
     const expenses = props.expenses.filter((expense) => expense.status === "active" && expense.currency === props.currency);
     const styles = getComputedStyle(document.documentElement);
-    const ink = styles.getPropertyValue("--chart-ink").trim() || "#20294c";
-    const accent = styles.getPropertyValue("--chart-accent").trim() || "#93ea62";
-    const muted = styles.getPropertyValue("--muted-foreground").trim() || "#73766f";
+    const ink = styles.getPropertyValue("--chart-ink").trim() || "#21201c";
+    const accent = styles.getPropertyValue("--chart-accent").trim() || "#208368";
+    const muted = styles.getPropertyValue("--muted-foreground").trim() || "#63635e";
     const gridLine = styles.getPropertyValue("--chart-grid").trim() || "rgba(32,41,76,.1)";
     const tooltip = { backgroundColor: styles.getPropertyValue("--card").trim(), borderColor: gridLine, textStyle: { color: styles.getPropertyValue("--foreground").trim(), fontSize: 12 }, extraCssText: "border-radius:10px;box-shadow:0 8px 24px rgba(18,22,20,.12);" };
     if (props.mode === "category") {
