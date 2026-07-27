@@ -106,7 +106,7 @@ The example `launchd` files in `deploy/` contain placeholders on purpose. Copy t
 Build the production PWA with its public API origin, then deploy the static directory to the existing Worker:
 
 ```sh
-VITE_API_URL=https://api.example.com bun --cwd apps/web run build
+VITE_API_URL=https://api.example.com bun --filter @expenses/web build
 bunx wrangler deploy --name shared-expenses-web --assets apps/web/dist --compatibility-date 2026-07-25
 ```
 
