@@ -1,12 +1,12 @@
 import { mkdirSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type { JsonValue, OperationEnvelope, SyncPushRequest } from "@expenses/protocol";
 import { getMigrations } from "better-auth/db/migration";
 import { createAuth, deriveDisplayNameFromEmail } from "./auth";
 import { loadConfig } from "./config";
 import { openDatabase, runDomainMigrations } from "./database";
-import { startEmailWorker } from "./email";
+import { enqueueEmail, startEmailWorker } from "./email";
 import { LedgerStore } from "./ledger";
 
 const config = loadConfig();
@@ -48,6 +48,10 @@ function json(request: Request, value: unknown, status = 200): Response {
 
 function errorResponse(request: Request, status: number, code: string, message: string): Response {
   return json(request, { error: { code, message } }, status);
+}
+
+function safeSubjectLabel(value: string): string {
+  return value.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) || "an Expenses user";
 }
 
 async function currentActor(request: Request): Promise<string | null> {
@@ -217,6 +221,46 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     return json(request, { id: invitationId, email, status: "pending" }, 201);
   }
 
+  if (url.pathname === "/api/v1/feedback" && request.method === "POST") {
+    const body = await bodyJson<{ category?: string; message?: string; pageUrl?: string }>(request);
+    const category = body.category === "bug" || body.category === "idea" ? body.category : null;
+    const message = body.message?.trim() ?? "";
+    if (!category) return errorResponse(request, 400, "INVALID_CATEGORY", 'category must be "bug" or "idea"');
+    if (!message || message.length > 4_000) {
+      return errorResponse(request, 400, "INVALID_MESSAGE", "Enter a message of at most 4000 characters");
+    }
+    const pageUrl = typeof body.pageUrl === "string" ? body.pageUrl.slice(0, 300) : "";
+    if (config.ownerEmail) {
+      const actorKey = createHash("sha256").update(actorId).digest("hex").slice(0, 24);
+      const recentCutoff = new Date(Date.now() - 15 * 60_000).toISOString();
+      const recentCount = db
+        .query<{ count: number }, [string, string]>(
+          "SELECT COUNT(*) AS count FROM email_outbox WHERE idempotency_key LIKE ? AND created_at >= ?",
+        )
+        .get(`feedback:${actorKey}:%`, recentCutoff)?.count ?? 0;
+      if (recentCount >= 5) {
+        return errorResponse(request, 429, "FEEDBACK_RATE_LIMITED", "Too many feedback messages. Try again shortly.");
+      }
+      const reporter = db
+        .query<{ email: string | null; name: string | null }, [string]>('SELECT email, name FROM "user" WHERE id = ?')
+        .get(actorId);
+      const reporterLabel = safeSubjectLabel(reporter?.name || reporter?.email || actorId);
+      const label = category === "bug" ? "Bug report" : "Feature request";
+      const contentKey = createHash("sha256")
+        .update(JSON.stringify({ actorId, category, message, pageUrl }))
+        .digest("hex");
+      enqueueEmail(db, {
+        idempotencyKey: `feedback:${actorKey}:${contentKey}`,
+        recipient: config.ownerEmail,
+        subject: `${label} from ${reporterLabel}`,
+        text: [message, "", `— ${reporterLabel}${reporter?.email ? ` (${reporter.email})` : ""}`, pageUrl ? `Page: ${pageUrl}` : ""]
+          .filter(Boolean)
+          .join("\n"),
+      });
+    }
+    return json(request, { status: "received" }, 201);
+  }
+
   if (url.pathname === "/api/v1/snapshot" && request.method === "GET") {
     return json(request, { ...ledger.snapshot(actorId), manifest: ledger.manifest(actorId) });
   }
@@ -236,7 +280,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     return json(request, {
       operations: ledger.pull(actorId, after),
       generation: ledger.generation,
-      latestServerSequence: ledger.latestSequence,
+      latestServerSequence: ledger.latestSequenceFor(actorId),
     });
   }
 
@@ -253,7 +297,9 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
         const actorSubscribers = subscribers.get(actorId) ?? new Set();
         actorSubscribers.add(nextController);
         subscribers.set(actorId, actorSubscribers);
-        nextController.enqueue(encoder.encode(`event: ready\ndata: ${JSON.stringify({ sequence: ledger.latestSequence })}\n\n`));
+        nextController.enqueue(
+          encoder.encode(`event: ready\ndata: ${JSON.stringify({ sequence: ledger.latestSequenceFor(actorId) })}\n\n`),
+        );
         heartbeat = setInterval(() => {
           try {
             nextController.enqueue(encoder.encode(": keepalive\n\n"));

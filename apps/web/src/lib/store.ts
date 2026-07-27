@@ -206,7 +206,11 @@ export async function createExpense(input: NewExpenseInput): Promise<string> {
 
 export async function updateExpense(expense: LocalExpense, input: NewExpenseInput): Promise<string> {
   const device = await ensureDevice();
-  if (expense.groupId !== input.groupId) throw new RangeError("An expense cannot be moved to another group");
+  const current = await localDb.expenses.get(expense.id);
+  if (!current) throw new RangeError("This expense no longer exists");
+  if (current.version !== expense.version) throw new RangeError("This expense changed. Reopen it and try again");
+  if (current.status !== "active") throw new RangeError("A deleted expense cannot be edited");
+  if (current.groupId !== input.groupId) throw new RangeError("An expense cannot be moved to another group");
   if (!input.description.trim()) throw new RangeError("Description is required");
   if (input.participantIds.length === 0) throw new RangeError("Select at least one participant");
   const amountMinor = parseDecimalToMinor(input.amount);
@@ -227,12 +231,12 @@ export async function updateExpense(expense: LocalExpense, input: NewExpenseInpu
   };
   const unsigned: UnsignedOperation = {
     id: crypto.randomUUID(),
-    groupId: expense.groupId,
+    groupId: current.groupId,
     actorId: device.actorId,
     deviceId: device.deviceId,
     type: "ExpenseAmended",
-    targetId: expense.id,
-    baseVersion: expense.version,
+    targetId: current.id,
+    baseVersion: current.version,
     clientTimestamp,
     payload,
   };
@@ -240,9 +244,13 @@ export async function updateExpense(expense: LocalExpense, input: NewExpenseInpu
   const paid = payers.find(({ participantId }) => participantId === device.actorId)?.amountMinor ?? 0;
   const owed = allocations.find(({ participantId }) => participantId === device.actorId)?.amountMinor ?? 0;
   await localDb.transaction("rw", localDb.operations, localDb.expenses, async () => {
+    const latest = await localDb.expenses.get(current.id);
+    if (!latest || latest.version !== current.version || latest.status !== "active") {
+      throw new RangeError("This expense changed while you were editing it. Reopen it and try again");
+    }
     await localDb.operations.add({ ...operation, syncStatus: "pending" });
     await localDb.expenses.put({
-      ...expense,
+      ...current,
       description: input.description.trim(),
       category: input.category,
       amountMinor,
@@ -253,13 +261,13 @@ export async function updateExpense(expense: LocalExpense, input: NewExpenseInpu
       payers,
       allocations,
       yourNetMinor: paid - owed,
-      version: expense.version + 1,
+      version: current.version + 1,
       updatedAt: clientTimestamp,
       syncStatus: "pending",
     });
   });
   void syncEngine.sync();
-  return expense.id;
+  return current.id;
 }
 
 export async function createGroup(input: NewGroupInput): Promise<string> {
@@ -310,28 +318,44 @@ async function enqueueOperation(unsigned: UnsignedOperation): Promise<LocalOpera
 
 export async function voidExpense(expense: LocalExpense, reason = ""): Promise<void> {
   const device = await ensureDevice();
+  const current = await localDb.expenses.get(expense.id);
+  if (!current) throw new RangeError("This expense no longer exists");
+  if (current.version !== expense.version) throw new RangeError("This expense changed. Reopen it and try again");
+  if (current.status !== "active") throw new RangeError("This expense is already deleted");
   const clientTimestamp = new Date().toISOString();
   const operation = await signOperation({
-    id: crypto.randomUUID(), groupId: expense.groupId, actorId: device.actorId, deviceId: device.deviceId,
-    type: "ExpenseVoided", targetId: expense.id, baseVersion: expense.version, clientTimestamp, payload: { reason },
+    id: crypto.randomUUID(), groupId: current.groupId, actorId: device.actorId, deviceId: device.deviceId,
+    type: "ExpenseVoided", targetId: current.id, baseVersion: current.version, clientTimestamp, payload: { reason },
   }, device.privateKey);
   await localDb.transaction("rw", localDb.operations, localDb.expenses, async () => {
+    const latest = await localDb.expenses.get(current.id);
+    if (!latest || latest.version !== current.version || latest.status !== "active") {
+      throw new RangeError("This expense changed. Reopen it and try again");
+    }
     await localDb.operations.add({ ...operation, syncStatus: "pending" });
-    await localDb.expenses.update(expense.id, { status: "voided", version: expense.version + 1, updatedAt: clientTimestamp, syncStatus: "pending" });
+    await localDb.expenses.update(current.id, { status: "voided", version: current.version + 1, updatedAt: clientTimestamp, syncStatus: "pending" });
   });
   void syncEngine.sync();
 }
 
 export async function restoreExpense(expense: LocalExpense): Promise<void> {
   const device = await ensureDevice();
+  const current = await localDb.expenses.get(expense.id);
+  if (!current) throw new RangeError("This expense no longer exists");
+  if (current.version !== expense.version) throw new RangeError("This expense changed. Reopen it and try again");
+  if (current.status !== "voided") throw new RangeError("This expense is already active");
   const clientTimestamp = new Date().toISOString();
   const operation = await signOperation({
-    id: crypto.randomUUID(), groupId: expense.groupId, actorId: device.actorId, deviceId: device.deviceId,
-    type: "ExpenseRestored", targetId: expense.id, baseVersion: expense.version, clientTimestamp, payload: { reason: "Restored from activity" },
+    id: crypto.randomUUID(), groupId: current.groupId, actorId: device.actorId, deviceId: device.deviceId,
+    type: "ExpenseRestored", targetId: current.id, baseVersion: current.version, clientTimestamp, payload: { reason: "Restored from activity" },
   }, device.privateKey);
   await localDb.transaction("rw", localDb.operations, localDb.expenses, async () => {
+    const latest = await localDb.expenses.get(current.id);
+    if (!latest || latest.version !== current.version || latest.status !== "voided") {
+      throw new RangeError("This expense changed. Reopen it and try again");
+    }
     await localDb.operations.add({ ...operation, syncStatus: "pending" });
-    await localDb.expenses.update(expense.id, { status: "active", version: expense.version + 1, updatedAt: clientTimestamp, syncStatus: "pending" });
+    await localDb.expenses.update(current.id, { status: "active", version: current.version + 1, updatedAt: clientTimestamp, syncStatus: "pending" });
   });
   void syncEngine.sync();
 }

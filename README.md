@@ -77,6 +77,7 @@ WEB_ORIGIN=https://expenses.example.com
 PUBLIC_API_URL=https://api.example.com
 BETTER_AUTH_SECRET=
 BETTER_AUTH_SECRET_KEYCHAIN_SERVICE=shared-expenses-auth
+COOKIE_DOMAIN=
 DEV_AUTH_BYPASS=false
 OWNER_EMAIL=your-real-invited-email@example.com
 BOOTSTRAP_GROUP_NAME=Shared expenses
@@ -86,7 +87,7 @@ SMTP_APP_PASSWORD_KEYCHAIN_SERVICE=shared-expenses-smtp
 SMTP_FROM=expenses@example.com
 ```
 
-`OWNER_EMAIL` is the only email allowed to create the first account. Invited placeholder members may then create accounts. Sign-in uses a verified, single-use link and does not require a password.
+`OWNER_EMAIL` is the only email allowed to create the first account. Invited placeholder members may then create accounts. Sign-in uses a verified, single-use link and does not require a password. `COOKIE_DOMAIN` is optional; leave it empty for the current host-only API session cookie, or set it only when a deployment deliberately needs one cookie shared by sibling subdomains.
 
 Keep this environment file out of Git, backups, shell history, and launch-agent XML. Restrict it with `chmod 600`; the included `scripts/run-server.sh` loads it for `launchd` through the non-secret `EXPENSES_ENV_FILE` path. When either Keychain service variable is set, the runner reads that secret from the macOS login Keychain and overrides the corresponding plaintext variable, so production does not need either secret in the env file.
 
