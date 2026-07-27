@@ -2,6 +2,7 @@ import { Dialog } from "@kobalte/core/dialog";
 import { ArrowRight, Check, LoaderCircle, X } from "lucide-solid";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { appStore, recordPayment } from "../lib/store";
+import { localDateValue } from "../lib/dates";
 import type { Settlement } from "../lib/ledger-view";
 import { Button } from "./ui";
 
@@ -18,7 +19,7 @@ export function PaymentComposer(props: PaymentComposerProps) {
   const [payerId, setPayerId] = createSignal("");
   const [recipientId, setRecipientId] = createSignal("");
   const [amount, setAmount] = createSignal("");
-  const [date, setDate] = createSignal(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = createSignal(localDateValue());
   const [note, setNote] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal("");
@@ -29,7 +30,7 @@ export function PaymentComposer(props: PaymentComposerProps) {
       setPayerId(props.suggested?.payerId ?? members()[0]?.userId ?? "");
       setRecipientId(props.suggested?.recipientId ?? members()[1]?.userId ?? "");
       setAmount(props.suggested ? (props.suggested.amountMinor / 100).toFixed(2) : "");
-      setDate(new Date().toISOString().slice(0, 10));
+      setDate(localDateValue());
       setNote("");
       setError("");
     }

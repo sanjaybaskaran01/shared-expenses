@@ -29,7 +29,7 @@ export function ExpenseTargetPicker(props: ExpenseTargetPickerProps) {
     props.onSelect(target);
   }
 
-  return <Dialog open={props.open} onOpenChange={(open) => { if (!open) setQuery(""); props.onOpenChange(open); }}>
+  return <Show when={props.open}><Dialog open={true} onOpenChange={(open) => { if (!open) setQuery(""); props.onOpenChange(open); }}>
     <Dialog.Portal>
       <Dialog.Overlay class="composer-overlay fixed inset-0 z-40 bg-black/45" />
       <div class="fixed inset-0 z-50 grid items-end sm:place-items-center sm:p-6">
@@ -75,5 +75,5 @@ export function ExpenseTargetPicker(props: ExpenseTargetPickerProps) {
         </Dialog.Content>
       </div>
     </Dialog.Portal>
-  </Dialog>;
+  </Dialog></Show>;
 }

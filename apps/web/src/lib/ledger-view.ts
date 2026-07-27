@@ -1,10 +1,17 @@
 import type { JsonValue } from "@expenses/protocol";
-import type { LocalExpense, LocalOperation } from "./db";
+import type { LocalExpense, LocalGroup, LocalMember, LocalOperation } from "./db";
 
 export interface Settlement {
   payerId: string;
   recipientId: string;
   amountMinor: number;
+}
+
+export interface RelationshipBalance {
+  userId: string;
+  currency: string;
+  amountMinor: number;
+  groupIds: string[];
 }
 
 function payload(operation: LocalOperation): Record<string, JsonValue> {
@@ -59,6 +66,67 @@ export function simplifyBalances(balances: Record<string, number>): Settlement[]
     if (debtor.amount === 0) debtorIndex++;
   }
   return settlements;
+}
+
+/**
+ * Projects the immutable, group-scoped ledger into the current user's
+ * cross-group relationships. Positive means the other person owes the actor;
+ * negative means the actor owes them. Currencies intentionally remain separate.
+ */
+export function computeRelationshipBalances(
+  expenses: readonly LocalExpense[],
+  operations: readonly LocalOperation[],
+  groups: readonly LocalGroup[],
+  members: readonly LocalMember[],
+  actorId: string,
+): RelationshipBalance[] {
+  const totals = new Map<string, RelationshipBalance>();
+
+  for (const group of groups) {
+    const groupUserIds = new Set(
+      members
+        .filter((member) => member.groupId === group.id && member.status === "active")
+        .map((member) => member.userId),
+    );
+    if (!groupUserIds.has(actorId)) continue;
+
+    const currencies = new Set<string>([group.settlementCurrency]);
+    for (const expense of expenses) {
+      if (expense.groupId === group.id && expense.status === "active") currencies.add(expense.currency);
+    }
+    for (const operation of activePayments(operations, group.id)) {
+      currencies.add(String(payload(operation).currency));
+    }
+
+    for (const currency of currencies) {
+      const settlements = simplifyBalances(computeBalances(expenses, operations, group.id, currency));
+      for (const settlement of settlements) {
+        let userId: string | undefined;
+        let amountMinor = 0;
+        if (settlement.recipientId === actorId) {
+          userId = settlement.payerId;
+          amountMinor = settlement.amountMinor;
+        } else if (settlement.payerId === actorId) {
+          userId = settlement.recipientId;
+          amountMinor = -settlement.amountMinor;
+        }
+        if (!userId || !groupUserIds.has(userId)) continue;
+
+        const key = `${userId}\u0000${currency}`;
+        const current = totals.get(key);
+        if (current) {
+          current.amountMinor += amountMinor;
+          if (!current.groupIds.includes(group.id)) current.groupIds.push(group.id);
+        } else {
+          totals.set(key, { userId, currency, amountMinor, groupIds: [group.id] });
+        }
+      }
+    }
+  }
+
+  return [...totals.values()]
+    .filter((item) => item.amountMinor !== 0)
+    .sort((a, b) => Math.abs(b.amountMinor) - Math.abs(a.amountMinor) || a.userId.localeCompare(b.userId) || a.currency.localeCompare(b.currency));
 }
 
 export function expenseComments(operations: readonly LocalOperation[], expenseId: string): LocalOperation[] {

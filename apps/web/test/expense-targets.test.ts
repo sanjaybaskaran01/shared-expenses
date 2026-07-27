@@ -11,18 +11,22 @@ const members: LocalMember[] = [
   { id: "2", groupId: "trip", userId: "ana", displayName: "Ananya", status: "active" },
   { id: "3", groupId: "home", userId: "me", displayName: "Me", status: "active" },
   { id: "4", groupId: "home", userId: "sam", displayName: "Sam", status: "invited" },
+  { id: "5", groupId: "home", userId: "ana", displayName: "Ananya", status: "active" },
 ];
 
 describe("expense targets", () => {
   test("offers every group and only active people", () => {
     const targets = buildExpenseTargets(groups, members, "me");
-    expect(targets.map((target) => target.key)).toEqual(["group:home", "group:trip", "person:trip:ana"]);
+    expect(targets.map((target) => target.key)).toEqual(["group:home", "group:trip", "person:ana"]);
     expect(targets[2]?.participantIds).toEqual(["me", "ana"]);
+    expect(targets[2]?.groupId).toBe("home");
+    expect(targets[2]?.detail).toBe("Home · 2 shared groups");
   });
 
   test("puts the current group first without preselecting it", () => {
     const targets = buildExpenseTargets(groups, members, "me", "trip");
     expect(targets[0]?.key).toBe("group:trip");
     expect(targets[1]?.key).toBe("group:home");
+    expect(targets[2]?.groupId).toBe("trip");
   });
 });

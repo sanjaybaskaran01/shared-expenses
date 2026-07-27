@@ -1,5 +1,5 @@
 import { Dialog } from "@kobalte/core/dialog";
-import { ArrowRight, CalendarDays, CheckCircle2, MessageCircle, PencilLine, RefreshCcw, RotateCcw, Trash2, X } from "lucide-solid";
+import { ArrowRight, CalendarDays, CheckCircle2, MessageCircle, PencilLine, RotateCcw, Trash2, X } from "lucide-solid";
 import { For, Show, createMemo, createSignal } from "solid-js";
 import type { LocalExpense } from "../lib/db";
 import { expenseComments } from "../lib/ledger-view";
@@ -87,7 +87,7 @@ export function ExpenseDetail(props: ExpenseDetailProps) {
                 <For each={expense.allocations}>{(allocation) => <div class="flex items-center gap-3 border-b border-border/60 px-4 py-3 last:border-0"><Avatar name={memberName(allocation.participantId)} class="size-8 text-xs" /><span class="min-w-0 flex-1 truncate text-sm font-medium">{memberName(allocation.participantId)}</span><span class="text-sm tabular-nums text-muted-foreground">{money(allocation.amountMinor, expense.currency)}</span></div>}</For>
               </section>
 
-              <Show when={expense.notes || (expense.recurrence && expense.recurrence !== "none")}><section class="surface-panel rounded-2xl border border-border/70 p-4"><Show when={expense.notes}><p class="text-sm leading-6">{expense.notes}</p></Show><Show when={expense.recurrence && expense.recurrence !== "none"}><p class="mt-2 flex items-center gap-2 text-xs font-medium text-primary"><RefreshCcw size={14} /> Repeats {expense.recurrence}</p></Show></section></Show>
+              <Show when={expense.notes}><section class="surface-panel rounded-2xl border border-border/70 p-4"><p class="text-sm leading-6">{expense.notes}</p></section></Show>
 
               <section>
                 <div class="mb-3 flex items-center justify-between"><h3 class="flex items-center gap-2 text-sm font-semibold"><MessageCircle size={16} /> Comments</h3><span class="text-xs text-muted-foreground">{comments().length}</span></div>
