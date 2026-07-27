@@ -24,6 +24,10 @@ export function FeedbackButton(props: { compact?: boolean; class?: string }) {
 
   function handleOpenChange(next: boolean): void {
     if (resetTimer !== undefined) window.clearTimeout(resetTimer);
+    if (next && closeTimer !== undefined) {
+      window.clearTimeout(closeTimer);
+      closeTimer = undefined;
+    }
     setOpen(next);
     if (!next) {
       resetTimer = window.setTimeout(() => {
