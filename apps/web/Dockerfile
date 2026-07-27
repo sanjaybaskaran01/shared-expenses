@@ -9,7 +9,7 @@ COPY apps/web/package.json apps/web/package.json
 RUN bun install --frozen-lockfile
 COPY packages/protocol packages/protocol
 COPY apps/web apps/web
-RUN bun --cwd apps/web run build
+RUN bun --filter @expenses/web build
 
 FROM nginx:1.29-alpine
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
