@@ -293,7 +293,7 @@ export async function createGroup(input: NewGroupInput): Promise<string> {
   const currentMember = members().find((member) => member.userId === device.actorId);
   await localDb.transaction("rw", localDb.operations, localDb.groups, localDb.members, async () => {
     await localDb.operations.add({ ...operation, syncStatus: "pending" });
-    await localDb.groups.add({ id: groupId, name, settlementCurrency, createdAt: clientTimestamp });
+    await localDb.groups.add({ id: groupId, name, settlementCurrency, createdAt: clientTimestamp, version: 0 });
     await localDb.members.add({
       id: `${groupId}:${device.actorId}`,
       groupId,
@@ -305,6 +305,52 @@ export async function createGroup(input: NewGroupInput): Promise<string> {
   });
   void syncEngine.sync();
   return groupId;
+}
+
+export async function changeGroupCurrency(groupId: string, value: string): Promise<void> {
+  const device = await ensureDevice();
+  const settlementCurrency = value.trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(settlementCurrency)) throw new RangeError("Choose a three-letter currency");
+  const group = await localDb.groups.get(groupId);
+  if (!group) throw new RangeError("This group no longer exists");
+  if (group.settlementCurrency === settlementCurrency) return;
+  const expenseCount = await localDb.expenses.where("groupId").equals(groupId).count();
+  const hasPayment = await localDb.operations
+    .where("groupId")
+    .equals(groupId)
+    .filter((operation) =>
+      operation.type === "PaymentRecorded" &&
+      operation.syncStatus !== "rejected" &&
+      operation.syncStatus !== "conflicted",
+    )
+    .first();
+  if (expenseCount > 0 || hasPayment) {
+    throw new RangeError("Currency is locked after the first expense or payment");
+  }
+  const clientTimestamp = new Date().toISOString();
+  const operation = await signOperation({
+    id: crypto.randomUUID(),
+    groupId,
+    actorId: device.actorId,
+    deviceId: device.deviceId,
+    type: "GroupCurrencyChanged",
+    targetId: groupId,
+    baseVersion: group.version ?? 0,
+    clientTimestamp,
+    payload: { settlementCurrency },
+  }, device.privateKey);
+  await localDb.transaction("rw", localDb.operations, localDb.groups, async () => {
+    const current = await localDb.groups.get(groupId);
+    if (!current || (current.version ?? 0) !== (group.version ?? 0)) {
+      throw new RangeError("This group changed. Refresh and try again");
+    }
+    await localDb.operations.add({ ...operation, syncStatus: "pending" });
+    await localDb.groups.update(groupId, {
+      settlementCurrency,
+      version: (group.version ?? 0) + 1,
+    });
+  });
+  void syncEngine.sync();
 }
 
 async function enqueueOperation(unsigned: UnsignedOperation): Promise<LocalOperation> {

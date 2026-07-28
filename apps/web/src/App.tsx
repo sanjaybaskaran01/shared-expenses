@@ -3,6 +3,7 @@ import Activity from "lucide-solid/icons/activity";
 import BedSingle from "lucide-solid/icons/bed-single";
 import CarFront from "lucide-solid/icons/car-front";
 import CheckCircle2 from "lucide-solid/icons/check-circle-2";
+import ChevronLeft from "lucide-solid/icons/chevron-left";
 import ChevronRight from "lucide-solid/icons/chevron-right";
 import CircleUserRound from "lucide-solid/icons/circle-user-round";
 import Cloud from "lucide-solid/icons/cloud";
@@ -60,7 +61,7 @@ import {
   computeRelationshipBalances,
   type Settlement,
 } from "./lib/ledger-view";
-import { appStore, initializeStore, restoreExpense } from "./lib/store";
+import { appStore, changeGroupCurrency, initializeStore, restoreExpense } from "./lib/store";
 
 type Tab = "overview" | "groups" | "activity" | "account";
 type Theme = "system" | "light" | "dark";
@@ -176,41 +177,6 @@ function SectionHeading(props: {
         </Show>
       </div>
       {props.action as never}
-    </div>
-  );
-}
-
-function GroupRail(props: {
-  activeGroupId?: string | undefined;
-  onSelect(groupId: string): void;
-  onCreate(): void;
-}) {
-  return (
-    <div
-      class="group-rail -mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0"
-      aria-label="Expense groups"
-    >
-      <For each={appStore.groups()}>
-        {(group) => (
-          <button
-            type="button"
-            class="group-tab snap-start"
-            classList={{ selected: props.activeGroupId === group.id }}
-            aria-pressed={props.activeGroupId === group.id}
-            onClick={() => props.onSelect(group.id)}
-          >
-            {group.name}
-          </button>
-        )}
-      </For>
-      <button
-        type="button"
-        class="group-tab group-tab-add snap-start"
-        onClick={props.onCreate}
-        aria-label="Create group"
-      >
-        <Plus size={15} /> New
-      </button>
     </div>
   );
 }
@@ -343,19 +309,90 @@ function ExpenseList(props: {
   );
 }
 
+function GroupsOverview(props: {
+  actorId: string;
+  onOpenGroup(groupId: string): void;
+  onCreateGroup(): void;
+}) {
+  const groupMemberCount = (groupId: string) =>
+    appStore.members().filter((member) => member.groupId === groupId && member.status === "active").length;
+  const groupExpenseCount = (groupId: string) =>
+    appStore.expenses().filter((expense) => expense.groupId === groupId && expense.status === "active").length;
+  const groupBalance = (groupId: string, currency: string) =>
+    computeBalances(appStore.expenses(), appStore.operations(), groupId, currency)[props.actorId] ?? 0;
+
+  return (
+    <div class="page-enter space-y-5 sm:space-y-6">
+      <header class="groups-overview-heading">
+        <div>
+          <p class="eyebrow">Shared ledgers</p>
+          <h1 class="page-title">Groups</h1>
+          <p class="mt-1 text-sm text-muted-foreground">
+            A clear view of what each circle owes you—or what you owe them.
+          </p>
+        </div>
+        <Button class="create-group-action" onClick={props.onCreateGroup}>
+          <UsersRound size={17} /> Create group
+        </Button>
+      </header>
+      <Show
+        when={appStore.groups().length}
+        fallback={
+          <Card class="group-empty-state">
+            <UsersRound size={28} />
+            <h2>Create your first shared ledger</h2>
+            <p>Groups keep a trip, home, or event separate and easy to settle.</p>
+            <Button onClick={props.onCreateGroup}><UsersRound size={16} /> Create group</Button>
+          </Card>
+        }
+      >
+        <div class="group-overview-grid" aria-label="Your groups">
+          <For each={appStore.groups()}>
+            {(group, index) => {
+              const balance = createMemo(() => groupBalance(group.id, group.settlementCurrency));
+              const expenses = createMemo(() => groupExpenseCount(group.id));
+              const people = createMemo(() => groupMemberCount(group.id));
+              return (
+                <button
+                  type="button"
+                  class="group-overview-card"
+                  style={{ "--row-index": index() }}
+                  onClick={() => props.onOpenGroup(group.id)}
+                >
+                  <span class="group-overview-icon"><UsersRound size={18} /></span>
+                  <span class="group-overview-main">
+                    <strong>{group.name}</strong>
+                    <small>{people()} {people() === 1 ? "person" : "people"} · {expenses()} active {expenses() === 1 ? "expense" : "expenses"}</small>
+                  </span>
+                  <span class="group-overview-balance">
+                    <small>{balance() > 0 ? "you’re owed" : balance() < 0 ? "you owe" : "settled"}</small>
+                    <strong classList={{ "money-in": balance() > 0, "money-out": balance() < 0 }}>
+                      {money(Math.abs(balance()), group.settlementCurrency)}
+                    </strong>
+                  </span>
+                  <ChevronRight size={16} />
+                </button>
+              );
+            }}
+          </For>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
 function GroupsView(props: {
   actorId: string;
   activeGroupId?: string | undefined;
-  onSelectGroup(groupId: string): void;
+  onShowOverview(): void;
   onAddExpense(groupId?: string): void;
   onOpenExpense(expense: LocalExpense): void;
   onCreateGroup(): void;
   onSettle(settlement: Settlement | undefined, currency: string): void;
+  onToast(message: string): void;
 }) {
   const group = createMemo(
-    () =>
-      appStore.groups().find((item) => item.id === props.activeGroupId) ??
-      appStore.groups()[0],
+    () => appStore.groups().find((item) => item.id === props.activeGroupId),
   );
   const expenses = createMemo(() =>
     appStore.expenses().filter((expense) => expense.groupId === group()?.id),
@@ -368,9 +405,36 @@ function GroupsView(props: {
     "category",
   );
   const [groupSection, setGroupSection] = createSignal<"expenses" | "balances" | "insights">("expenses");
+  const [changingCurrency, setChangingCurrency] = createSignal(false);
   createEffect(() => {
     setCurrency(group()?.settlementCurrency ?? "USD");
   });
+  const hasLedgerEntries = createMemo(() => {
+    const groupId = group()?.id;
+    if (!groupId) return false;
+    return appStore.expenses().some((expense) => expense.groupId === groupId) ||
+      appStore.operations().some((operation) =>
+        operation.groupId === groupId &&
+        operation.type === "PaymentRecorded" &&
+        operation.syncStatus !== "rejected" &&
+        operation.syncStatus !== "conflicted",
+      );
+  });
+  async function updateCurrency(value: string): Promise<void> {
+    const activeGroup = group();
+    if (!activeGroup || value === activeGroup.settlementCurrency) return;
+    setChangingCurrency(true);
+    try {
+      await changeGroupCurrency(activeGroup.id, value);
+      setCurrency(value);
+      props.onToast(`Group currency changed to ${value}`);
+    } catch (error) {
+      setCurrency(activeGroup.settlementCurrency);
+      props.onToast(error instanceof Error ? error.message : "Could not change currency");
+    } finally {
+      setChangingCurrency(false);
+    }
+  }
   const balances = createMemo(() =>
     group()
       ? computeBalances(
@@ -424,7 +488,9 @@ function GroupsView(props: {
     <div class="page-enter space-y-5 sm:space-y-6">
       <header class="group-page-heading">
         <div>
-          <p class="eyebrow">Group ledger</p>
+          <button class="group-back-action" type="button" onClick={props.onShowOverview}>
+            <ChevronLeft size={15} /> All groups
+          </button>
           <h1 class="page-title">{group()?.name ?? "Groups"}</h1>
           <Show when={group()} fallback={<p class="mt-1 text-sm text-muted-foreground">No groups yet</p>}>
             <p class="mt-1 text-sm text-muted-foreground">
@@ -432,14 +498,21 @@ function GroupsView(props: {
             </p>
           </Show>
         </div>
+        <Show when={group()}>
+          <label class="group-currency-setting">
+            <span>Group currency</span>
+            <select
+              value={group()?.settlementCurrency}
+              disabled={hasLedgerEntries() || changingCurrency()}
+              onChange={(event) => void updateCurrency(event.currentTarget.value)}
+              aria-describedby="group-currency-note"
+            >
+              <option value="USD">USD</option><option value="CAD">CAD</option><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="INR">INR</option>
+            </select>
+            <small id="group-currency-note">{hasLedgerEntries() ? "Locked after first entry" : "Editable until first entry"}</small>
+          </label>
+        </Show>
       </header>
-      <Show when={appStore.groups().length > 0}>
-        <GroupRail
-          activeGroupId={group()?.id}
-          onSelect={props.onSelectGroup}
-          onCreate={props.onCreateGroup}
-        />
-      </Show>
       <Show
         when={group()}
         keyed
@@ -452,7 +525,7 @@ function GroupsView(props: {
                 Add people, then start logging shared expenses.
               </p>
               <Button class="mt-5" onClick={props.onCreateGroup}>
-                <Plus size={16} /> New group
+                <UsersRound size={16} /> Create group
               </Button>
             </div>
           </Card>
@@ -670,7 +743,7 @@ function OverviewView(props: {
 
       <Show when={homeSection() === "groups"}>
         <Card class="home-list-card overflow-hidden" role="tabpanel">
-          <SectionHeading title="Groups" detail="Your shared ledgers" action={<button type="button" class="list-add-action" onClick={props.onCreateGroup}><Plus size={14} /> New</button>} />
+          <SectionHeading title="Groups" detail="Your shared ledgers" action={<button type="button" class="list-add-action" onClick={props.onCreateGroup}><UsersRound size={14} /> Create group</button>} />
           <For each={appStore.groups()} fallback={<div class="px-6 py-12 text-center text-sm text-muted-foreground">Create a group to start splitting.</div>}>
             {(group) => (
               <button type="button" class="home-group-row" onClick={() => props.onOpenGroup(group.id)}>
@@ -717,6 +790,7 @@ const activityCopy: Partial<Record<LocalOperation["type"], string>> = {
   PaymentRecorded: "recorded a payment",
   PaymentReversed: "reversed a payment",
   GroupCreated: "created a group",
+  GroupCurrencyChanged: "changed the group currency",
   GroupMemberAdded: "added a member",
   GroupMemberRemoved: "removed a member",
 };
@@ -904,6 +978,7 @@ function AccountView(props: { displayName: string }) {
 
 function AuthenticatedApp(props: { actorId: string }) {
   const [tab, setTab] = createSignal<Tab>("overview");
+  const [groupsMode, setGroupsMode] = createSignal<"overview" | "detail">("overview");
   const [expenseOpen, setExpenseOpen] = createSignal(false);
   const [targetPickerOpen, setTargetPickerOpen] = createSignal(false);
   const [detailOpen, setDetailOpen] = createSignal(false);
@@ -962,6 +1037,12 @@ function AuthenticatedApp(props: { actorId: string }) {
   }
   function selectGroup(id: string) {
     setSelectedGroupId(id);
+    setGroupsMode("detail");
+    setTab("groups");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function showGroupsOverview() {
+    setGroupsMode("overview");
     setTab("groups");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -1021,7 +1102,7 @@ function AuthenticatedApp(props: { actorId: string }) {
                 class="desktop-nav-item"
                 classList={{ active: tab() === item.id }}
                 aria-current={tab() === item.id ? "page" : undefined}
-                onClick={() => setTab(item.id)}
+                onClick={() => item.id === "groups" ? showGroupsOverview() : setTab(item.id)}
               >
                 <item.icon size={18} />
                 {item.label}
@@ -1033,19 +1114,19 @@ function AuthenticatedApp(props: { actorId: string }) {
           <div class="mb-2 flex items-center justify-between px-2">
             <span class="eyebrow">Groups</span>
             <button
-              class="icon-button"
+              class="sidebar-create-group"
               onClick={openGroupComposer}
-              aria-label="New group"
+              aria-label="Create group"
             >
-              <Plus size={15} />
+              <Plus size={14} /> Create
             </button>
           </div>
           <For each={appStore.groups()}>
             {(group) => (
               <button
                 class="desktop-group"
-                classList={{ active: selectedGroupId() === group.id }}
-                aria-pressed={selectedGroupId() === group.id}
+                classList={{ active: groupsMode() === "detail" && selectedGroupId() === group.id }}
+                aria-pressed={groupsMode() === "detail" && selectedGroupId() === group.id}
                 onClick={() => selectGroup(group.id)}
               >
                 <span class="size-2 rounded-full bg-primary" />
@@ -1064,9 +1145,9 @@ function AuthenticatedApp(props: { actorId: string }) {
       </aside>
       <div class="min-w-0">
         <header class="mobile-header md:hidden">
-          <strong class="mobile-wordmark">Tally</strong>
+          <span class="flex items-center gap-2"><BrandMark size={28} /><strong class="mobile-wordmark">Tally</strong></span>
           <button class="mobile-add-action" type="button" onClick={() => addExpense()}>
-            Add expense
+            <Plus size={16} /> Add expense
           </button>
         </header>
         <main class="app-main mx-auto w-full max-w-5xl px-4 pb-28 pt-5 sm:px-6 sm:pt-8 md:px-8 md:pb-12 lg:px-10">
@@ -1081,15 +1162,27 @@ function AuthenticatedApp(props: { actorId: string }) {
               />
             </Match>
             <Match when={tab() === "groups"}>
-              <GroupsView
-                actorId={props.actorId}
-                activeGroupId={selectedGroupId()}
-                onSelectGroup={selectGroup}
-                onAddExpense={addExpense}
-                onOpenExpense={openDetail}
-                onCreateGroup={openGroupComposer}
-                onSettle={settle}
-              />
+              <Show
+                when={groupsMode() === "overview"}
+                fallback={
+                  <GroupsView
+                    actorId={props.actorId}
+                    activeGroupId={selectedGroupId()}
+                    onShowOverview={showGroupsOverview}
+                    onAddExpense={addExpense}
+                    onOpenExpense={openDetail}
+                    onCreateGroup={openGroupComposer}
+                    onSettle={settle}
+                    onToast={notify}
+                  />
+                }
+              >
+                <GroupsOverview
+                  actorId={props.actorId}
+                  onOpenGroup={selectGroup}
+                  onCreateGroup={openGroupComposer}
+                />
+              </Show>
             </Match>
             <Match when={tab() === "activity"}>
               <ActivityView
@@ -1114,7 +1207,7 @@ function AuthenticatedApp(props: { actorId: string }) {
               class="nav-item"
               classList={{ active: tab() === item.id }}
               aria-current={tab() === item.id ? "page" : undefined}
-              onClick={() => setTab(item.id)}
+              onClick={() => item.id === "groups" ? showGroupsOverview() : setTab(item.id)}
             >
               <item.icon size={20} stroke-width={tab() === item.id ? 2.6 : 2} />
               <span>{item.label}</span>

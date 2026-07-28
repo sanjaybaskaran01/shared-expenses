@@ -177,6 +177,37 @@ describe("ledger ingestion", () => {
     ]));
   });
 
+  test("changes a new group's currency with a versioned ledger operation", async () => {
+    const operation = await signedOperation(privateKey, {
+      id: crypto.randomUUID(),
+      type: "GroupCurrencyChanged",
+      targetId: "group-1",
+      baseVersion: 0,
+      payload: { settlementCurrency: "EUR" },
+    });
+    expect((await store.push("user-1", [operation])).accepted).toHaveLength(1);
+    expect(store.snapshot("user-1").groups).toEqual([
+      expect.objectContaining({ id: "group-1", settlementCurrency: "EUR", version: 1 }),
+    ]);
+  });
+
+  test("locks a group's currency after the first ledger entry", async () => {
+    await store.push("user-1", [await signedOperation(privateKey)]);
+    const operation = await signedOperation(privateKey, {
+      id: crypto.randomUUID(),
+      type: "GroupCurrencyChanged",
+      targetId: "group-1",
+      baseVersion: 0,
+      payload: { settlementCurrency: "EUR" },
+    });
+    expect((await store.push("user-1", [operation])).rejected).toEqual([
+      expect.objectContaining({ message: "Group currency is locked after the first expense or payment" }),
+    ]);
+    expect(store.snapshot("user-1").groups).toEqual([
+      expect.objectContaining({ id: "group-1", settlementCurrency: "USD" }),
+    ]);
+  });
+
   test("voids and restores an expense with versioned audit operations", async () => {
     await store.push("user-1", [await signedOperation(privateKey)]);
     const voided = await signedOperation(privateKey, {

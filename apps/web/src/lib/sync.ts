@@ -58,6 +58,13 @@ async function applyRemote(operation: OperationEnvelope, currentActorId: string)
       syncStatus: "accepted",
     });
   }
+  if (operation.type === "GroupCurrencyChanged") {
+    const payload = operation.payload as Record<string, JsonValue>;
+    await localDb.groups.update(operation.groupId, {
+      settlementCurrency: String(payload.settlementCurrency),
+      version: operation.baseVersion + 1,
+    });
+  }
 }
 
 export type ConnectionState = "connecting" | "online" | "offline" | "error";
@@ -99,7 +106,7 @@ export class SyncEngine {
       outbound.sort((left, right) => left.clientTimestamp.localeCompare(right.clientTimestamp));
       for (let offset = 0; offset < outbound.length; offset += 100) {
         const result = await pushOperations(outbound.slice(offset, offset + 100));
-        await localDb.transaction("rw", localDb.operations, localDb.expenses, async () => {
+        await localDb.transaction("rw", localDb.operations, localDb.expenses, localDb.groups, async () => {
           for (const accepted of [...result.accepted, ...result.duplicates]) {
             await localDb.operations.update(accepted.id, {
               syncStatus: "accepted",
@@ -116,6 +123,13 @@ export class SyncEngine {
                   version: operation.baseVersion + 1,
                   updatedAt: operation.receivedAt ?? operation.clientTimestamp,
                   syncStatus: "accepted",
+                });
+              }
+              if (operation.type === "GroupCurrencyChanged") {
+                const payload = operation.payload as Record<string, JsonValue>;
+                await localDb.groups.update(operation.groupId, {
+                  settlementCurrency: String(payload.settlementCurrency),
+                  version: operation.baseVersion + 1,
                 });
               }
             }

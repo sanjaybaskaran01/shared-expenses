@@ -1,8 +1,9 @@
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
-const publicDir = resolve(import.meta.dir, "../public");
+const publicDir = resolve(dirname(fileURLToPath(import.meta.url)), "../public");
 const mark = await readFile(resolve(publicDir, "brand-mark.svg"));
 
 for (const [filename, size] of [
@@ -15,16 +16,16 @@ for (const [filename, size] of [
 
 await sharp(mark)
   .resize(410, 410, { fit: "contain" })
-  .extend({ top: 51, bottom: 51, left: 51, right: 51, background: "#102d38" })
+  .extend({ top: 51, bottom: 51, left: 51, right: 51, background: "#132f3a" })
   .png()
   .toFile(resolve(publicDir, "maskable-512.png"));
 
 const social = `
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630">
-  <rect width="1200" height="630" fill="#102d38"/>
+  <rect width="1200" height="630" fill="#132f3a"/>
   <image href="data:image/svg+xml;base64,${mark.toString("base64")}" x="100" y="135" width="360" height="360"/>
-  <text x="520" y="285" fill="#f8f7f4" font-size="88" font-weight="700" font-family="Inter,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">Tally</text>
-  <text x="525" y="365" fill="#cbd5d2" font-size="37" font-family="Inter,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">Shared fairly. Reconciled clearly.</text>
+  <text x="520" y="285" fill="#fbfaf8" font-size="88" font-weight="700" font-family="Inter,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">Tally</text>
+  <text x="525" y="365" fill="#c6e0d4" font-size="37" font-family="Inter,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">Shared fairly. Reconciled clearly.</text>
 </svg>`;
 await sharp(Buffer.from(social)).png().toFile(resolve(publicDir, "og-image.png"));
 

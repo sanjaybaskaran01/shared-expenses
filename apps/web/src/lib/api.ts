@@ -19,7 +19,7 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export interface RemoteSnapshot {
-  groups: Array<{ id: string; name: string; settlementCurrency: string; createdAt: string }>;
+  groups: Array<{ id: string; name: string; settlementCurrency: string; createdAt: string; version: number }>;
   members: Array<{
     groupId: string;
     userId: string;
