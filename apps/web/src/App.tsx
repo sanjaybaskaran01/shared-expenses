@@ -209,8 +209,28 @@ function ExpenseList(props: {
   const activeCount = createMemo(
     () => expenses().filter((item) => item.status === "active").length,
   );
+  const expenseMonths = createMemo(() => {
+    const months = new Map<string, { label: string; items: LocalExpense[] }>();
+    for (const expense of expenses()) {
+      const date = expenseDate(expense.expenseDate);
+      const key = expense.expenseDate.slice(0, 7);
+      const existing = months.get(key);
+      if (existing) {
+        existing.items.push(expense);
+      } else {
+        months.set(key, {
+          label: new Intl.DateTimeFormat(undefined, {
+            month: "long",
+            year: "numeric",
+          }).format(date),
+          items: [expense],
+        });
+      }
+    }
+    return [...months.values()];
+  });
   return (
-    <Card class="overflow-hidden">
+    <Card class="expense-ledger">
       <SectionHeading
         title="Expense timeline"
         detail={`${activeCount()} active ${activeCount() === 1 ? "expense" : "expenses"}`}
@@ -238,59 +258,58 @@ function ExpenseList(props: {
           </div>
         }
       >
-        <div class="divide-y divide-border/60">
-          <For each={expenses()}>
-            {(expense) => (
-              <button
-                type="button"
-                class="group-row flex min-h-[4.75rem] w-full items-center gap-3 px-4 text-left hover:bg-muted/40 sm:px-5"
-                classList={{ "opacity-55": expense.status === "voided" }}
-                onClick={() => props.onOpen(expense)}
-              >
-                <span class="category-icon">
-                  {expense.description.slice(0, 1).toUpperCase()}
-                </span>
-                <div class="min-w-0 flex-1">
-                  <strong class="block truncate text-sm font-semibold">
-                    {expense.description}
-                  </strong>
-                  <span class="micro-label mt-0.5 block truncate">
-                    {memberName(
+        <div>
+          <For each={expenseMonths()}>
+            {(month) => <section class="expense-month" aria-label={month.label}>
+              <div class="expense-month-heading">{month.label}</div>
+              <div class="divide-y divide-border/60">
+                <For each={month.items}>
+                  {(expense) => {
+                    const date = expenseDate(expense.expenseDate);
+                    const payer = memberName(
                       expense.groupId,
                       expense.payers[0]?.participantId ?? "",
                       props.actorId,
-                    )}{" "}
-                    paid ·{" "}
-                    {new Intl.DateTimeFormat(undefined, {
-                      month: "short",
-                      day: "numeric",
-                    }).format(expenseDate(expense.expenseDate))}
-                    {expense.status === "voided" ? " · deleted" : ""}
-                  </span>
-                </div>
-                <div class="shrink-0 text-right">
-                  <strong class="money-type block text-sm tabular-nums">
-                    {money(expense.amountMinor, expense.currency)}
-                  </strong>
-                  <span
-                    class="micro-label block"
-                    classList={{
-                      "money-in": expense.yourNetMinor > 0,
-                      "money-out": expense.yourNetMinor < 0,
-                    }}
-                  >
-                    {expense.syncStatus === "pending"
-                      ? "on device"
-                      : expense.yourNetMinor > 0
-                        ? `+${money(expense.yourNetMinor, expense.currency)}`
-                        : expense.yourNetMinor < 0
-                          ? `−${money(-expense.yourNetMinor, expense.currency)}`
-                          : "included"}
-                  </span>
-                </div>
-                <ChevronRight size={15} class="text-muted-foreground" />
-              </button>
-            )}
+                    );
+                    return <button
+                      type="button"
+                      class="expense-timeline-row group-row"
+                      classList={{ "opacity-55": expense.status === "voided" }}
+                      onClick={() => props.onOpen(expense)}
+                    >
+                      <time class="expense-date-rail" datetime={expense.expenseDate}>
+                        <span>{new Intl.DateTimeFormat(undefined, { month: "short" }).format(date)}</span>
+                        <strong>{new Intl.DateTimeFormat(undefined, { day: "2-digit" }).format(date)}</strong>
+                      </time>
+                      <div class="min-w-0">
+                        <strong class="expense-row-title">{expense.description}</strong>
+                        <span class="expense-row-context">
+                          {payer} paid · split {expense.allocations.length} {expense.allocations.length === 1 ? "way" : "ways"}
+                          {expense.syncStatus === "pending" ? " · on device" : ""}
+                          {expense.status === "voided" ? " · deleted" : ""}
+                        </span>
+                      </div>
+                      <div class="expense-row-money">
+                        <strong>{money(expense.amountMinor, expense.currency)}</strong>
+                        <span classList={{
+                          "money-in": expense.yourNetMinor > 0,
+                          "money-out": expense.yourNetMinor < 0,
+                        }}>
+                          {expense.status === "voided"
+                            ? "deleted"
+                            : expense.yourNetMinor > 0
+                              ? `you’re owed ${money(expense.yourNetMinor, expense.currency)}`
+                              : expense.yourNetMinor < 0
+                                ? `you owe ${money(-expense.yourNetMinor, expense.currency)}`
+                                : "included"}
+                        </span>
+                      </div>
+                      <ChevronRight size={15} class="expense-row-chevron" />
+                    </button>;
+                  }}
+                </For>
+              </div>
+            </section>}
           </For>
         </div>
       </Show>
