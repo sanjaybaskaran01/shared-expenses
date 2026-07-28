@@ -40,8 +40,9 @@ export function Badge(props: JSX.HTMLAttributes<HTMLSpanElement>) {
 }
 
 export function Avatar(props: { name: string; class?: string }) {
+  const tone = [...props.name].reduce((total, character) => total + character.charCodeAt(0), 0) % 4;
   return (
-    <span class={cn("avatar-tile inline-grid size-9 shrink-0 place-items-center rounded-md text-sm font-semibold", props.class)}>
+    <span class={cn(`avatar-tile avatar-tone-${tone} inline-grid size-9 shrink-0 place-items-center rounded-md text-sm font-semibold`, props.class)}>
       {props.name
         .split(/\s+/)
         .filter(Boolean)
