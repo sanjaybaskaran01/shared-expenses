@@ -1,3 +1,4 @@
+import { AlertDialog } from "@kobalte/core/alert-dialog";
 import { Dialog } from "@kobalte/core/dialog";
 import { ArrowRight, CalendarDays, CheckCircle2, MessageCircle, PencilLine, RotateCcw, Trash2, X } from "lucide-solid";
 import { For, Show, createMemo, createSignal } from "solid-js";
@@ -67,8 +68,13 @@ export function ExpenseDetail(props: ExpenseDetailProps) {
     }
   }
 
+  function handleOpenChange(open: boolean): void {
+    if (!open) setConfirmDelete(false);
+    props.onOpenChange(open);
+  }
+
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+    <Dialog open={props.open} onOpenChange={handleOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay class="composer-overlay fixed inset-0 z-40 bg-black/45" />
         <div class="fixed inset-0 z-50 grid items-end sm:place-items-center sm:p-6">
@@ -97,12 +103,34 @@ export function ExpenseDetail(props: ExpenseDetailProps) {
 
               <div class="flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2 text-xs text-muted-foreground"><CheckCircle2 size={14} class="text-primary" /> Version {expense.version} · {expense.syncStatus === "pending" ? "Saved on this device" : expense.syncStatus === "conflicted" ? "Needs conflict review" : "Verified by ledger"}</div>
               <Show when={error()}><p class="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700" role="alert">{error()}</p></Show>
-              <Show when={confirmDelete()}><div class="disclosure-panel rounded-2xl border border-rose-200 bg-rose-50 p-4"><strong class="text-sm text-rose-900">Delete this expense?</strong><p class="mt-1 text-xs leading-5 text-rose-700">It will be removed from balances, retained in the audit trail, and can be restored from Activity.</p><div class="mt-3 flex gap-2"><Button variant="secondary" class="flex-1" onClick={() => setConfirmDelete(false)}>Cancel</Button><Button variant="destructive" class="flex-1" disabled={busy()} onClick={() => void changeStatus()}>Delete</Button></div></div></Show>
               <div class="grid grid-cols-2 gap-2"><Show when={expense.status === "active"} fallback={<Button class="col-span-2" onClick={() => void changeStatus()} disabled={busy()}><RotateCcw size={16} /> Restore expense</Button>}><Button variant="secondary" onClick={() => props.onEdit(expense)}><PencilLine size={16} /> Edit</Button><Button variant="destructive" onClick={() => setConfirmDelete(true)}><Trash2 size={16} /> Delete</Button></Show></div>
             </div>}</Show>
           </Dialog.Content>
         </div>
       </Dialog.Portal>
+
+      <AlertDialog open={confirmDelete()} onOpenChange={setConfirmDelete}>
+        <AlertDialog.Portal>
+          <AlertDialog.Overlay class="confirm-overlay fixed inset-0 z-[60] bg-black/55 backdrop-blur-[2px]" />
+          <div class="fixed inset-0 z-[70] grid place-items-center p-5">
+            <AlertDialog.Content class="confirm-dialog w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-2xl outline-none">
+              <div class="confirm-danger-icon"><Trash2 size={19} /></div>
+              <AlertDialog.Title class="mt-4 text-lg font-semibold tracking-tight">
+                Delete “{props.expense?.description ?? "this expense"}”?
+              </AlertDialog.Title>
+              <AlertDialog.Description class="mt-2 text-sm leading-6 text-muted-foreground">
+                This removes it from everyone’s balances in {group()?.name ?? "this group"}. The ledger keeps an audit record, so it can be restored later from Activity.
+              </AlertDialog.Description>
+              <div class="mt-5 grid grid-cols-2 gap-2">
+                <Button variant="secondary" onClick={() => setConfirmDelete(false)}>Keep it</Button>
+                <Button variant="destructive" disabled={busy()} onClick={() => void changeStatus()}>
+                  <Trash2 size={16} /> {busy() ? "Deleting…" : "Delete expense"}
+                </Button>
+              </div>
+            </AlertDialog.Content>
+          </div>
+        </AlertDialog.Portal>
+      </AlertDialog>
     </Dialog>
   );
 }
