@@ -16,14 +16,18 @@
     "dev:server": "bun --filter @expenses/server dev",
     "dev:web": "bun --filter @expenses/web dev",
     "test": "bun test",
-    "typecheck": "bun --filter '*' typecheck",
+    "typecheck": "bun --filter @expenses/protocol typecheck && bun --filter @expenses/server typecheck && bun --filter @expenses/web typecheck && tsc --noEmit -p scripts/tsconfig.json",
+    "validate": "bun run typecheck && bun run test",
     "build": "bun --filter @expenses/protocol build && bun --filter @expenses/web build && bun --filter @expenses/server build",
+    "build:release-artifacts": "bun scripts/build-release-artifacts.ts",
+    "release": "bun scripts/release.ts",
     "assets": "bun apps/web/scripts/generate-assets.ts",
     "recovery:new-generation": "bun scripts/rotate-generation.ts",
-    "check": "bun run typecheck && bun run test && bun run build"
+    "check": "bun run validate && bun run build"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "latest"
+    "typescript": "latest",
+    "wrangler": "4.114.0"
   }
 }

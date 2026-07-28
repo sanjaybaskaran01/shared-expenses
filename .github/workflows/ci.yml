@@ -18,7 +18,21 @@ jobs:
         with:
           bun-version: 1.3.10
       - run: bun install --frozen-lockfile
-      - run: bun run check
+      - run: bun run validate
+      - run: bun --filter @expenses/protocol build
+      - run: bun --filter @expenses/web build
+        env:
+          VITE_API_URL: https://api.sanjaybaskaran.com
+      - run: bun --filter @expenses/server build
+      - run: bun run build:release-artifacts -- --commit "$GITHUB_SHA" --output release-artifact
+      - name: Verify the production Worker package
+        run: ./node_modules/.bin/wrangler deploy --dry-run --config apps/web/wrangler.jsonc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tally-release-${{ github.sha }}
+          path: release-artifact
+          if-no-files-found: error
+          retention-days: 30
 
   containers:
     runs-on: ubuntu-latest

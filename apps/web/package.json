@@ -24,15 +24,13 @@
     "echarts": "^6.0.0",
     "lucide-solid": "latest",
     "solid-js": "latest",
-    "tailwind-merge": "^3.6.0",
-    "workbox-window": "latest"
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "latest",
     "sharp": "latest",
     "tailwindcss": "latest",
     "vite": "latest",
-    "vite-plugin-pwa": "latest",
     "vite-plugin-solid": "latest"
   }
 }

@@ -8,8 +8,10 @@ import { loadConfig } from "./config";
 import { openDatabase, runDomainMigrations } from "./database";
 import { enqueueEmail, startEmailWorker } from "./email";
 import { LedgerStore } from "./ledger";
+import { loadReleaseMetadata } from "./release";
 
 const config = loadConfig();
+const releaseMetadata = loadReleaseMetadata(resolve(import.meta.dir, "../release.json"));
 mkdirSync(config.attachmentsPath, { recursive: true });
 const db = openDatabase(config.databasePath);
 runDomainMigrations(db, resolve(import.meta.dir, "../migrations"));
@@ -106,7 +108,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
   if (url.pathname === "/health" && request.method === "GET") {
     return json(request, {
       status: "ok",
-      version: process.env.APP_VERSION ?? "dev",
+      ...releaseMetadata,
       serverTime: new Date().toISOString(),
     });
   }
