@@ -1,6 +1,6 @@
-# Expenses
+# Tally
 
-Expenses is an installable, offline-first shared-expense ledger. A phone writes each expense to IndexedDB before any network request, signs the operation with a per-device P-256 key, and reconciles it with a Bun/SQLite server whenever the server is reachable.
+Tally is an installable, offline-first shared-expense ledger. A phone writes each expense to IndexedDB before any network request, signs the operation with a per-device P-256 key, and reconciles it with a Bun/SQLite server whenever the server is reachable.
 
 This repository is an original implementation inspired by the shared-expense product category. It does not use Splitwise branding, source code, or proprietary assets.
 
@@ -68,6 +68,7 @@ Copy `apps/server/.env.example` to a secret location outside the repository and 
 
 ```dotenv
 NODE_ENV=production
+APP_VERSION=0.1.0
 EXPENSES_BUN_PATH=/absolute/path/from-command-v-bun
 HOST=127.0.0.1
 PORT=3000
@@ -91,28 +92,28 @@ SMTP_FROM=expenses@example.com
 
 Keep this environment file out of Git, backups, shell history, and launch-agent XML. Restrict it with `chmod 600`; the included `scripts/run-server.sh` loads it for `launchd` through the non-secret `EXPENSES_ENV_FILE` path. When either Keychain service variable is set, the runner reads that secret from the macOS login Keychain and overrides the corresponding plaintext variable, so production does not need either secret in the env file.
 
-### 2. Build and run the API
+### 2. Install the native services
+
+The example `launchd` files in `deploy/` contain placeholders on purpose. Copy them to `~/Library/LaunchAgents`, replace every placeholder with an explicit absolute path, and validate them with `plutil -lint` before loading. The production API follows `runtime/current/server/index.js`; the first deterministic release preserves an existing legacy runtime and updates `EXPENSES_SERVER_ENTRY` automatically. A cold reboot still requires a person to unlock FileVault and log in.
+
+### 3. Release from CI artifacts
+
+Push a clean `main` commit and wait for the `CI` workflow. CI performs validation, builds the production web and API packages once, includes every migration, generates SHA-256 manifests, and uploads `tally-release-<commit>`.
 
 ```sh
-bun run check
-bun --filter @expenses/server build
-bun apps/server/dist/index.js
+bun run release -- all
+bun run release -- web
+bun run release -- api
+bun run release -- all --dry-run
 ```
 
-The example `launchd` files in `deploy/` contain placeholders on purpose. Copy them to `~/Library/LaunchAgents`, replace every placeholder with an explicit absolute path, and validate them with `plutil -lint` before loading. A cold reboot still requires a person to unlock FileVault and log in.
+The release command refuses tracked changes, non-`main` branches, unpushed commits, failed CI, missing artifacts, and checksum mismatches. Untracked files only produce a warning. It does not build or run the full test suite on the home Mac.
 
-### 3. Publish the PWA
+API packages are staged under `runtime/releases/<commit>`, preceded by an online SQLite snapshot, and activated by atomically switching `runtime/current`. Local and public health checks must report the exact commit within 30 seconds or the previous release is restored. Web publication captures the current Cloudflare Worker version and automatically rolls it back if release metadata, hashed assets, manifest, or service-worker policy fail verification. Release history and timings are stored outside the repository under Application Support; no release or database snapshot is pruned automatically.
 
-Build the production PWA with its public API origin, then deploy the static directory to the existing Worker:
+The Worker has the `expenses.example.com` custom domain configured in Cloudflare. Static assets remain available while the home Mac is offline. The repository includes static-host security and cache headers. Do not proxy the PWA through the home Mac; that would defeat offline app-shell availability.
 
-```sh
-VITE_API_URL=https://api.example.com bun --filter @expenses/web build
-bunx wrangler deploy --name shared-expenses-web --assets apps/web/dist --compatibility-date 2026-07-25
-```
-
-The Worker has the `expenses.example.com` custom domain configured in Cloudflare. Static assets remain available while the home Mac is offline.
-
-The repository includes static-host security and cache headers. Do not proxy the PWA through the home Mac; that would defeat offline app-shell availability.
+`GET /release.json` identifies the web commit. `GET /health` identifies the API commit, build time, semantic version, and server time.
 
 ### 4. Expose only the API
 
