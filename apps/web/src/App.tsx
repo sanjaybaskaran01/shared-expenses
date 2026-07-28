@@ -1,9 +1,13 @@
+import { Dialog } from "@kobalte/core/dialog";
 import Activity from "lucide-solid/icons/activity";
+import BedSingle from "lucide-solid/icons/bed-single";
+import CarFront from "lucide-solid/icons/car-front";
 import CheckCircle2 from "lucide-solid/icons/check-circle-2";
 import ChevronRight from "lucide-solid/icons/chevron-right";
 import CircleUserRound from "lucide-solid/icons/circle-user-round";
 import Cloud from "lucide-solid/icons/cloud";
 import CloudOff from "lucide-solid/icons/cloud-off";
+import Coffee from "lucide-solid/icons/coffee";
 import House from "lucide-solid/icons/house";
 import LockKeyhole from "lucide-solid/icons/lock-keyhole";
 import LogOut from "lucide-solid/icons/log-out";
@@ -14,10 +18,14 @@ import ReceiptText from "lucide-solid/icons/receipt-text";
 import RefreshCw from "lucide-solid/icons/refresh-cw";
 import Scale from "lucide-solid/icons/scale";
 import ShieldCheck from "lucide-solid/icons/shield-check";
+import ShoppingBasket from "lucide-solid/icons/shopping-basket";
 import Sparkles from "lucide-solid/icons/sparkles";
 import Sun from "lucide-solid/icons/sun";
+import Ticket from "lucide-solid/icons/ticket";
+import Utensils from "lucide-solid/icons/utensils";
 import UsersRound from "lucide-solid/icons/users-round";
 import UserPlus from "lucide-solid/icons/user-plus";
+import X from "lucide-solid/icons/x";
 import {
   For,
   Match,
@@ -79,6 +87,25 @@ function money(amountMinor: number, currency = "USD", compact = false): string {
 
 function expenseDate(value: string): Date {
   return new Date(`${value}T12:00:00`);
+}
+
+function CategoryMark(props: { category: string }) {
+  const value = props.category.toLocaleLowerCase();
+  const Icon = value.includes("food") || value.includes("dinner") || value.includes("restaurant")
+    ? Utensils
+    : value.includes("coffee") || value.includes("drink")
+      ? Coffee
+      : value.includes("car") || value.includes("taxi") || value.includes("transport")
+        ? CarFront
+        : value.includes("grocery") || value.includes("shop")
+          ? ShoppingBasket
+          : value.includes("hotel") || value.includes("stay")
+            ? BedSingle
+            : value.includes("ticket") || value.includes("event")
+              ? Ticket
+              : ReceiptText;
+  const tone = [...value].reduce((total, character) => total + character.charCodeAt(0), 0) % 4;
+  return <span class={`category-icon category-tone-${tone}`}><Icon size={17} /></span>;
 }
 
 function memberName(groupId: string, userId: string, actorId: string): string {
@@ -279,6 +306,7 @@ function ExpenseList(props: {
                         <span>{new Intl.DateTimeFormat(undefined, { month: "short" }).format(date)}</span>
                         <strong>{new Intl.DateTimeFormat(undefined, { day: "2-digit" }).format(date)}</strong>
                       </time>
+                      <CategoryMark category={expense.category} />
                       <div class="min-w-0">
                         <strong class="expense-row-title">{expense.description}</strong>
                         <span class="expense-row-context">
@@ -340,14 +368,8 @@ function GroupsView(props: {
     "category",
   );
   const [groupSection, setGroupSection] = createSignal<"expenses" | "balances" | "insights">("expenses");
-  let sectionGroupId = "";
   createEffect(() => {
-    const nextGroupId = group()?.id ?? "";
     setCurrency(group()?.settlementCurrency ?? "USD");
-    if (nextGroupId && nextGroupId !== sectionGroupId) {
-      sectionGroupId = nextGroupId;
-      setGroupSection("expenses");
-    }
   });
   const balances = createMemo(() =>
     group()
@@ -400,10 +422,16 @@ function GroupsView(props: {
 
   return (
     <div class="page-enter space-y-5 sm:space-y-6">
-      <header>
-        <p class="eyebrow">Group ledger</p>
-        <h1 class="page-title">{group()?.name ?? "Groups"}</h1>
-        <p class="mt-1 text-sm text-muted-foreground">{people().length + 1} people · {activeExpenses().length} {activeExpenses().length === 1 ? "expense" : "expenses"}</p>
+      <header class="group-page-heading">
+        <div>
+          <p class="eyebrow">Group ledger</p>
+          <h1 class="page-title">{group()?.name ?? "Groups"}</h1>
+          <Show when={group()} fallback={<p class="mt-1 text-sm text-muted-foreground">No groups yet</p>}>
+            <p class="mt-1 text-sm text-muted-foreground">
+              {people().length + 1} {people().length === 0 ? "person" : "people"} · {activeExpenses().length} active {activeExpenses().length === 1 ? "expense" : "expenses"}
+            </p>
+          </Show>
+        </div>
       </header>
       <Show when={appStore.groups().length > 0}>
         <GroupRail
@@ -500,12 +528,12 @@ function GroupsView(props: {
 function OverviewView(props: {
   actorId: string;
   activeGroupId?: string | undefined;
-  onAddExpense(): void;
   onCreateGroup(): void;
   onOpenGroup(groupId: string): void;
   onSettle(settlement: Settlement, currency: string, groupId: string): void;
 }) {
   const [inviteOpen, setInviteOpen] = createSignal(false);
+  const [homeSection, setHomeSection] = createSignal<"people" | "groups">("people");
   const [inviteGroupId, setInviteGroupId] = createSignal(
     props.activeGroupId ?? appStore.groups()[0]?.id ?? "",
   );
@@ -545,6 +573,10 @@ function OverviewView(props: {
       .map((id) => appStore.groups().find((group) => group.id === id)?.name)
       .filter(Boolean)
       .join(" · ");
+  const groupMemberCount = (groupId: string) =>
+    appStore.members().filter((member) => member.groupId === groupId && member.status === "active").length;
+  const groupExpenseCount = (groupId: string) =>
+    appStore.expenses().filter((expense) => expense.groupId === groupId && expense.status === "active").length;
   createEffect(() => {
     if (!inviteGroupId() && appStore.groups()[0]) setInviteGroupId(appStore.groups()[0]!.id);
   });
@@ -562,22 +594,19 @@ function OverviewView(props: {
     }
   }
   return (
-    <div class="page-enter space-y-5">
-      <header class="flex items-start justify-between gap-4">
-        <div>
-          <p class="eyebrow">Across {appStore.groups().length} {appStore.groups().length === 1 ? "group" : "groups"}</p>
-          <h1 class="page-title">Your balances</h1>
-        </div>
-        <Button class="hidden sm:inline-flex" onClick={props.onAddExpense}>
-          <Plus size={16} /> Add expense
-        </Button>
+    <div class="page-enter home-page space-y-5">
+      <header class="home-heading">
+        <h1 class="page-title">Your balances</h1>
+        <p class="home-summary-copy">
+          Across {relationships().length} {relationships().length === 1 ? "person" : "people"} · {appStore.groups().length} {appStore.groups().length === 1 ? "group" : "groups"}
+        </p>
       </header>
 
-      <div class="grid gap-3 lg:grid-cols-2">
+      <div class="overview-currency-grid">
         <For each={totals()}>
           {(total) => (
             <section class="overview-balance" aria-label={`${total.currency} balance across all groups`}>
-              <div>
+              <div class="overview-balance-primary">
                 <span class="micro-label">Summary · {total.currency}</span>
                 <strong class="money-type">
                   {total.net === 0 ? money(0, total.currency) : `${total.net > 0 ? "+" : "−"}${money(Math.abs(total.net), total.currency)}`}
@@ -593,68 +622,88 @@ function OverviewView(props: {
         </For>
       </div>
 
-      <div class="grid gap-3 sm:grid-cols-2">
-        <button type="button" class="overview-action" onClick={() => setInviteOpen((value) => !value)} aria-expanded={inviteOpen()}>
-          <span class="overview-action-icon"><UserPlus size={17} /></span>
-          <span><strong>Invite someone</strong><small>Email is all you need</small></span>
-          <ChevronRight size={17} />
-        </button>
-        <button type="button" class="overview-action" onClick={props.onCreateGroup}>
-          <span class="overview-action-icon"><UsersRound size={17} /></span>
-          <span><strong>New group</strong><small>For a trip, home, or event</small></span>
-          <ChevronRight size={17} />
-        </button>
+      <div class="home-list-tabs" role="tablist" aria-label="Home balance views">
+        <button type="button" role="tab" aria-selected={homeSection() === "people"} classList={{ active: homeSection() === "people" }} onClick={() => setHomeSection("people")}>People</button>
+        <button type="button" role="tab" aria-selected={homeSection() === "groups"} classList={{ active: homeSection() === "groups" }} onClick={() => setHomeSection("groups")}>Groups</button>
       </div>
 
-      <Show when={inviteOpen()}>
-        <Card class="disclosure-panel p-5">
-          <div class="flex items-start justify-between gap-3">
-            <div><h2 class="text-sm font-semibold">Invite by email</h2><p class="mt-1 text-sm text-muted-foreground">One link signs them in and opens the right group.</p></div>
-            <Show when={appStore.groups().length > 1}>
-              <select class="form-control h-10 max-w-40" value={inviteGroup()?.id} onInput={(event) => setInviteGroupId(event.currentTarget.value)} aria-label="Group for invitation">
-                <For each={appStore.groups()}>{(group) => <option value={group.id}>{group.name}</option>}</For>
-              </select>
-            </Show>
-          </div>
-          <form class="mt-4 flex gap-2" onSubmit={invite}>
-            <input class="form-control h-11" required type="email" autocomplete="email" value={email()} onInput={(event) => setEmail(event.currentTarget.value)} placeholder="friend@example.com" />
-            <Button type="submit">Send</Button>
-          </form>
-          <Show when={message()}><p class="mt-3 text-xs text-muted-foreground">{message()}</p></Show>
+      <Show when={homeSection() === "people"}>
+        <Card class="home-list-card overflow-hidden" role="tabpanel">
+          <SectionHeading
+            title="People"
+            detail={relationships().length ? "Net across all shared groups" : "No open balances"}
+            action={appStore.groups().length
+              ? <button type="button" class="list-add-action" onClick={() => setInviteOpen(true)}><UserPlus size={14} /> Invite</button>
+              : <button type="button" class="list-add-action" onClick={props.onCreateGroup}><Plus size={14} /> Create group</button>}
+          />
+          <For
+            each={relationships()}
+            fallback={<div class="px-6 py-12 text-center"><ReceiptText class="mx-auto text-muted-foreground" size={25} /><p class="mt-3 text-sm text-muted-foreground">Add an expense and balances will appear here.</p></div>}
+          >
+            {(relationship, index) => {
+              const personName = createMemo(() => nameFor(relationship.userId));
+              const settlement = createMemo<Settlement>(() => relationship.amountMinor > 0
+                ? { payerId: relationship.userId, recipientId: props.actorId, amountMinor: relationship.amountMinor }
+                : { payerId: props.actorId, recipientId: relationship.userId, amountMinor: Math.abs(relationship.amountMinor) });
+              const canSettleHere = relationship.groupIds.length === 1;
+              return (
+                <article class="relationship-row" style={{ "--row-index": index() }}>
+                  <Avatar name={personName()} class="size-10 text-xs" />
+                  <button type="button" class="min-w-0 flex-1 text-left" onClick={() => props.onOpenGroup(relationship.groupIds[0]!)}>
+                    <strong class="block truncate text-sm">{personName()}</strong>
+                    <span class="block truncate text-xs text-muted-foreground">{groupNames(relationship.groupIds)}</span>
+                  </button>
+                  <div class="text-right">
+                    <span class="relationship-direction">{relationship.amountMinor > 0 ? "owes you" : "you owe"}</span>
+                    <strong class="block text-sm tabular-nums" classList={{ "money-in": relationship.amountMinor > 0, "money-out": relationship.amountMinor < 0 }}>{money(Math.abs(relationship.amountMinor), relationship.currency)}</strong>
+                  </div>
+                  <button type="button" class="relationship-action" onClick={() => canSettleHere ? props.onSettle(settlement(), relationship.currency, relationship.groupIds[0]!) : props.onOpenGroup(relationship.groupIds[0]!)}>
+                    <span class="relationship-action-label">{canSettleHere ? "Settle" : "View"}</span>
+                    <ChevronRight class="relationship-action-chevron" size={16} />
+                  </button>
+                </article>
+              );
+            }}
+          </For>
         </Card>
       </Show>
 
-      <Card class="overflow-hidden">
-        <SectionHeading title="People" detail={relationships().length ? "Net across all shared groups" : "No open balances"} />
-        <For
-          each={relationships()}
-          fallback={<div class="px-6 py-12 text-center"><ReceiptText class="mx-auto text-muted-foreground" size={25} /><p class="mt-3 text-sm text-muted-foreground">Add an expense and balances will appear here.</p></div>}
-        >
-          {(relationship, index) => {
-            const personName = createMemo(() => nameFor(relationship.userId));
-            const settlement = createMemo<Settlement>(() => relationship.amountMinor > 0
-              ? { payerId: relationship.userId, recipientId: props.actorId, amountMinor: relationship.amountMinor }
-              : { payerId: props.actorId, recipientId: relationship.userId, amountMinor: Math.abs(relationship.amountMinor) });
-            const canSettleHere = relationship.groupIds.length === 1;
-            return (
-              <article class="relationship-row" style={{ "--row-index": index() }}>
-                <Avatar name={personName()} class="size-9 text-xs" />
-                <button type="button" class="min-w-0 flex-1 text-left" onClick={() => props.onOpenGroup(relationship.groupIds[0]!)}>
-                  <strong class="block truncate text-sm">{personName()}</strong>
-                  <span class="block truncate text-xs text-muted-foreground">{groupNames(relationship.groupIds)}</span>
-                </button>
-                <div class="text-right">
-                  <strong class="block text-sm tabular-nums" classList={{ "money-in": relationship.amountMinor > 0, "money-out": relationship.amountMinor < 0 }}>{money(Math.abs(relationship.amountMinor), relationship.currency)}</strong>
-                  <span class="text-[11px] text-muted-foreground">{relationship.amountMinor > 0 ? "owes you" : "you owe"}</span>
-                </div>
-                <button type="button" class="relationship-action" onClick={() => canSettleHere ? props.onSettle(settlement(), relationship.currency, relationship.groupIds[0]!) : props.onOpenGroup(relationship.groupIds[0]!)}>
-                  {canSettleHere ? "Settle" : "View"}
-                </button>
-              </article>
-            );
-          }}
-        </For>
-      </Card>
+      <Show when={homeSection() === "groups"}>
+        <Card class="home-list-card overflow-hidden" role="tabpanel">
+          <SectionHeading title="Groups" detail="Your shared ledgers" action={<button type="button" class="list-add-action" onClick={props.onCreateGroup}><Plus size={14} /> New</button>} />
+          <For each={appStore.groups()} fallback={<div class="px-6 py-12 text-center text-sm text-muted-foreground">Create a group to start splitting.</div>}>
+            {(group) => (
+              <button type="button" class="home-group-row" onClick={() => props.onOpenGroup(group.id)}>
+                <Avatar name={group.name} class="size-10 text-xs" />
+                <span class="min-w-0 flex-1 text-left"><strong>{group.name}</strong><small>{groupMemberCount(group.id)} {groupMemberCount(group.id) === 1 ? "person" : "people"} · {groupExpenseCount(group.id)} active {groupExpenseCount(group.id) === 1 ? "expense" : "expenses"}</small></span>
+                <ChevronRight size={16} />
+              </button>
+            )}
+          </For>
+        </Card>
+      </Show>
+
+      <Dialog open={inviteOpen()} onOpenChange={(open) => { setInviteOpen(open); if (!open) setMessage(""); }}>
+        <Dialog.Portal>
+          <Dialog.Overlay class="composer-overlay fixed inset-0 z-40 bg-black/45" />
+          <div class="fixed inset-0 z-50 grid items-end sm:place-items-center sm:p-6">
+            <Dialog.Content class="composer-dialog invite-dialog w-full border border-border bg-card shadow-2xl outline-none sm:max-w-md sm:rounded-xl">
+              <header class="flex min-h-16 items-center justify-between border-b border-border px-5">
+                <div><Dialog.Title class="text-base font-semibold">Invite by email</Dialog.Title><Dialog.Description class="mt-0.5 text-xs text-muted-foreground">One link signs them in and opens the right group.</Dialog.Description></div>
+                <Dialog.CloseButton class="icon-button" aria-label="Close invite form"><X size={18} /></Dialog.CloseButton>
+              </header>
+              <form class="grid gap-4 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]" onSubmit={invite}>
+                <Show when={appStore.groups().length > 1}>
+                  <label class="grid gap-2 text-sm font-medium">Group<select class="form-control" value={inviteGroup()?.id} onInput={(event) => setInviteGroupId(event.currentTarget.value)} aria-label="Group for invitation"><For each={appStore.groups()}>{(group) => <option value={group.id}>{group.name}</option>}</For></select></label>
+                </Show>
+                <label class="grid gap-2 text-sm font-medium">Email address<input class="form-control" required type="email" autocomplete="email" value={email()} onInput={(event) => setEmail(event.currentTarget.value)} placeholder="friend@example.com" /></label>
+                <Button type="submit" class="w-full">Send invite</Button>
+                <Show when={message()}><p class="text-xs leading-5 text-muted-foreground">{message()}</p></Show>
+              </form>
+            </Dialog.Content>
+          </div>
+        </Dialog.Portal>
+      </Dialog>
     </div>
   );
 }
@@ -677,6 +726,27 @@ function ActivityView(props: {
   onOpenExpense(expense: LocalExpense): void;
   onToast(message: string): void;
 }) {
+  const activityDays = createMemo(() => {
+    const groups = new Map<string, { label: string; operations: LocalOperation[] }>();
+    const now = new Date();
+    const todayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const yesterdayKey = `${yesterday.getFullYear()}-${yesterday.getMonth()}-${yesterday.getDate()}`;
+    for (const operation of [...appStore.operations()].sort((left, right) => right.clientTimestamp.localeCompare(left.clientTimestamp))) {
+      const date = new Date(operation.clientTimestamp);
+      const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+      const label = key === todayKey
+        ? "Today"
+        : key === yesterdayKey
+          ? "Yesterday"
+          : new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric", year: date.getFullYear() === now.getFullYear() ? undefined : "numeric" }).format(date);
+      const existing = groups.get(key);
+      if (existing) existing.operations.push(operation);
+      else groups.set(key, { label, operations: [operation] });
+    }
+    return [...groups.values()];
+  });
   async function restore(expense: LocalExpense) {
     await restoreExpense(expense);
     props.onToast("Expense restored");
@@ -687,92 +757,46 @@ function ActivityView(props: {
         <h1 class="page-title">Activity</h1>
         <p class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
           <span class="sync-dot" classList={{ pending: appStore.connection() !== "online" }} />
-          {appStore.connection() === "online" ? "Synced" : "Saved on this device"} · every change remains auditable
+          {appStore.connection() === "online" ? "Synced" : "Saved on this device"} · just now
         </p>
       </header>
-      <Card class="overflow-hidden">
+      <div>
+        <h2 class="activity-feed-title">Everything that changed</h2>
         <For
-          each={appStore.operations()}
+          each={activityDays()}
           fallback={
-            <div class="px-6 py-12 text-center text-sm text-muted-foreground">
+            <Card class="mt-4 px-6 py-12 text-center text-sm text-muted-foreground">
               Activity appears after your first ledger change.
-            </div>
+            </Card>
           }
         >
-          {(operation) => {
-            const expense = createMemo(() =>
-              appStore
-                .expenses()
-                .find((item) => item.id === operation.targetId),
-            );
-            const group = createMemo(() =>
-              appStore.groups().find((item) => item.id === operation.groupId),
-            );
-            return (
-              <article class="activity-row flex gap-3 border-b border-border/60 px-4 py-4 last:border-0 sm:px-5">
-                <span
-                  class="activity-dot"
-                  classList={{
-                    pending: operation.syncStatus === "pending",
-                    error:
-                      operation.syncStatus === "conflicted" ||
-                      operation.syncStatus === "rejected",
-                  }}
-                />
-                <button
-                  type="button"
-                  class="min-w-0 flex-1 text-left"
-                  disabled={!expense()}
-                  onClick={() => expense() && props.onOpenExpense(expense()!)}
-                >
-                  <strong class="block text-sm font-semibold">
-                    {operation.actorId === props.actorId
-                      ? "You"
-                      : memberName(
-                          operation.groupId,
-                          operation.actorId,
-                          props.actorId,
-                        )}{" "}
-                    {activityCopy[operation.type] ?? "changed the ledger"}
-                  </strong>
-                  <p class="mt-0.5 truncate text-xs text-muted-foreground">
-                    {expense()
-                      ? `${expense()!.description} · ${group()?.name ?? "Shared group"}`
-                      : group()?.name ?? "Shared ledger"}{" "}
-                    ·{" "}
-                    {operation.syncStatus === "pending"
-                      ? "on this device"
-                      : operation.syncStatus === "accepted"
-                        ? "verified"
-                        : "needs review"}
-                  </p>
-                </button>
-                <div class="shrink-0 text-right">
-                  <time class="block text-[11px] text-muted-foreground">
-                    {new Intl.DateTimeFormat(undefined, {
-                      month: "short",
-                      day: "numeric",
-                    }).format(new Date(operation.clientTimestamp))}
-                  </time>
-                  <Show
-                    when={
-                      operation.type === "ExpenseVoided" &&
-                      expense()?.status === "voided"
-                    }
-                  >
-                    <button
-                      class="mt-1 text-xs font-semibold text-primary"
-                      onClick={() => expense() && void restore(expense()!)}
-                    >
-                      Restore
-                    </button>
-                  </Show>
-                </div>
-              </article>
-            );
-          }}
+          {(day) => <section class="activity-day" aria-label={day.label}>
+            <h3>{day.label}</h3>
+            <Card class="activity-day-card overflow-hidden">
+              <For each={day.operations}>{(operation) => {
+                const expense = createMemo(() => appStore.expenses().find((item) => item.id === operation.targetId));
+                const group = createMemo(() => appStore.groups().find((item) => item.id === operation.groupId));
+                const actor = createMemo(() => operation.actorId === props.actorId ? "You" : memberName(operation.groupId, operation.actorId, props.actorId));
+                return <article class="activity-row">
+                  <Avatar name={actor()} class="size-10 text-xs" />
+                  <button type="button" class="activity-row-main" disabled={!expense()} onClick={() => expense() && props.onOpenExpense(expense()!)}>
+                    <strong>{actor()} {activityCopy[operation.type] ?? "changed the ledger"}</strong>
+                    <span>{expense() ? `${expense()!.description} · ${group()?.name ?? "Shared group"}` : group()?.name ?? "Shared ledger"}</span>
+                    <time>{new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(operation.clientTimestamp))}</time>
+                  </button>
+                  <div class="activity-row-value">
+                    <Show when={expense()}>{(item) => <strong>{money(item().amountMinor, item().currency)}</strong>}</Show>
+                    <Show when={operation.type === "ExpenseVoided" && expense()?.status === "voided"}>
+                      <button onClick={() => expense() && void restore(expense()!)}>Restore</button>
+                    </Show>
+                  </div>
+                  <Show when={expense()}><ChevronRight size={15} class="activity-row-chevron" /></Show>
+                </article>;
+              }}</For>
+            </Card>
+          </section>}
         </For>
-      </Card>
+      </div>
     </div>
   );
 }
@@ -929,7 +953,7 @@ function AuthenticatedApp(props: { actorId: string }) {
     { id: "overview" as const, label: "Home", icon: House },
     { id: "groups" as const, label: "Groups", icon: UsersRound },
     { id: "activity" as const, label: "Activity", icon: Activity },
-    { id: "account" as const, label: "Account", icon: CircleUserRound },
+    { id: "account" as const, label: "You", icon: CircleUserRound },
   ];
   function notify(message: string) {
     setToast(message);
@@ -1042,16 +1066,15 @@ function AuthenticatedApp(props: { actorId: string }) {
         <header class="mobile-header md:hidden">
           <strong class="mobile-wordmark">Tally</strong>
           <button class="mobile-add-action" type="button" onClick={() => addExpense()}>
-            <Plus size={15} /> Add expense
+            Add expense
           </button>
         </header>
-        <main class="mx-auto w-full max-w-6xl px-4 pb-28 pt-5 sm:px-6 sm:pt-8 md:px-8 md:pb-12 lg:px-10">
+        <main class="app-main mx-auto w-full max-w-5xl px-4 pb-28 pt-5 sm:px-6 sm:pt-8 md:px-8 md:pb-12 lg:px-10">
           <Switch>
             <Match when={tab() === "overview"}>
               <OverviewView
                 actorId={props.actorId}
                 activeGroupId={selectedGroupId()}
-                onAddExpense={() => addExpense()}
                 onCreateGroup={openGroupComposer}
                 onOpenGroup={selectGroup}
                 onSettle={settle}
