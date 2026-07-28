@@ -41,8 +41,13 @@ export function Badge(props: JSX.HTMLAttributes<HTMLSpanElement>) {
 
 export function Avatar(props: { name: string; class?: string }) {
   return (
-    <span class={cn("inline-grid size-9 shrink-0 place-items-center rounded-full bg-muted text-sm font-semibold text-foreground", props.class)}>
-      {props.name.slice(0, 1).toUpperCase()}
+    <span class={cn("avatar-tile inline-grid size-9 shrink-0 place-items-center rounded-md text-sm font-semibold", props.class)}>
+      {props.name
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part.slice(0, 1).toUpperCase())
+        .join("") || "?"}
     </span>
   );
 }

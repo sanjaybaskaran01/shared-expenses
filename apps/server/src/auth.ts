@@ -63,7 +63,7 @@ export function createAuth(db: Database, config: AppConfig) {
     );
   };
   return betterAuth({
-    appName: "Expenses",
+    appName: "Tally",
     database: db,
     baseURL: config.publicApiUrl,
     secret: config.authSecret,
@@ -91,13 +91,13 @@ export function createAuth(db: Database, config: AppConfig) {
             : null;
           const subject = invitation
             ? `${invitation.inviterName} invited you to ${invitation.groupName}`
-            : "Your secure Expenses sign-in link";
+            : "Your secure Tally sign-in link";
           const text = invitation
-            ? `${invitation.inviterName} invited you to join ${invitation.groupName} on Expenses. Open this single-use link to join and sign in: ${url}`
-            : `Open this single-use link to sign in to Expenses: ${url}`;
+            ? `${invitation.inviterName} invited you to join ${invitation.groupName} on Tally. Open this single-use link to join and sign in: ${url}`
+            : `Open this single-use link to sign in to Tally: ${url}`;
           const html = invitation
-            ? `<p><strong>${escapeHtml(invitation.inviterName)}</strong> invited you to join <strong>${escapeHtml(invitation.groupName)}</strong> on Expenses.</p><p><a href="${escapeHtml(url)}">Join ${escapeHtml(invitation.groupName)}</a></p><p>This single-use link verifies your email and signs you in. It expires in 10 minutes.</p>`
-            : `<p>Use this single-use link to sign in to Expenses:</p><p><a href="${escapeHtml(url)}">Open Expenses</a></p><p>This link expires in 10 minutes.</p>`;
+            ? `<p><strong>${escapeHtml(invitation.inviterName)}</strong> invited you to join <strong>${escapeHtml(invitation.groupName)}</strong> on Tally.</p><p><a href="${escapeHtml(url)}">Join ${escapeHtml(invitation.groupName)}</a></p><p>This single-use link verifies your email and signs you in. It expires in 10 minutes.</p>`
+            : `<p>Use this single-use link to sign in to Tally:</p><p><a href="${escapeHtml(url)}">Open Tally</a></p><p>This link expires in 10 minutes.</p>`;
           enqueueEmail(db, {
             idempotencyKey: emailKey("magic-link", email, token),
             recipient: email,

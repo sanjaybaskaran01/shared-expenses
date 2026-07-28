@@ -1,5 +1,10 @@
 import { Dialog } from "@kobalte/core/dialog";
-import { Bug, Check, LoaderCircle, Lightbulb, MessageCircle, X } from "lucide-solid";
+import Bug from "lucide-solid/icons/bug";
+import Check from "lucide-solid/icons/check";
+import Lightbulb from "lucide-solid/icons/lightbulb";
+import LoaderCircle from "lucide-solid/icons/loader-circle";
+import MessageCircle from "lucide-solid/icons/message-circle";
+import X from "lucide-solid/icons/x";
 import { Show, createSignal, onCleanup } from "solid-js";
 import { sendFeedback } from "../lib/api";
 import { cn } from "../lib/cn";
@@ -89,7 +94,7 @@ export function FeedbackButton(props: { compact?: boolean; class?: string }) {
                 when={!sent()}
                 fallback={
                   <div class="grid place-items-center gap-3 px-6 py-12 text-center">
-                    <span class="grid size-11 place-items-center rounded-full bg-emerald-50 text-emerald-700">
+                    <span class="feedback-success grid size-11 place-items-center rounded-md">
                       <Check size={20} />
                     </span>
                     <p class="text-sm font-medium">Thanks — we got it.</p>
@@ -130,7 +135,7 @@ export function FeedbackButton(props: { compact?: boolean; class?: string }) {
                     />
                   </label>
                   <Show when={error()}>
-                    <p class="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700" role="alert">
+                    <p class="error-callout" role="alert">
                       {error()}
                     </p>
                   </Show>

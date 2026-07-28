@@ -1,5 +1,13 @@
 import { Dialog } from "@kobalte/core/dialog";
-import { CalendarDays, Check, ChevronDown, ChevronRight, ChevronUp, LoaderCircle, Scale, SlidersHorizontal, UsersRound } from "lucide-solid";
+import CalendarDays from "lucide-solid/icons/calendar-days";
+import Check from "lucide-solid/icons/check";
+import ChevronDown from "lucide-solid/icons/chevron-down";
+import ChevronRight from "lucide-solid/icons/chevron-right";
+import ChevronUp from "lucide-solid/icons/chevron-up";
+import LoaderCircle from "lucide-solid/icons/loader-circle";
+import Scale from "lucide-solid/icons/scale";
+import SlidersHorizontal from "lucide-solid/icons/sliders-horizontal";
+import UsersRound from "lucide-solid/icons/users-round";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { LocalExpense } from "../lib/db";
 import { isLocalToday, localDateValue } from "../lib/dates";
@@ -414,7 +422,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                 </section>
               </Show>
 
-              <Show when={error()}><p class="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700" role="alert">{error()}</p></Show>
+              <Show when={error()}><p class="error-callout" role="alert">{error()}</p></Show>
               <footer class="sticky bottom-0 z-10 -mx-4 mt-1 grid gap-2 border-t border-border bg-card/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur sm:-mx-6 sm:px-6">
                 <Button class="h-11 w-full" type="submit" disabled={!canSave()}>
                   <Show when={saving()} fallback={<><Check size={16} /> {props.expense ? "Save changes" : `Add ${formatMinor(Math.round((Number(amount()) || 0) * 100), currency())}`}</>}><LoaderCircle class="animate-spin" size={16} /> Saving…</Show>
