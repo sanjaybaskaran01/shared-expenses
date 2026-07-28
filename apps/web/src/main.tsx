@@ -4,7 +4,7 @@ import "./styles/app.css";
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    void navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" });
+    void navigator.serviceWorker.register("/tally-sw.js", { updateViaCache: "none" });
   });
 }
 
