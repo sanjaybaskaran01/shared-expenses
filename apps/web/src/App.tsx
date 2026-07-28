@@ -1,25 +1,23 @@
-import {
-  Activity,
-  CheckCircle2,
-  ChevronRight,
-  CircleUserRound,
-  Cloud,
-  CloudOff,
-  House,
-  LockKeyhole,
-  LogOut,
-  Mail,
-  Moon,
-  Plus,
-  ReceiptText,
-  RefreshCw,
-  Scale,
-  ShieldCheck,
-  Sparkles,
-  Sun,
-  UsersRound,
-  UserPlus,
-} from "lucide-solid";
+import Activity from "lucide-solid/icons/activity";
+import CheckCircle2 from "lucide-solid/icons/check-circle-2";
+import ChevronRight from "lucide-solid/icons/chevron-right";
+import CircleUserRound from "lucide-solid/icons/circle-user-round";
+import Cloud from "lucide-solid/icons/cloud";
+import CloudOff from "lucide-solid/icons/cloud-off";
+import House from "lucide-solid/icons/house";
+import LockKeyhole from "lucide-solid/icons/lock-keyhole";
+import LogOut from "lucide-solid/icons/log-out";
+import Mail from "lucide-solid/icons/mail";
+import Moon from "lucide-solid/icons/moon";
+import Plus from "lucide-solid/icons/plus";
+import ReceiptText from "lucide-solid/icons/receipt-text";
+import RefreshCw from "lucide-solid/icons/refresh-cw";
+import Scale from "lucide-solid/icons/scale";
+import ShieldCheck from "lucide-solid/icons/shield-check";
+import Sparkles from "lucide-solid/icons/sparkles";
+import Sun from "lucide-solid/icons/sun";
+import UsersRound from "lucide-solid/icons/users-round";
+import UserPlus from "lucide-solid/icons/user-plus";
 import {
   For,
   Match,
@@ -129,7 +127,7 @@ function ConnectionPill() {
           <span>Checking</span>
         </Match>
         <Match when={true}>
-          <CloudOff class="text-amber-600" size={14} />
+          <CloudOff class="connection-warning" size={14} />
           <span>{pending() ? `${pending()} on device` : "Offline"}</span>
         </Match>
       </Switch>
@@ -232,7 +230,7 @@ function ExpenseList(props: {
   return (
     <Card class="expense-ledger">
       <SectionHeading
-        title="Expense timeline"
+        title="Activity"
         detail={`${activeCount()} active ${activeCount() === 1 ? "expense" : "expenses"}`}
         action={
           <Show when={props.onAdd}>
@@ -403,9 +401,9 @@ function GroupsView(props: {
   return (
     <div class="page-enter space-y-5 sm:space-y-6">
       <header>
-        <p class="eyebrow">Group</p>
+        <p class="eyebrow">Group ledger</p>
         <h1 class="page-title">{group()?.name ?? "Groups"}</h1>
-        <p class="mt-2 text-sm text-muted-foreground">{activeExpenses().length} {activeExpenses().length === 1 ? "expense" : "expenses"} · newest first</p>
+        <p class="mt-1 text-sm text-muted-foreground">{people().length + 1} people · {activeExpenses().length} {activeExpenses().length === 1 ? "expense" : "expenses"}</p>
       </header>
       <Show when={appStore.groups().length > 0}>
         <GroupRail
@@ -435,7 +433,7 @@ function GroupsView(props: {
         {(activeGroup) => (
           <>
             <div class="group-view-tabs" role="tablist" aria-label={`${activeGroup.name} views`}>
-              <button type="button" role="tab" aria-selected={groupSection() === "expenses"} classList={{ active: groupSection() === "expenses" }} onClick={() => setGroupSection("expenses")}><ReceiptText size={16} /><span>Expenses</span></button>
+              <button type="button" role="tab" aria-selected={groupSection() === "expenses"} classList={{ active: groupSection() === "expenses" }} onClick={() => setGroupSection("expenses")}><ReceiptText size={16} /><span>Activity</span></button>
               <button type="button" role="tab" aria-selected={groupSection() === "balances"} classList={{ active: groupSection() === "balances" }} onClick={() => setGroupSection("balances")}><Scale size={16} /><span>Balances</span></button>
               <button type="button" role="tab" aria-selected={groupSection() === "insights"} classList={{ active: groupSection() === "insights" }} onClick={() => setGroupSection("insights")}><Activity size={16} /><span>Insights</span></button>
             </div>
@@ -567,11 +565,10 @@ function OverviewView(props: {
     <div class="page-enter space-y-5">
       <header class="flex items-start justify-between gap-4">
         <div>
-          <p class="eyebrow">Across every group</p>
-          <h1 class="page-title">Your shared money</h1>
-          <p class="mt-1 text-sm text-muted-foreground">One view of what is owed, regardless of where it happened.</p>
+          <p class="eyebrow">Across {appStore.groups().length} {appStore.groups().length === 1 ? "group" : "groups"}</p>
+          <h1 class="page-title">Your balances</h1>
         </div>
-        <Button class="hidden rounded-full sm:inline-flex" onClick={props.onAddExpense}>
+        <Button class="hidden sm:inline-flex" onClick={props.onAddExpense}>
           <Plus size={16} /> Add expense
         </Button>
       </header>
@@ -581,15 +578,15 @@ function OverviewView(props: {
           {(total) => (
             <section class="overview-balance" aria-label={`${total.currency} balance across all groups`}>
               <div>
-                <span class="micro-label">Net balance · {total.currency}</span>
+                <span class="micro-label">Summary · {total.currency}</span>
                 <strong class="money-type">
                   {total.net === 0 ? money(0, total.currency) : `${total.net > 0 ? "+" : "−"}${money(Math.abs(total.net), total.currency)}`}
                 </strong>
-                <p>{total.net > 0 ? "You are owed overall" : total.net < 0 ? "You owe overall" : "Everything is settled"}</p>
+                <p>{total.net > 0 ? "owed to you" : total.net < 0 ? "you owe overall" : "all settled"}</p>
               </div>
               <div class="overview-balance-details">
-                <span><small>Coming in</small><strong>{money(total.incoming, total.currency)}</strong></span>
-                <span><small>Going out</small><strong>{money(total.outgoing, total.currency)}</strong></span>
+                <span><small>You’re owed</small><strong class="money-in">{money(total.incoming, total.currency)}</strong></span>
+                <span><small>You owe</small><strong class="money-out">{money(total.outgoing, total.currency)}</strong></span>
               </div>
             </section>
           )}
@@ -647,7 +644,7 @@ function OverviewView(props: {
                   <span class="block truncate text-xs text-muted-foreground">{groupNames(relationship.groupIds)}</span>
                 </button>
                 <div class="text-right">
-                  <strong class="block text-sm tabular-nums">{money(Math.abs(relationship.amountMinor), relationship.currency)}</strong>
+                  <strong class="block text-sm tabular-nums" classList={{ "money-in": relationship.amountMinor > 0, "money-out": relationship.amountMinor < 0 }}>{money(Math.abs(relationship.amountMinor), relationship.currency)}</strong>
                   <span class="text-[11px] text-muted-foreground">{relationship.amountMinor > 0 ? "owes you" : "you owe"}</span>
                 </div>
                 <button type="button" class="relationship-action" onClick={() => canSettleHere ? props.onSettle(settlement(), relationship.currency, relationship.groupIds[0]!) : props.onOpenGroup(relationship.groupIds[0]!)}>
@@ -687,10 +684,10 @@ function ActivityView(props: {
   return (
     <div class="page-enter space-y-5">
       <header>
-        <p class="eyebrow">Immutable ledger</p>
         <h1 class="page-title">Activity</h1>
-        <p class="mt-1 text-sm text-muted-foreground">
-          Every change is signed and remains auditable.
+        <p class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+          <span class="sync-dot" classList={{ pending: appStore.connection() !== "online" }} />
+          {appStore.connection() === "online" ? "Synced" : "Saved on this device"} · every change remains auditable
         </p>
       </header>
       <Card class="overflow-hidden">
@@ -712,7 +709,7 @@ function ActivityView(props: {
               appStore.groups().find((item) => item.id === operation.groupId),
             );
             return (
-              <article class="flex gap-3 border-b border-border/60 px-4 py-4 last:border-0 sm:px-5">
+              <article class="activity-row flex gap-3 border-b border-border/60 px-4 py-4 last:border-0 sm:px-5">
                 <span
                   class="activity-dot"
                   classList={{
@@ -983,7 +980,7 @@ function AuthenticatedApp(props: { actorId: string }) {
       <aside class="desktop-sidebar hidden md:sticky md:top-0 md:flex md:h-dvh md:flex-col">
         <div class="flex h-18 items-center gap-2.5 px-5">
           <BrandMark size={32} />
-          <strong>Expenses</strong>
+          <strong>Tally</strong>
         </div>
         <div class="px-3 pb-3">
           <Button
@@ -1043,13 +1040,12 @@ function AuthenticatedApp(props: { actorId: string }) {
       </aside>
       <div class="min-w-0">
         <header class="mobile-header md:hidden">
-          <div class="flex items-center gap-2">
-            <BrandMark size={29} />
-            <strong class="text-sm">Expenses</strong>
-          </div>
-          <ConnectionPill />
+          <strong class="mobile-wordmark">Tally</strong>
+          <button class="mobile-add-action" type="button" onClick={() => addExpense()}>
+            <Plus size={15} /> Add expense
+          </button>
         </header>
-        <main class="mx-auto w-full max-w-6xl px-4 pb-36 pt-6 sm:px-6 sm:pt-8 md:px-8 md:pb-12 lg:px-10">
+        <main class="mx-auto w-full max-w-6xl px-4 pb-28 pt-5 sm:px-6 sm:pt-8 md:px-8 md:pb-12 lg:px-10">
           <Switch>
             <Match when={tab() === "overview"}>
               <OverviewView
@@ -1102,10 +1098,6 @@ function AuthenticatedApp(props: { actorId: string }) {
             </button>
           )}
         </For>
-        <button class="nav-add-item" type="button" onClick={() => addExpense()} aria-label="Add expense">
-          <Plus size={20} stroke-width={2.5} />
-          <span>Add</span>
-        </button>
       </nav>
       <Show when={toast()}>
         <div class="toast-enter toast-pill">
@@ -1209,9 +1201,9 @@ function AuthScreen() {
       <div class="w-full max-w-sm">
         <div class="mb-6 flex items-center justify-center gap-2.5 text-white">
           <BrandMark size={38} />
-          <strong class="text-lg">Expenses</strong>
+          <strong class="text-lg">Tally</strong>
         </div>
-        <Card class="glass-auth rounded-[2rem] p-6 sm:p-8">
+        <Card class="glass-auth rounded-xl p-6 sm:p-8">
           <span class="mb-5 grid size-11 place-items-center rounded-2xl bg-primary/10 text-primary">
             <LockKeyhole size={19} />
           </span>

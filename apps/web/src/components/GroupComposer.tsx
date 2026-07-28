@@ -1,5 +1,7 @@
 import { Dialog } from "@kobalte/core/dialog";
-import { LoaderCircle, Plus, X } from "lucide-solid";
+import LoaderCircle from "lucide-solid/icons/loader-circle";
+import Plus from "lucide-solid/icons/plus";
+import X from "lucide-solid/icons/x";
 import { Show, createEffect, createSignal } from "solid-js";
 import { Button } from "./ui";
 import { createGroup } from "../lib/store";
@@ -54,7 +56,7 @@ export function GroupComposer(props: GroupComposerProps) {
             <form class="grid gap-5 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] sm:p-6" onSubmit={(event) => void submit(event)}>
               <label class="grid gap-2 text-sm font-medium">Group name<input class="form-control h-12" autofocus required maxlength={100} placeholder="Apartment, Japan trip…" value={name()} onInput={(event) => setName(event.currentTarget.value)} /></label>
               <label class="grid gap-2 text-sm font-medium">Default currency<select class="form-control" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)}><option value="USD">USD — US dollar</option><option value="CAD">CAD — Canadian dollar</option><option value="EUR">EUR — Euro</option><option value="GBP">GBP — British pound</option><option value="INR">INR — Indian rupee</option></select></label>
-              <Show when={error()}><p class="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700" role="alert">{error()}</p></Show>
+              <Show when={error()}><p class="error-callout" role="alert">{error()}</p></Show>
               <Button class="h-11 w-full" type="submit" disabled={!name().trim() || saving()}>
                 <Show when={saving()} fallback={<><Plus size={16} /> Create group</>}><LoaderCircle class="animate-spin" size={16} /> Creating…</Show>
               </Button>

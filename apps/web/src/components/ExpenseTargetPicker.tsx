@@ -1,5 +1,10 @@
 import { Dialog } from "@kobalte/core/dialog";
-import { ChevronRight, Plus, Search, UserRound, UsersRound, X } from "lucide-solid";
+import ChevronRight from "lucide-solid/icons/chevron-right";
+import Plus from "lucide-solid/icons/plus";
+import Search from "lucide-solid/icons/search";
+import UserRound from "lucide-solid/icons/user-round";
+import UsersRound from "lucide-solid/icons/users-round";
+import X from "lucide-solid/icons/x";
 import { For, Show, createMemo, createSignal } from "solid-js";
 import { buildExpenseTargets, type ExpenseTarget } from "../lib/expense-targets";
 import { appStore } from "../lib/store";

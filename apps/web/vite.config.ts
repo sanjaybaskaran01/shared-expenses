@@ -11,11 +11,11 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["brand-mark.svg", "apple-touch-icon.png", "brand-concept.png"],
       manifest: {
-        name: "Expenses",
-        short_name: "Expenses",
+        name: "Tally",
+        short_name: "Tally",
         description: "Shared fairly. Reconciled clearly.",
-        theme_color: "#fafafa",
-        background_color: "#fafafa",
+        theme_color: "#f8f7f4",
+        background_color: "#f8f7f4",
         display: "standalone",
         start_url: "/",
         icons: [
