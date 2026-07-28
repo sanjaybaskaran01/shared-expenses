@@ -51,6 +51,7 @@ const versionedTypes = new Set([
   "ExpenseRestored",
   "PaymentRecorded",
   "PaymentReversed",
+  "GroupCurrencyChanged",
   "ConflictResolved",
 ]);
 
@@ -458,6 +459,26 @@ export class LedgerStore {
       return;
     }
 
+    if (operation.type === "GroupCurrencyChanged") {
+      if (operation.groupId !== operation.targetId) throw new TypeError("A currency change must target its group id");
+      const payload = jsonObject(operation.payload);
+      const settlementCurrency = requiredString(payload, "settlementCurrency", 3).toUpperCase();
+      if (!/^[A-Z]{3}$/.test(settlementCurrency)) throw new TypeError("settlementCurrency must be a three-letter ISO code");
+      const ledgerEntries = this.db
+        .query<{ count: number }, [string, string]>(
+          `SELECT
+             (SELECT COUNT(*) FROM expenses WHERE group_id = ?) +
+             (SELECT COUNT(*) FROM payments WHERE group_id = ?) AS count`,
+        )
+        .get(operation.groupId, operation.groupId)?.count ?? 0;
+      if (ledgerEntries > 0) throw new Error("Group currency is locked after the first expense or payment");
+      const result = this.db
+        .query("UPDATE groups SET settlement_currency = ? WHERE id = ? AND deleted_at IS NULL")
+        .run(settlementCurrency, operation.groupId);
+      if (result.changes !== 1) throw new Error("Group does not exist");
+      return;
+    }
+
     if (operation.type === "ExpenseCreated" || operation.type === "ExpenseAmended") {
       const payload = parseExpensePayload(operation.payload);
       this.assertActiveParticipants(operation.groupId, "payers", payload.payers);
@@ -659,8 +680,10 @@ export class LedgerStore {
   snapshot(actorId: string): { groups: unknown[]; expenses: unknown[]; members: unknown[] } {
     const groups = this.db
       .query(
-        `SELECT g.id, g.name, g.settlement_currency AS settlementCurrency, g.created_at AS createdAt
+        `SELECT g.id, g.name, g.settlement_currency AS settlementCurrency, g.created_at AS createdAt,
+                COALESCE(ev.version, 0) AS version
          FROM groups g JOIN group_members gm ON gm.group_id = g.id
+         LEFT JOIN entity_versions ev ON ev.group_id = g.id AND ev.target_id = g.id
          WHERE gm.user_id = ? AND gm.status = 'active' AND g.deleted_at IS NULL
          ORDER BY g.created_at`,
       )

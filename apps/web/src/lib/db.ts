@@ -13,6 +13,7 @@ export interface LocalGroup {
   name: string;
   settlementCurrency: string;
   createdAt: string;
+  version?: number;
 }
 
 export interface LocalMember {

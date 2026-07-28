@@ -9,6 +9,7 @@ export const operationTypes = [
   "PaymentRecorded",
   "PaymentReversed",
   "GroupCreated",
+  "GroupCurrencyChanged",
   "GroupMemberAdded",
   "GroupMemberRemoved",
   "ConflictResolved",
