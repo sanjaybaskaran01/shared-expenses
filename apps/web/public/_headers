@@ -11,5 +11,5 @@
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 
-/sw.js
+/tally-sw.js
   Cache-Control: no-cache
