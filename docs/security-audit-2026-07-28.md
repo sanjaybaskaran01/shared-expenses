@@ -13,6 +13,7 @@ Ignored production environment files were checked only for Git tracking status a
 - GitHub's secret-scanning alerts endpoint returned no open alerts at the time of review.
 - The production environment file is ignored, absent from the index, and absent from reachable history.
 - No database, WAL, backup, receipt, attachment, or browser private-key material was tracked.
+- A GitGuardian finding in `apps/server/test/auth.test.ts` was correlated to a single synthetic, high-entropy test fixture introduced in commit `1eefde25fcabb0212c27680525de9ce6b5e2b712`. It did not match any configured credential. The fixture was replaced with an unmistakable test-only value, and the tracked-tree scanner now checks credential-like object-literal properties as well as environment-style assignments.
 - Historical commit metadata contains a personal author email, and historical documents disclosed deployment-specific domains and operational choices. Those are privacy/operational disclosures, not credentials, but they should be removed from public history.
 - Unreachable local objects exist from amended/deleted work. They were scanned and did not contain a detected credential. They are not referenced by the remote repository, but local garbage collection has not been run because it is destructive.
 - v1 data authorization was scoped by verified session, active group membership, and trusted device. v1 content remains readable to the server operator.

@@ -13,7 +13,7 @@ function integerEnv(name: string, fallback: number): number {
 }
 
 export function validateProductionAuthSecret(value: string): void {
-  if (value.length < 32 || /(development|replace|example)/i.test(value)) {
+  if (value.length < 32 || /(development|replace|example|test)/i.test(value)) {
     throw new Error("BETTER_AUTH_SECRET must contain at least 32 non-example characters in production");
   }
 }
