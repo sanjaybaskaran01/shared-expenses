@@ -185,9 +185,17 @@ export class LedgerStore {
     })();
   }
 
-  registerDevice(input: { id: string; userId: string; publicKeyJwk: JsonWebKey; name: string }): void {
+  registerDevice(input: {
+    id: string;
+    userId: string;
+    publicKeyJwk: JsonWebKey;
+    encryptionPublicKeyJwk?: JsonWebKey;
+    name: string;
+  }): void {
     const existing = this.db
-      .query<{ user_id: string; public_key_jwk: string }, [string]>("SELECT user_id, public_key_jwk FROM devices WHERE id = ?")
+      .query<{ user_id: string; public_key_jwk: string; encryption_public_key_jwk: string | null }, [string]>(
+        "SELECT user_id, public_key_jwk, encryption_public_key_jwk FROM devices WHERE id = ?",
+      )
       .get(input.id);
     if (existing && existing.user_id !== input.userId) {
       throw new Error("Device id is already owned by another account");
@@ -195,17 +203,32 @@ export class LedgerStore {
     if (existing && existing.public_key_jwk !== JSON.stringify(input.publicKeyJwk)) {
       throw new Error("Device public key cannot be replaced");
     }
+    if (
+      existing?.encryption_public_key_jwk &&
+      input.encryptionPublicKeyJwk &&
+      existing.encryption_public_key_jwk !== JSON.stringify(input.encryptionPublicKeyJwk)
+    ) {
+      throw new Error("Device encryption key cannot be replaced");
+    }
     this.db
       .query(
-        `INSERT INTO devices(id, user_id, public_key_jwk, name, status, created_at)
-         VALUES (?, ?, ?, ?, 'active', ?)
+        `INSERT INTO devices(id, user_id, public_key_jwk, encryption_public_key_jwk, name, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 'active', ?)
          ON CONFLICT(id) DO UPDATE SET
            public_key_jwk = excluded.public_key_jwk,
+           encryption_public_key_jwk = COALESCE(devices.encryption_public_key_jwk, excluded.encryption_public_key_jwk),
            name = excluded.name,
            status = 'active',
            revoked_at = NULL`,
       )
-      .run(input.id, input.userId, JSON.stringify(input.publicKeyJwk), input.name, new Date().toISOString());
+      .run(
+        input.id,
+        input.userId,
+        JSON.stringify(input.publicKeyJwk),
+        input.encryptionPublicKeyJwk ? JSON.stringify(input.encryptionPublicKeyJwk) : null,
+        input.name,
+        new Date().toISOString(),
+      );
   }
 
   private isActiveMember(groupId: string, userId: string): boolean {

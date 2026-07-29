@@ -23,11 +23,12 @@
     "release": "bun scripts/release.ts",
     "assets": "bun apps/web/scripts/generate-assets.ts",
     "recovery:new-generation": "bun scripts/rotate-generation.ts",
-    "check": "bun run validate && bun run build"
+    "security:audit": "bun scripts/security-audit.ts",
+    "check": "bun run security:audit && bun run validate && bun run build"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "typescript": "latest",
+    "@types/bun": "1.3.14",
+    "typescript": "7.0.2",
     "wrangler": "4.114.0"
   }
 }

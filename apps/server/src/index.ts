@@ -1,10 +1,18 @@
 import { mkdirSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import type { JsonValue, OperationEnvelope, SyncPushRequest } from "@expenses/protocol";
+import type {
+  ConfidentialOperationEnvelope,
+  GroupKeyEnvelope,
+  JsonValue,
+  OperationEnvelope,
+  SyncPushRequest,
+} from "@expenses/protocol";
 import { getMigrations } from "better-auth/db/migration";
 import { createAuth, deriveDisplayNameFromEmail } from "./auth";
 import { loadConfig } from "./config";
+import { ContactInviteError, ContactInviteStore } from "./contact-invites";
+import { ConfidentialLedgerStore } from "./confidential-ledger";
 import { openDatabase, runDomainMigrations } from "./database";
 import { enqueueEmail, startEmailWorker } from "./email";
 import { LedgerStore } from "./ledger";
@@ -15,10 +23,12 @@ const releaseMetadata = loadReleaseMetadata(resolve(import.meta.dir, "../release
 mkdirSync(config.attachmentsPath, { recursive: true });
 const db = openDatabase(config.databasePath);
 runDomainMigrations(db, resolve(import.meta.dir, "../migrations"));
-const auth = createAuth(db, config);
+const contactInvites = new ContactInviteStore(db, { emailHashSecret: config.authSecret });
+const auth = createAuth(db, config, contactInvites);
 const authMigrations = await getMigrations(auth.options);
 await authMigrations.runMigrations();
 const ledger = new LedgerStore(db);
+const confidentialLedger = new ConfidentialLedgerStore(db);
 const stopEmailWorker = startEmailWorker(db, config);
 
 const subscribers = new Map<string, Set<ReadableStreamDefaultController<Uint8Array>>>();
@@ -34,16 +44,26 @@ function corsHeaders(request: Request): HeadersInit {
   };
 }
 
+function securityHeaders(): Record<string, string> {
+  return {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    "Cross-Origin-Resource-Policy": "same-site",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+  };
+}
+
 function json(request: Request, value: unknown, status = 200): Response {
   return Response.json(value, {
     status,
     headers: {
       ...corsHeaders(request),
+      ...securityHeaders(),
       "Cache-Control": "no-store",
       "Content-Type": "application/json; charset=utf-8",
-      "X-Content-Type-Options": "nosniff",
-      "Referrer-Policy": "no-referrer",
-      "X-Frame-Options": "DENY",
+      "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
     },
   });
 }
@@ -53,7 +73,15 @@ function errorResponse(request: Request, status: number, code: string, message: 
 }
 
 function safeSubjectLabel(value: string): string {
-  return value.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) || "an Expenses user";
+  return value.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) || "a Tally user";
+}
+
+function validEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && value.length <= 320;
+}
+
+function validContactInviteToken(value: string): boolean {
+  return /^[A-Za-z0-9_-]{43}$/.test(value);
 }
 
 async function currentActor(request: Request): Promise<string | null> {
@@ -116,24 +144,86 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
   if (url.pathname === "/api/v1/auth/capabilities" && request.method === "GET") {
     return json(request, {
       google: Boolean(config.googleAuth),
-      magicLink: true,
+      magicLink: config.smtp.enabled,
     });
+  }
+
+  if (url.pathname === "/api/v1/contact-invitations/claim" && request.method === "POST") {
+    if (!config.smtp.enabled) {
+      return errorResponse(request, 503, "EMAIL_NOT_CONFIGURED", "Email verification is unavailable");
+    }
+    const body = await bodyJson<{ token?: string; email?: string }>(request);
+    const token = body.token?.trim() ?? "";
+    const email = body.email?.trim().toLowerCase() ?? "";
+    if (!validContactInviteToken(token)) {
+      return errorResponse(request, 400, "INVALID_INVITATION", "This invitation link is invalid");
+    }
+    if (!validEmail(email)) {
+      return errorResponse(request, 400, "INVALID_EMAIL", "Enter a valid email address");
+    }
+    const reservation = contactInvites.reserve(token, email);
+    await auth.api.signInMagicLink({
+      headers: request.headers,
+      body: {
+        email,
+        name: deriveDisplayNameFromEmail(email),
+        callbackURL: config.webOrigin,
+        newUserCallbackURL: config.webOrigin,
+        errorCallbackURL: `${config.webOrigin}/?auth=failed`,
+        metadata: { contactInvitationId: reservation.invitationId },
+      },
+    });
+    return json(request, { status: "verification-sent" }, 202);
   }
 
   if (url.pathname.startsWith("/api/auth/")) {
     const response = await auth.handler(request);
     const headers = new Headers(response.headers);
     for (const [key, value] of Object.entries(corsHeaders(request))) headers.set(key, value);
+    for (const [key, value] of Object.entries(securityHeaders())) headers.set(key, value);
     headers.set("Cache-Control", "no-store");
-    headers.set("X-Content-Type-Options", "nosniff");
-    headers.set("Referrer-Policy", "no-referrer");
-    headers.set("X-Frame-Options", "DENY");
     return new Response(response.body, { status: response.status, headers });
   }
 
   const actorOrResponse = await requireActor(request);
   if (actorOrResponse instanceof Response) return actorOrResponse;
   const actorId = actorOrResponse;
+
+  if (url.pathname === "/api/v1/contact-invitations" && request.method === "POST") {
+    const invitation = contactInvites.create(actorId);
+    const shareUrl = new URL(config.webOrigin);
+    shareUrl.hash = new URLSearchParams({ invite: invitation.token }).toString();
+    return json(request, {
+      id: invitation.id,
+      url: shareUrl.toString(),
+      expiresAt: invitation.expiresAt,
+      ...contactInvites.list(actorId),
+    }, 201);
+  }
+
+  if (url.pathname === "/api/v1/contacts" && request.method === "GET") {
+    return json(request, contactInvites.list(actorId));
+  }
+
+  if (url.pathname === "/api/v1/contact-invitations/accept" && request.method === "POST") {
+    const body = await bodyJson<{ token?: string }>(request);
+    const token = body.token?.trim() ?? "";
+    if (!validContactInviteToken(token)) {
+      return errorResponse(request, 400, "INVALID_INVITATION", "This invitation link is invalid");
+    }
+    const user = db.query<{ email: string }, [string]>(
+      `SELECT email FROM "user" WHERE id = ? LIMIT 1`,
+    ).get(actorId);
+    if (!user) return errorResponse(request, 401, "UNAUTHENTICATED", "Sign in is required");
+    contactInvites.acceptForSignedInUser(token, actorId, user.email);
+    return json(request, { status: "accepted", ...contactInvites.list(actorId) });
+  }
+
+  const contactInvitationMatch = /^\/api\/v1\/contact-invitations\/([^/]+)\/revoke$/.exec(url.pathname);
+  if (contactInvitationMatch && request.method === "POST") {
+    contactInvites.revoke(actorId, decodeURIComponent(contactInvitationMatch[1]!));
+    return json(request, { status: "revoked", ...contactInvites.list(actorId) });
+  }
 
   if (url.pathname === "/api/v1/dev/bootstrap" && request.method === "POST") {
     if (!config.devAuthBypass) return errorResponse(request, 404, "NOT_FOUND", "Not found");
@@ -161,20 +251,36 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
   }
 
   if (url.pathname === "/api/v1/devices/register" && request.method === "POST") {
-    const body = await bodyJson<{ id: string; publicKeyJwk: JsonWebKey; name: string }>(request);
+    const body = await bodyJson<{
+      id: string;
+      publicKeyJwk: JsonWebKey;
+      encryptionPublicKeyJwk?: JsonWebKey;
+      name: string;
+    }>(request);
     if (
       !body.id || body.id.length > 100 ||
       !body.name || body.name.length > 100 ||
-      !body.publicKeyJwk || body.publicKeyJwk.kty !== "EC" || body.publicKeyJwk.crv !== "P-256"
+      !body.publicKeyJwk || body.publicKeyJwk.kty !== "EC" || body.publicKeyJwk.crv !== "P-256" ||
+      (body.encryptionPublicKeyJwk &&
+        (body.encryptionPublicKeyJwk.kty !== "EC" || body.encryptionPublicKeyJwk.crv !== "P-256"))
     ) {
       return errorResponse(request, 400, "INVALID_DEVICE", "id, publicKeyJwk, and name are required");
     }
-    ledger.registerDevice({ id: body.id, userId: actorId, publicKeyJwk: body.publicKeyJwk, name: body.name });
+    ledger.registerDevice({
+      id: body.id,
+      userId: actorId,
+      publicKeyJwk: body.publicKeyJwk,
+      ...(body.encryptionPublicKeyJwk ? { encryptionPublicKeyJwk: body.encryptionPublicKeyJwk } : {}),
+      name: body.name,
+    });
     return json(request, { id: body.id, status: "active" }, 201);
   }
 
   const invitationMatch = /^\/api\/v1\/groups\/([^/]+)\/invitations$/.exec(url.pathname);
   if (invitationMatch && request.method === "POST") {
+    if (!config.smtp.enabled) {
+      return errorResponse(request, 503, "EMAIL_NOT_CONFIGURED", "Email invitations are unavailable");
+    }
     const groupId = decodeURIComponent(invitationMatch[1]!);
     const membership = db.query<{ one: number }, [string, string]>(
       "SELECT 1 AS one FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'active'",
@@ -182,7 +288,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     if (!membership) return errorResponse(request, 403, "NOT_A_GROUP_MEMBER", "Active group membership is required");
     const body = await bodyJson<{ email?: string }>(request);
     const email = body.email?.trim().toLowerCase() ?? "";
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 320) {
+    if (!validEmail(email)) {
       return errorResponse(request, 400, "INVALID_EMAIL", "Enter a valid email address");
     }
     const existingUser = db.query<{ name: string }, [string]>(
@@ -297,6 +403,56 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     return json(request, ledger.manifest(actorId));
   }
 
+  if (url.pathname === "/api/v2/sync/push" && request.method === "POST") {
+    const body = await bodyJson<{ operations?: ConfidentialOperationEnvelope[] }>(request);
+    if (!Array.isArray(body.operations) || body.operations.length > 100) {
+      return errorResponse(request, 400, "INVALID_BATCH", "operations must contain at most 100 entries");
+    }
+    return json(request, await confidentialLedger.push(actorId, body.operations));
+  }
+
+  if (url.pathname === "/api/v2/sync/pull" && request.method === "GET") {
+    const after = Math.max(0, Number.parseInt(url.searchParams.get("after") ?? "0", 10) || 0);
+    return json(request, {
+      operations: confidentialLedger.pull(actorId, after),
+      latestServerSequence: confidentialLedger.latestSequenceFor(actorId),
+    });
+  }
+
+  const confidentialDevicesMatch = /^\/api\/v2\/groups\/([^/]+)\/devices$/.exec(url.pathname);
+  if (confidentialDevicesMatch && request.method === "GET") {
+    const groupId = decodeURIComponent(confidentialDevicesMatch[1]!);
+    try {
+      return json(request, { devices: confidentialLedger.groupDevices(actorId, groupId) });
+    } catch {
+      return errorResponse(request, 403, "NOT_A_GROUP_MEMBER", "Active group membership is required");
+    }
+  }
+
+  const keyEnvelopesMatch = /^\/api\/v2\/groups\/([^/]+)\/key-envelopes$/.exec(url.pathname);
+  if (keyEnvelopesMatch && request.method === "GET") {
+    const groupId = decodeURIComponent(keyEnvelopesMatch[1]!);
+    try {
+      return json(request, { envelopes: confidentialLedger.keyEnvelopes(actorId, groupId) });
+    } catch {
+      return errorResponse(request, 403, "NOT_A_GROUP_MEMBER", "Active group membership is required");
+    }
+  }
+
+  if (keyEnvelopesMatch && request.method === "POST") {
+    const groupId = decodeURIComponent(keyEnvelopesMatch[1]!);
+    const body = await bodyJson<{ envelope?: GroupKeyEnvelope }>(request);
+    if (!body.envelope || body.envelope.groupId !== groupId) {
+      return errorResponse(request, 400, "INVALID_KEY_ENVELOPE", "A matching group key envelope is required");
+    }
+    try {
+      const status = await confidentialLedger.putKeyEnvelope(actorId, body.envelope);
+      return json(request, { status }, status === "created" ? 201 : 200);
+    } catch {
+      return errorResponse(request, 400, "INVALID_KEY_ENVELOPE", "The key envelope was rejected");
+    }
+  }
+
   if (url.pathname === "/api/v1/sync/events" && request.method === "GET") {
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -345,13 +501,30 @@ const server = Bun.serve({
     try {
       return await apiRoute(request, new URL(request.url));
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unexpected server error";
-      return errorResponse(request, error instanceof RangeError ? 400 : 500, "REQUEST_FAILED", message);
+      if (error instanceof ContactInviteError) {
+        return errorResponse(request, error.status, error.code, error.message);
+      }
+      if (error instanceof RangeError) {
+        return errorResponse(request, 400, "INVALID_REQUEST", error.message);
+      }
+      const requestId = randomUUID();
+      console.error("API request failed", {
+        requestId,
+        method: request.method,
+        path: new URL(request.url).pathname,
+        error: error instanceof Error ? error.name : "UnknownError",
+      });
+      return errorResponse(
+        request,
+        500,
+        "REQUEST_FAILED",
+        `The request could not be completed (reference ${requestId})`,
+      );
     }
   },
 });
 
-console.info(`Expenses API listening on ${server.url}`);
+console.info(`Tally API listening on ${server.url}`);
 
 function shutdown(): void {
   stopEmailWorker();

@@ -1,5 +1,11 @@
 import Dexie, { type EntityTable } from "dexie";
-import type { JsonValue, OperationEnvelope, ParticipantAmount } from "@expenses/protocol";
+import type {
+  ConfidentialOperationEnvelope,
+  GroupKeyEnvelope,
+  JsonValue,
+  OperationEnvelope,
+  ParticipantAmount,
+} from "@expenses/protocol";
 
 export type SyncStatus = "pending" | "accepted" | "conflicted" | "rejected";
 
@@ -51,11 +57,22 @@ export interface DeviceRecord {
   actorId: string;
   privateKey: CryptoKey;
   publicKeyJwk: JsonWebKey;
+  agreementPrivateKey?: CryptoKey;
+  agreementPublicKeyJwk?: JsonWebKey;
 }
 
 export interface SettingRecord {
   key: string;
   value: JsonValue;
+}
+
+export interface LocalConfidentialOperation extends ConfidentialOperationEnvelope {
+  syncStatus: "pending" | "accepted" | "rejected";
+  errorCode?: string;
+}
+
+export interface LocalGroupKeyEnvelope extends GroupKeyEnvelope {
+  id: string;
 }
 
 export class ExpensesDatabase extends Dexie {
@@ -65,6 +82,8 @@ export class ExpensesDatabase extends Dexie {
   expenses!: EntityTable<LocalExpense, "id">;
   devices!: EntityTable<DeviceRecord, "id">;
   settings!: EntityTable<SettingRecord, "key">;
+  confidentialOperations!: EntityTable<LocalConfidentialOperation, "id">;
+  groupKeyEnvelopes!: EntityTable<LocalGroupKeyEnvelope, "id">;
 
   constructor() {
     super("expenses-ledger");
@@ -75,6 +94,24 @@ export class ExpensesDatabase extends Dexie {
       expenses: "id, groupId, expenseDate, status, syncStatus, updatedAt",
       devices: "id, deviceId, actorId",
       settings: "key",
+    });
+    this.version(2).stores({
+      operations: "id, syncStatus, serverSequence, groupId, targetId, clientTimestamp",
+      groups: "id, createdAt",
+      members: "id, groupId, userId, status",
+      expenses: "id, groupId, expenseDate, status, syncStatus, updatedAt",
+      devices: "id, deviceId, actorId",
+      settings: "key",
+    });
+    this.version(3).stores({
+      operations: "id, syncStatus, serverSequence, groupId, targetId, clientTimestamp",
+      groups: "id, createdAt",
+      members: "id, groupId, userId, status",
+      expenses: "id, groupId, expenseDate, status, syncStatus, updatedAt",
+      devices: "id, deviceId, actorId",
+      settings: "key",
+      confidentialOperations: "id, syncStatus, serverSequence, groupId, keyEpoch, clientTimestamp",
+      groupKeyEnvelopes: "id, groupId, keyEpoch, recipientDeviceId",
     });
   }
 }

@@ -82,7 +82,14 @@ export class SyncEngine {
     try {
       const device = await ensureDevice();
       await bootstrapDevelopment();
-      await registerDevice({ id: device.deviceId, publicKeyJwk: device.publicKeyJwk, name: "This browser" });
+      await registerDevice({
+        id: device.deviceId,
+        publicKeyJwk: device.publicKeyJwk,
+        ...(device.agreementPublicKeyJwk
+          ? { encryptionPublicKeyJwk: device.agreementPublicKeyJwk }
+          : {}),
+        name: "This browser",
+      });
       const snapshot = await getSnapshot();
       const knownGeneration = String((await localDb.settings.get("generation"))?.value ?? "");
       const recovering = Boolean(knownGeneration && knownGeneration !== snapshot.manifest.generation);

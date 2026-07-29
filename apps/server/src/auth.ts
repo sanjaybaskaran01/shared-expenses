@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { betterAuth } from "better-auth";
 import { magicLink } from "better-auth/plugins/magic-link";
 import type { AppConfig } from "./config";
+import type { ContactInviteStore } from "./contact-invites";
 import { enqueueEmail } from "./email";
 
 function emailKey(kind: string, recipient: string, token: string): string {
@@ -26,7 +27,12 @@ export function deriveDisplayNameFromEmail(email: string): string {
   return (displayName || "Friend").slice(0, 100);
 }
 
-function claimPendingInvitations(db: Database, userId: string, email: string): void {
+function claimPendingInvitations(
+  db: Database,
+  contactInvites: ContactInviteStore,
+  userId: string,
+  email: string,
+): void {
   const normalized = email.trim().toLowerCase();
   const now = new Date().toISOString();
   db.transaction(() => {
@@ -45,9 +51,10 @@ function claimPendingInvitations(db: Database, userId: string, email: string): v
       "UPDATE group_invitations SET status = 'accepted', accepted_at = ? WHERE lower(email) = ? AND status = 'pending'",
     ).run(now, normalized);
   })();
+  contactInvites.acceptReservedForUser(userId, normalized);
 }
 
-export function createAuth(db: Database, config: AppConfig) {
+export function createAuth(db: Database, config: AppConfig, contactInvites: ContactInviteStore) {
   const ownerEmail = config.ownerEmail;
   const canCreateAccount = (email: string): boolean => {
     const normalized = email.trim().toLowerCase();
@@ -59,7 +66,7 @@ export function createAuth(db: Database, config: AppConfig) {
     return Boolean(
       db.query<{ one: number }, [string]>(
         "SELECT 1 AS one FROM group_members WHERE lower(email) = ? AND status = 'placeholder' LIMIT 1",
-      ).get(normalized),
+      ).get(normalized) || contactInvites.canCreateAccount(normalized),
     );
   };
   return betterAuth({
@@ -93,6 +100,9 @@ export function createAuth(db: Database, config: AppConfig) {
         sendMagicLink: async ({ email, url, token, metadata }) => {
           if (!config.devAuthBypass && !canCreateAccount(email)) return;
           const invitationId = typeof metadata?.invitationId === "string" ? metadata.invitationId : "";
+          const contactInvitationId = typeof metadata?.contactInvitationId === "string"
+            ? metadata.contactInvitationId
+            : "";
           const invitation = invitationId
             ? db.query<{ groupName: string; inviterName: string }, [string, string]>(
                 `SELECT g.name AS groupName, COALESCE(u.name, 'A friend') AS inviterName
@@ -102,13 +112,22 @@ export function createAuth(db: Database, config: AppConfig) {
                  WHERE gi.id = ? AND lower(gi.email) = ? AND gi.status = 'pending'`,
               ).get(invitationId, email.trim().toLowerCase())
             : null;
-          const subject = invitation
+          const contactInvitation = contactInvitationId
+            ? contactInvites.invitationContext(contactInvitationId, email)
+            : null;
+          const subject = contactInvitation
+            ? `${contactInvitation.inviterName} invited you to Tally`
+            : invitation
             ? `${invitation.inviterName} invited you to ${invitation.groupName}`
             : "Your secure Tally sign-in link";
-          const text = invitation
+          const text = contactInvitation
+            ? `${contactInvitation.inviterName} invited you to connect on Tally. Open this single-use link to verify your email, join, and sign in: ${url}`
+            : invitation
             ? `${invitation.inviterName} invited you to join ${invitation.groupName} on Tally. Open this single-use link to join and sign in: ${url}`
             : `Open this single-use link to sign in to Tally: ${url}`;
-          const html = invitation
+          const html = contactInvitation
+            ? `<p><strong>${escapeHtml(contactInvitation.inviterName)}</strong> invited you to connect on Tally.</p><p><a href="${escapeHtml(url)}">Join Tally</a></p><p>This single-use link verifies your email and signs you in. It expires in 10 minutes.</p>`
+            : invitation
             ? `<p><strong>${escapeHtml(invitation.inviterName)}</strong> invited you to join <strong>${escapeHtml(invitation.groupName)}</strong> on Tally.</p><p><a href="${escapeHtml(url)}">Join ${escapeHtml(invitation.groupName)}</a></p><p>This single-use link verifies your email and signs you in. It expires in 10 minutes.</p>`
             : `<p>Use this single-use link to sign in to Tally:</p><p><a href="${escapeHtml(url)}">Open Tally</a></p><p>This link expires in 10 minutes.</p>`;
           enqueueEmail(db, {
@@ -132,7 +151,7 @@ export function createAuth(db: Database, config: AppConfig) {
           after: async (user) => {
             const email = user.email.trim().toLowerCase();
             const now = new Date().toISOString();
-            claimPendingInvitations(db, user.id, email);
+            claimPendingInvitations(db, contactInvites, user.id, email);
             db.transaction(() => {
               if (ownerEmail && email === ownerEmail) {
                 const membership = db.query<{ one: number }, [string]>(
@@ -159,7 +178,7 @@ export function createAuth(db: Database, config: AppConfig) {
             const user = db.query<{ email: string }, [string]>(
               `SELECT email FROM "user" WHERE id = ? LIMIT 1`,
             ).get(session.userId);
-            if (user) claimPendingInvitations(db, session.userId, user.email);
+            if (user) claimPendingInvitations(db, contactInvites, session.userId, user.email);
           },
         },
       },

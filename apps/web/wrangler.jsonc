@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "shared-expenses-web",
+  "name": "tally-web",
   "compatibility_date": "2026-07-25",
   "assets": {
     "directory": "./dist"
