@@ -113,6 +113,13 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     });
   }
 
+  if (url.pathname === "/api/v1/auth/capabilities" && request.method === "GET") {
+    return json(request, {
+      google: Boolean(config.googleAuth),
+      magicLink: true,
+    });
+  }
+
   if (url.pathname.startsWith("/api/auth/")) {
     const response = await auth.handler(request);
     const headers = new Headers(response.headers);

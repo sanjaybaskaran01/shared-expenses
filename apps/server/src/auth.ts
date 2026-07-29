@@ -68,6 +68,19 @@ export function createAuth(db: Database, config: AppConfig) {
     baseURL: config.publicApiUrl,
     secret: config.authSecret,
     trustedOrigins: [config.webOrigin],
+    ...(config.googleAuth
+      ? {
+          socialProviders: {
+            google: {
+              clientId: config.googleAuth.clientId,
+              clientSecret: config.googleAuth.clientSecret,
+            },
+          },
+        }
+      : {}),
+    account: {
+      encryptOAuthTokens: true,
+    },
     rateLimit: {
       enabled: true,
       storage: "database",
