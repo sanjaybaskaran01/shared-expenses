@@ -18,7 +18,7 @@ The working vertical slice includes:
 - Background push/pull reconciliation, idempotent operation UUIDs, and SSE wakeups.
 - Deterministic canonical JSON, SHA-256 content hashes, and P-256 device signatures.
 - Append-only server ledger, SQLite projections, explicit stale-edit conflicts, and membership checks.
-- Invite-only, verified, single-use email sign-in through Better Auth.
+- Invite-only sign-in through Google or a verified, single-use email link, backed by the same Better Auth session.
 - Transactional Gmail SMTP outbox with retry and idempotency.
 - Cloudflare Pages/Tunnel, native macOS `launchd`, Docker Compose, and encrypted-backup scaffolding.
 
@@ -79,6 +79,9 @@ PUBLIC_API_URL=https://api.sanjaybaskaran.com
 BETTER_AUTH_SECRET=
 BETTER_AUTH_SECRET_KEYCHAIN_SERVICE=shared-expenses-auth
 COOKIE_DOMAIN=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_CLIENT_SECRET_KEYCHAIN_SERVICE=shared-expenses-google-oauth
 DEV_AUTH_BYPASS=false
 OWNER_EMAIL=your-real-invited-email@example.com
 BOOTSTRAP_GROUP_NAME=Shared expenses
@@ -88,15 +91,42 @@ SMTP_APP_PASSWORD_KEYCHAIN_SERVICE=shared-expenses-smtp
 SMTP_FROM=expenses@sanjaybaskaran.com
 ```
 
-`OWNER_EMAIL` is the only email allowed to create the first account. Invited placeholder members may then create accounts. Sign-in uses a verified, single-use link and does not require a password. `COOKIE_DOMAIN` is optional; leave it empty for the current host-only API session cookie, or set it only when a deployment deliberately needs one cookie shared by sibling subdomains.
+`OWNER_EMAIL` is the only email allowed to create the first account. Invited placeholder members may then create accounts. Google and email-link sign-in apply the same invite-only account-creation rule; configuring Google does not open public signup. `COOKIE_DOMAIN` is optional; leave it empty for the current host-only API session cookie, or set it only when a deployment deliberately needs one cookie shared by sibling subdomains.
 
-Keep this environment file out of Git, backups, shell history, and launch-agent XML. Restrict it with `chmod 600`; the included `scripts/run-server.sh` loads it for `launchd` through the non-secret `EXPENSES_ENV_FILE` path. When either Keychain service variable is set, the runner reads that secret from the macOS login Keychain and overrides the corresponding plaintext variable, so production does not need either secret in the env file.
+Keep this environment file out of Git, backups, shell history, and launch-agent XML. Restrict it with `chmod 600`; the included `scripts/run-server.sh` loads it for `launchd` through the non-secret `EXPENSES_ENV_FILE` path. When a Keychain service variable is set, the runner reads that secret from the macOS login Keychain and overrides the corresponding plaintext variable, so production does not need the authentication, SMTP, or Google client secret in the env file.
 
-### 2. Install the native services
+### 2. Add Google as an optional sign-in method
+
+Google sign-in is a server-side OAuth flow and only requests the basic `openid`, `email`, and `profile` identity scopes. It does not grant Tally access to Gmail, Drive, contacts, or a Google Workspace domain.
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/), create or select a project such as `Tally`, then open **Google Auth Platform**.
+2. Choose **Get started**. Set the app name to `Tally`, choose a monitored support email, select **External** audience, and add a developer contact email. Keep the project in **Testing** while configuring it.
+3. Under **Data Access**, keep only the basic identity scopes: `openid`, `.../auth/userinfo.email`, and `.../auth/userinfo.profile`. Do not add Gmail, Drive, Calendar, or other API scopes.
+4. Under **Clients**, create a client with application type **Web application** and name it `Tally Web`.
+5. Add these exact **Authorized redirect URIs** (scheme, host, port, path, and trailing slash rules are exact):
+
+   ```text
+   http://localhost:3000/api/auth/callback/google
+   https://api.sanjaybaskaran.com/api/auth/callback/google
+   ```
+
+   This integration does not load Google's JavaScript SDK, so Authorized JavaScript origins are not required for the server-side flow.
+6. Copy the client ID into `GOOGLE_CLIENT_ID` in the production environment file. Store the client secret in the macOS login Keychain rather than the repository or env file:
+
+   ```sh
+   security add-generic-password -U -a "$USER" -s shared-expenses-google-oauth -w
+   ```
+
+   Run the command interactively and paste the client secret only into its secure prompt. Keep `GOOGLE_CLIENT_SECRET=` empty and set `GOOGLE_CLIENT_SECRET_KEYCHAIN_SERVICE=shared-expenses-google-oauth`.
+7. Restart the API after releasing the code. `GET /api/v1/auth/capabilities` should report `"google": true`; the login screen will then show **Continue with Google** above the existing email-link option.
+
+For the initial invite-only rollout, Google's Testing status is sufficient when requesting only basic Sign in with Google identity scopes. Before publishing branded OAuth consent broadly, verify `sanjaybaskaran.com` in Google Search Console and publish matching homepage, privacy-policy, and terms links. Never commit or send the client secret in chat.
+
+### 3. Install the native services
 
 The example `launchd` files in `deploy/` contain placeholders on purpose. Copy them to `~/Library/LaunchAgents`, replace every placeholder with an explicit absolute path, and validate them with `plutil -lint` before loading. The production API follows `runtime/current/server/index.js`; the first deterministic release preserves an existing legacy runtime and updates `EXPENSES_SERVER_ENTRY` automatically. A cold reboot still requires a person to unlock FileVault and log in.
 
-### 3. Release from CI artifacts
+### 4. Release from CI artifacts
 
 Push a clean `main` commit and wait for the `CI` workflow. CI performs validation, builds the production web and API packages once, includes every migration, generates SHA-256 manifests, and uploads `tally-release-<commit>`.
 
@@ -115,11 +145,11 @@ The Worker has the `expenses.sanjaybaskaran.com` custom domain configured in Clo
 
 `GET /release.json` identifies the web commit. `GET /health` identifies the API commit, build time, semantic version, and server time.
 
-### 4. Expose only the API
+### 5. Expose only the API
 
 Install `cloudflared`, create a named tunnel, and route only `api.sanjaybaskaran.com` to `http://127.0.0.1:3000`. Do not add a router port-forward. For a token-managed tunnel, store the token in macOS Keychain under service `shared-expenses-tunnel`, then adapt `deploy/com.shared-expenses.tunnel.plist.example`; its runner reads the token at startup without putting it in the plist or process arguments. `deploy/cloudflared-config.example.yml` remains available for credential-file installations.
 
-### 5. Validate Gmail delivery
+### 6. Validate Gmail delivery
 
 The selected From address is a Cloudflare-forwarded alias, not necessarily an authenticated Gmail sending identity. Before inviting anyone, send real verification messages to Gmail, Outlook, and iCloud. Inspect `Authentication-Results` for SPF, DKIM, and DMARC alignment and confirm whether Google exposes the underlying Gmail address. Strict DMARC may reject this arrangement; deployment is not complete until those tests pass.
 

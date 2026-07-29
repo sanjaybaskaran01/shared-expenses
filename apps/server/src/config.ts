@@ -12,6 +12,24 @@ function integerEnv(name: string, fallback: number): number {
   return value;
 }
 
+export interface GoogleAuthConfig {
+  clientId: string;
+  clientSecret: string;
+}
+
+export function resolveGoogleAuthConfig(
+  clientIdValue: string | undefined,
+  clientSecretValue: string | undefined,
+): GoogleAuthConfig | undefined {
+  const clientId = clientIdValue?.trim();
+  const clientSecret = clientSecretValue?.trim();
+  if (!clientId && !clientSecret) return undefined;
+  if (!clientId || !clientSecret) {
+    throw new Error("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured together");
+  }
+  return { clientId, clientSecret };
+}
+
 export interface AppConfig {
   nodeEnv: string;
   host: string;
@@ -24,6 +42,7 @@ export interface AppConfig {
   devAuthBypass: boolean;
   ownerEmail?: string;
   cookieDomain?: string;
+  googleAuth?: GoogleAuthConfig;
   bootstrapGroupName: string;
   smtp: {
     host: string;
@@ -50,6 +69,10 @@ export function loadConfig(): AppConfig {
   const smtpPassword = process.env.SMTP_APP_PASSWORD;
   const ownerEmail = process.env.OWNER_EMAIL?.trim().toLowerCase();
   const cookieDomain = process.env.COOKIE_DOMAIN?.trim().toLowerCase();
+  const googleAuth = resolveGoogleAuthConfig(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+  );
   if (nodeEnv === "production" && !ownerEmail) {
     throw new Error("OWNER_EMAIL is required in production");
   }
@@ -65,6 +88,7 @@ export function loadConfig(): AppConfig {
     devAuthBypass,
     ...(ownerEmail ? { ownerEmail } : {}),
     ...(cookieDomain ? { cookieDomain } : {}),
+    ...(googleAuth ? { googleAuth } : {}),
     bootstrapGroupName: process.env.BOOTSTRAP_GROUP_NAME ?? "Shared expenses",
     smtp: {
       host: process.env.SMTP_HOST ?? "smtp.gmail.com",

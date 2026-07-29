@@ -321,6 +321,8 @@ textarea.form-control { height: auto; } select.form-control { appearance: auto; 
 
 .auth-shell { background: var(--brand-shell); }
 .glass-auth { background: var(--card); }
+.auth-divider { display: flex; align-items: center; gap: .75rem; margin: 1.25rem 0 -0.25rem; color: var(--muted-foreground); font-size: .68rem; }
+.auth-divider::before, .auth-divider::after { height: 1px; flex: 1; background: var(--border); content: ""; }
 
 .target-section-label { padding: .55rem .75rem .35rem; color: var(--muted-foreground); font-size: .64rem; font-weight: 720; letter-spacing: .12em; text-transform: uppercase; }
 .target-row { display: flex; width: 100%; min-height: 3.75rem; align-items: center; gap: .75rem; border-radius: .85rem; padding: .5rem .75rem; text-align: left; transition: background-color 140ms ease, transform 140ms ease; }

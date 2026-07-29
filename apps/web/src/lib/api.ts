@@ -35,6 +35,15 @@ export async function bootstrapDevelopment(): Promise<void> {
   await apiFetch("/api/v1/dev/bootstrap", { method: "POST", body: "{}" });
 }
 
+export interface AuthCapabilities {
+  google: boolean;
+  magicLink: boolean;
+}
+
+export function getAuthCapabilities(): Promise<AuthCapabilities> {
+  return apiFetch("/api/v1/auth/capabilities");
+}
+
 export async function registerDevice(input: {
   id: string;
   publicKeyJwk: JsonWebKey;

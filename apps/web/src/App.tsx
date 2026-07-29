@@ -48,7 +48,7 @@ import { FeedbackButton } from "./components/FeedbackDialog";
 import { GroupComposer } from "./components/GroupComposer";
 import { PaymentComposer } from "./components/PaymentComposer";
 import { Avatar, Button, Card } from "./components/ui";
-import { inviteGroupMember } from "./lib/api";
+import { getAuthCapabilities, inviteGroupMember } from "./lib/api";
 import {
   authClient,
   getOfflineActorId,
@@ -893,11 +893,26 @@ function AccountView(props: { displayName: string }) {
       <Card class="p-5">
         <div class="flex items-center gap-4">
           <Avatar name={props.displayName} class="size-14 text-lg" />
-          <div>
+          <div class="min-w-0 flex-1">
             <h2 class="font-semibold">{props.displayName}</h2>
             <p class="text-sm text-muted-foreground">Passwordless account</p>
           </div>
+          <Show when={!import.meta.env.DEV}>
+            <Button
+              variant="secondary"
+              size="sm"
+              class="shrink-0"
+              onClick={() => void signOutAndClearLocalLedger()}
+            >
+              <LogOut size={15} /> Log out
+            </Button>
+          </Show>
         </div>
+        <Show when={!import.meta.env.DEV}>
+          <p class="mt-4 border-t border-border/60 pt-3 text-xs leading-5 text-muted-foreground">
+            Logging out removes this account's cached ledger from this device.
+          </p>
+        </Show>
       </Card>
       <Card class="overflow-hidden">
         <SectionHeading title="Appearance" detail="Optimized for iPhone" />
@@ -960,15 +975,6 @@ function AccountView(props: { displayName: string }) {
         <Show when={!import.meta.env.DEV}>
           <div class="border-t border-border/60 p-3">
             <FeedbackButton />
-          </div>
-          <div class="border-t border-border/60 p-4">
-            <Button
-              variant="destructive"
-              class="w-full"
-              onClick={() => void signOutAndClearLocalLedger()}
-            >
-              <LogOut size={16} /> Sign out and clear this device
-            </Button>
           </div>
         </Show>
       </Card>
@@ -1282,15 +1288,59 @@ function AuthenticatedApp(props: { actorId: string }) {
   );
 }
 
-function AuthScreen() {
-  const [email, setEmail] = createSignal(
-    new URLSearchParams(location.search).get("email") ?? "",
+function GoogleMark() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 18 18" width="18" height="18">
+      <path fill="#4285F4" d="M17.64 9.2c0-.63-.06-1.22-.16-1.8H9v3.4h4.84a4.15 4.15 0 0 1-1.8 2.72l2.91 2.26c1.7-1.57 2.69-3.89 2.69-6.58Z" />
+      <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.95-2.22l-2.91-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.33-1.58-5.04-3.71L.95 13c1.47 2.96 4.53 5 8.05 5Z" />
+      <path fill="#FBBC05" d="M3.96 10.67A5.41 5.41 0 0 1 3.68 9c0-.58.1-1.14.28-1.67L.95 5A9 9 0 0 0 0 9c0 1.45.35 2.82.95 4l3.01-2.33Z" />
+      <path fill="#EA4335" d="M9 3.62c1.32 0 2.51.45 3.44 1.34l2.58-2.52C13.46.98 11.43 0 9 0 5.48 0 2.42 2.04.95 5l3.01 2.33C4.67 5.2 6.66 3.62 9 3.62Z" />
+    </svg>
   );
-  const [message, setMessage] = createSignal("");
-  const [busy, setBusy] = createSignal(false);
+}
+
+function AuthScreen() {
+  const search = new URLSearchParams(location.search);
+  const [email, setEmail] = createSignal(
+    search.get("email") ?? "",
+  );
+  const [message, setMessage] = createSignal(
+    search.get("auth") === "failed"
+      ? "Sign-in could not be completed. Use the Google account or email address that was invited."
+      : "",
+  );
+  const [busy, setBusy] = createSignal<"google" | "email" | null>(null);
+  const [capabilities] = createResource(async () => {
+    try {
+      return await getAuthCapabilities();
+    } catch {
+      return { google: false, magicLink: true };
+    }
+  });
+
+  async function signInWithGoogle() {
+    setBusy("google");
+    setMessage("");
+    try {
+      const result = await authClient.signIn.social({
+        provider: "google",
+        callbackURL: location.origin,
+        newUserCallbackURL: location.origin,
+        errorCallbackURL: `${location.origin}/?auth=failed`,
+      });
+      if (result.error) {
+        setMessage(result.error.message ?? "Google sign-in could not be started.");
+      }
+    } catch {
+      setMessage("The server is unavailable. Try the email link or continue on a previously signed-in device.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function requestLink(event: SubmitEvent) {
     event.preventDefault();
-    setBusy(true);
+    setBusy("email");
     setMessage("");
     try {
       const result = await authClient.signIn.magicLink({
@@ -1309,7 +1359,7 @@ function AuthScreen() {
         "The server is unavailable. Previously signed-in devices can continue offline.",
       );
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
   return (
@@ -1325,8 +1375,21 @@ function AuthScreen() {
           </span>
           <h1 class="text-2xl font-semibold tracking-tight">Welcome back</h1>
           <p class="mt-2 text-sm leading-6 text-muted-foreground">
-            Enter your invited email. No password, no second verification step.
+            Sign in with the Google account or email address that was invited.
           </p>
+          <Show when={capabilities()?.google}>
+            <Button
+              class="mt-6 h-12 w-full rounded-xl"
+              type="button"
+              variant="secondary"
+              disabled={busy() !== null}
+              onClick={() => void signInWithGoogle()}
+            >
+              <GoogleMark />
+              {busy() === "google" ? "Connecting…" : "Continue with Google"}
+            </Button>
+            <div class="auth-divider" aria-hidden="true"><span>or use email</span></div>
+          </Show>
           <form class="mt-6 grid gap-4" onSubmit={requestLink}>
             <label class="grid gap-2 text-sm font-medium">
               Email address
@@ -1349,9 +1412,9 @@ function AuthScreen() {
             <Button
               class="h-12 w-full rounded-xl"
               type="submit"
-              disabled={busy()}
+              disabled={busy() !== null}
             >
-              {busy() ? "Sending…" : "Email me a sign-in link"}
+              {busy() === "email" ? "Sending…" : "Email me a sign-in link"}
             </Button>
           </form>
           <Show when={message()}>

@@ -16,6 +16,10 @@ if [[ -n "${SMTP_APP_PASSWORD_KEYCHAIN_SERVICE:-}" ]]; then
   : "${SMTP_USER:?Set SMTP_USER when using a Keychain-backed SMTP password}"
   export SMTP_APP_PASSWORD="$(security find-generic-password -a "$SMTP_USER" -s "$SMTP_APP_PASSWORD_KEYCHAIN_SERVICE" -w)"
 fi
+if [[ -n "${GOOGLE_CLIENT_SECRET_KEYCHAIN_SERVICE:-}" ]]; then
+  : "${GOOGLE_CLIENT_ID:?Set GOOGLE_CLIENT_ID when using a Keychain-backed Google client secret}"
+  export GOOGLE_CLIENT_SECRET="$(security find-generic-password -a "${USER}" -s "$GOOGLE_CLIENT_SECRET_KEYCHAIN_SERVICE" -w)"
+fi
 
 repository_root="${0:A:h:h}"
 runtime_root="${0:A:h}"
