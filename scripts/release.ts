@@ -106,7 +106,7 @@ interface ObtainedArtifact {
 
 function contextFromEnvironment(): ReleaseContext {
   const repositoryRoot = resolve(import.meta.dir, "..");
-  const supportRoot = resolve(process.env.TALLY_SUPPORT_ROOT ?? join(homedir(), "Library/Application Support/Expenses"));
+  const supportRoot = resolve(process.env.TALLY_SUPPORT_ROOT ?? join(homedir(), "Library/Application Support/Tally"));
   return {
     repositoryRoot,
     supportRoot,
@@ -115,13 +115,13 @@ function contextFromEnvironment(): ReleaseContext {
     artifactCacheRoot: resolve(process.env.TALLY_RELEASE_CACHE ?? join(supportRoot, "release-cache")),
     historyRoot: resolve(process.env.TALLY_RELEASE_HISTORY ?? join(supportRoot, "release-history")),
     snapshotRoot: resolve(process.env.TALLY_RELEASE_BACKUPS ?? join(supportRoot, "release-backups")),
-    webUrl: process.env.TALLY_WEB_URL ?? "https://expenses.sanjaybaskaran.com",
-    publicApiUrl: process.env.TALLY_API_URL ?? "https://api.sanjaybaskaran.com",
+    webUrl: process.env.TALLY_WEB_URL ?? "https://tally.example.com",
+    publicApiUrl: process.env.TALLY_API_URL ?? "https://tally-api.example.com",
     localApiUrl: process.env.TALLY_LOCAL_API_URL ?? "http://127.0.0.1:3000",
-    launchdLabel: process.env.TALLY_LAUNCHD_LABEL ?? "com.shared-expenses.api",
+    launchdLabel: process.env.TALLY_LAUNCHD_LABEL ?? "com.tally.api",
     wranglerPath: resolve(repositoryRoot, "node_modules/.bin/wrangler"),
     wranglerConfig: resolve(repositoryRoot, "apps/web/wrangler.jsonc"),
-    workerName: process.env.TALLY_WORKER_NAME ?? "shared-expenses-web",
+    workerName: process.env.TALLY_WORKER_NAME ?? "tally-web",
   };
 }
 

@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createAuth, deriveDisplayNameFromEmail } from "../src/auth";
-import { resolveGoogleAuthConfig, type AppConfig } from "../src/config";
+import {
+  resolveGoogleAuthConfig,
+  validateProductionAuthSecret,
+  type AppConfig,
+} from "../src/config";
+import { ContactInviteStore } from "../src/contact-invites";
 
 function testConfig(googleAuth?: AppConfig["googleAuth"]): AppConfig {
   return {
@@ -18,6 +23,7 @@ function testConfig(googleAuth?: AppConfig["googleAuth"]): AppConfig {
     ...(googleAuth ? { googleAuth } : {}),
     bootstrapGroupName: "Test group",
     smtp: {
+      enabled: false,
       host: "smtp.example.com",
       port: 465,
       secure: true,
@@ -61,9 +67,25 @@ describe("Google authentication configuration", () => {
 
   test("registers Google with encrypted OAuth token storage", () => {
     const database = new Database(":memory:");
-    const auth = createAuth(database, testConfig({ clientId: "client-id", clientSecret: "client-secret" }));
+    const config = testConfig({ clientId: "client-id", clientSecret: "client-secret" });
+    const contactInvites = new ContactInviteStore(database, { emailHashSecret: config.authSecret });
+    const auth = createAuth(database, config, contactInvites);
     expect(auth.options.socialProviders?.google?.clientId).toBe("client-id");
     expect(auth.options.account?.encryptOAuthTokens).toBe(true);
     database.close();
+  });
+});
+
+describe("production authentication secret", () => {
+  test("rejects empty, short, and example secrets", () => {
+    expect(() => validateProductionAuthSecret("")).toThrow();
+    expect(() => validateProductionAuthSecret("too-short")).toThrow();
+    expect(() => validateProductionAuthSecret("development-only-secret-change-before-production")).toThrow();
+    expect(() => validateProductionAuthSecret("replace-with-at-least-32-random-characters")).toThrow();
+    expect(() => validateProductionAuthSecret("example-secret-that-is-intentionally-long-enough")).toThrow();
+  });
+
+  test("accepts a sufficiently long non-example secret", () => {
+    expect(() => validateProductionAuthSecret("a-secure-random-value-that-is-long-enough")).not.toThrow();
   });
 });

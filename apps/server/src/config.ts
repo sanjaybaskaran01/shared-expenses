@@ -12,6 +12,12 @@ function integerEnv(name: string, fallback: number): number {
   return value;
 }
 
+export function validateProductionAuthSecret(value: string): void {
+  if (value.length < 32 || /(development|replace|example)/i.test(value)) {
+    throw new Error("BETTER_AUTH_SECRET must contain at least 32 non-example characters in production");
+  }
+}
+
 export interface GoogleAuthConfig {
   clientId: string;
   clientSecret: string;
@@ -45,6 +51,7 @@ export interface AppConfig {
   googleAuth?: GoogleAuthConfig;
   bootstrapGroupName: string;
   smtp: {
+    enabled: boolean;
     host: string;
     port: number;
     secure: boolean;
@@ -61,20 +68,25 @@ export function loadConfig(): AppConfig {
   if (nodeEnv === "production" && devAuthBypass) {
     throw new Error("DEV_AUTH_BYPASS cannot be enabled in production");
   }
-  if (nodeEnv === "production" && authSecret.includes("development-only")) {
-    throw new Error("BETTER_AUTH_SECRET is required in production");
-  }
+  if (nodeEnv === "production") validateProductionAuthSecret(authSecret);
 
   const smtpUser = process.env.SMTP_USER;
   const smtpPassword = process.env.SMTP_APP_PASSWORD;
+  const smtpFrom = process.env.SMTP_FROM?.trim();
   const ownerEmail = process.env.OWNER_EMAIL?.trim().toLowerCase();
   const cookieDomain = process.env.COOKIE_DOMAIN?.trim().toLowerCase();
   const googleAuth = resolveGoogleAuthConfig(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
   );
+  if (Boolean(smtpUser) !== Boolean(smtpPassword)) {
+    throw new Error("SMTP_USER and SMTP_APP_PASSWORD must be configured together");
+  }
   if (nodeEnv === "production" && !ownerEmail) {
     throw new Error("OWNER_EMAIL is required in production");
+  }
+  if (nodeEnv === "production" && !smtpFrom) {
+    throw new Error("SMTP_FROM is required in production");
   }
   return {
     nodeEnv,
@@ -91,12 +103,13 @@ export function loadConfig(): AppConfig {
     ...(googleAuth ? { googleAuth } : {}),
     bootstrapGroupName: process.env.BOOTSTRAP_GROUP_NAME ?? "Shared expenses",
     smtp: {
+      enabled: Boolean(smtpUser && smtpPassword),
       host: process.env.SMTP_HOST ?? "smtp.gmail.com",
       port: integerEnv("SMTP_PORT", 465),
       secure: booleanEnv("SMTP_SECURE", true),
       ...(smtpUser ? { user: smtpUser } : {}),
       ...(smtpPassword ? { appPassword: smtpPassword } : {}),
-      from: process.env.SMTP_FROM ?? "expenses@sanjaybaskaran.com",
+      from: smtpFrom || "Tally <tally@example.com>",
     },
   };
 }

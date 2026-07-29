@@ -1,5 +1,6 @@
 import { operationContentHash, type JsonValue, type OperationEnvelope, type UnsignedOperation } from "@expenses/protocol";
 import { localDb, type DeviceRecord } from "./db";
+import { generateAgreementKeyPair } from "./confidential";
 
 function encodeBase64Url(buffer: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(buffer)))
@@ -11,6 +12,16 @@ function encodeBase64Url(buffer: ArrayBuffer): string {
 export async function ensureDevice(actorId?: string): Promise<DeviceRecord> {
   const existing = await localDb.devices.get("current");
   if (existing) {
+    if (!existing.agreementPrivateKey || !existing.agreementPublicKeyJwk) {
+      const agreement = await generateAgreementKeyPair();
+      const upgraded = {
+        ...existing,
+        agreementPrivateKey: agreement.privateKey,
+        agreementPublicKeyJwk: agreement.publicKeyJwk,
+      };
+      await localDb.devices.put(upgraded);
+      return upgraded;
+    }
     if (actorId && existing.actorId === "pending-authentication") {
       const rebound = { ...existing, actorId };
       await localDb.devices.put(rebound);
@@ -36,12 +47,15 @@ export async function ensureDevice(actorId?: string): Promise<DeviceRecord> {
     false,
     ["sign"],
   );
+  const agreement = await generateAgreementKeyPair();
   const record: DeviceRecord = {
     id: "current",
     deviceId: crypto.randomUUID(),
     actorId: actorId ?? (import.meta.env.DEV ? "dev-user" : "pending-authentication"),
     privateKey,
     publicKeyJwk,
+    agreementPrivateKey: agreement.privateKey,
+    agreementPublicKeyJwk: agreement.publicKeyJwk,
   };
   await localDb.devices.add(record);
   return record;

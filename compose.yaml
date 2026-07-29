@@ -7,8 +7,14 @@ services:
       - path: .env
         required: false
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:3000:3000"
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      DEV_AUTH_BYPASS: "false"
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:8080}
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8080}
+    expose:
+      - "3000"
     volumes:
       - expenses-data:/data
 
@@ -16,8 +22,6 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
-      args:
-        VITE_API_URL: ${PUBLIC_API_URL:-http://localhost:3000}
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:80"

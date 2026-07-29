@@ -58,6 +58,7 @@ describe("ledger ingestion", () => {
   beforeEach(async () => {
     db = openDatabase(":memory:");
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/001_domain.sql"), "utf8"));
+    db.exec(readFileSync(resolve(import.meta.dir, "../migrations/004_confidential_sync.sql"), "utf8"));
     db.query("INSERT INTO app_meta(key, value) VALUES ('generation', 'test-generation')").run();
     store = new LedgerStore(db);
     store.bootstrapGroup({
@@ -65,7 +66,7 @@ describe("ledger ingestion", () => {
       name: "Trip",
       settlementCurrency: "USD",
       userId: "user-1",
-      displayName: "Sanjay",
+      displayName: "Sam",
     });
     db.query(
       "INSERT INTO group_members(group_id, user_id, display_name, status, joined_at) VALUES (?, ?, ?, 'active', ?)",
@@ -358,7 +359,7 @@ describe("ledger ingestion", () => {
         name: "Other trip",
         settlementCurrency: "USD",
         userId: "user-1",
-        displayName: "Sanjay",
+        displayName: "Sam",
       });
       await store.push("user-1", [await signedOperation(privateKey)]);
     });

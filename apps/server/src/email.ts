@@ -39,7 +39,7 @@ interface OutboxRow {
 }
 
 export function startEmailWorker(db: Database, config: AppConfig): () => void {
-  if (!config.smtp.user || !config.smtp.appPassword) {
+  if (!config.smtp.enabled || !config.smtp.user || !config.smtp.appPassword) {
     console.info("SMTP credentials are absent; queued emails will remain pending");
     return () => undefined;
   }
@@ -68,13 +68,18 @@ export function startEmailWorker(db: Database, config: AppConfig): () => void {
       db.query("UPDATE email_outbox SET status = 'sending', attempts = attempts + 1 WHERE id = ?").run(row.id);
       try {
         await transport.sendMail({
-          from: `Expenses <${config.smtp.from}>`,
+          from: config.smtp.from,
           to: row.recipient,
           subject: row.subject,
           text: row.text_body,
           ...(row.html_body ? { html: row.html_body } : {}),
         });
-        db.query("UPDATE email_outbox SET status = 'sent', sent_at = ?, last_error_code = NULL WHERE id = ?").run(
+        db.query(
+          `UPDATE email_outbox
+           SET status = 'sent', sent_at = ?, last_error_code = NULL,
+               recipient = '[redacted]', subject = '[redacted]', text_body = '[redacted]', html_body = NULL
+           WHERE id = ?`,
+        ).run(
           new Date().toISOString(),
           row.id,
         );

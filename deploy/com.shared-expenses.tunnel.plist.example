@@ -12,7 +12,7 @@
     <key>CLOUDFLARED_PATH</key><string>REPLACE_WITH_CLOUDFLARED_PATH</string>
     <key>CLOUDFLARED_PROTOCOL</key><string>auto</string>
     <key>CLOUDFLARED_TOKEN_KEYCHAIN_ACCOUNT</key><string>REPLACE_WITH_MACOS_USERNAME</string>
-    <key>CLOUDFLARED_TOKEN_KEYCHAIN_SERVICE</key><string>shared-expenses-tunnel</string>
+    <key>CLOUDFLARED_TOKEN_KEYCHAIN_SERVICE</key><string>tally-tunnel</string>
   </dict>
   <key>KeepAlive</key><true/>
   <key>RunAtLoad</key><true/>

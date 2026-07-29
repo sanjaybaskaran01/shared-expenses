@@ -1,4 +1,3 @@
-import { Dialog } from "@kobalte/core/dialog";
 import Activity from "lucide-solid/icons/activity";
 import BedSingle from "lucide-solid/icons/bed-single";
 import CarFront from "lucide-solid/icons/car-front";
@@ -26,7 +25,6 @@ import Ticket from "lucide-solid/icons/ticket";
 import Utensils from "lucide-solid/icons/utensils";
 import UsersRound from "lucide-solid/icons/users-round";
 import UserPlus from "lucide-solid/icons/user-plus";
-import X from "lucide-solid/icons/x";
 import {
   For,
   Match,
@@ -41,6 +39,7 @@ import {
   onMount,
 } from "solid-js";
 import { BrandMark } from "./components/BrandMark";
+import { ContactInviteDialog } from "./components/ContactInviteDialog";
 import { ExpenseComposer } from "./components/ExpenseComposer";
 import { ExpenseDetail } from "./components/ExpenseDetail";
 import { ExpenseTargetPicker } from "./components/ExpenseTargetPicker";
@@ -48,12 +47,18 @@ import { FeedbackButton } from "./components/FeedbackDialog";
 import { GroupComposer } from "./components/GroupComposer";
 import { PaymentComposer } from "./components/PaymentComposer";
 import { Avatar, Button, Card } from "./components/ui";
-import { getAuthCapabilities, inviteGroupMember } from "./lib/api";
+import {
+  acceptCurrentContactInvitation,
+  claimContactInvitation,
+  getAuthCapabilities,
+  getContacts,
+} from "./lib/api";
 import {
   authClient,
   getOfflineActorId,
   signOutAndClearLocalLedger,
 } from "./lib/auth";
+import { clearInviteToken, inviteTokenFromHash } from "./lib/contact-invites";
 import type { LocalExpense, LocalOperation } from "./lib/db";
 import type { ExpenseTarget } from "./lib/expense-targets";
 import {
@@ -607,14 +612,13 @@ function OverviewView(props: {
 }) {
   const [inviteOpen, setInviteOpen] = createSignal(false);
   const [homeSection, setHomeSection] = createSignal<"people" | "groups">("people");
-  const [inviteGroupId, setInviteGroupId] = createSignal(
-    props.activeGroupId ?? appStore.groups()[0]?.id ?? "",
-  );
-  const [email, setEmail] = createSignal("");
-  const [message, setMessage] = createSignal("");
-  const inviteGroup = createMemo(
-    () => appStore.groups().find((item) => item.id === inviteGroupId()) ?? appStore.groups()[0],
-  );
+  const [contactState, { refetch: refetchContacts }] = createResource(async () => {
+    try {
+      return await getContacts();
+    } catch {
+      return { creditsTotal: 5, creditsRemaining: 0, invitations: [], contacts: [] };
+    }
+  });
   const relationships = createMemo(() =>
     computeRelationshipBalances(
       appStore.expenses(),
@@ -650,22 +654,10 @@ function OverviewView(props: {
     appStore.members().filter((member) => member.groupId === groupId && member.status === "active").length;
   const groupExpenseCount = (groupId: string) =>
     appStore.expenses().filter((expense) => expense.groupId === groupId && expense.status === "active").length;
-  createEffect(() => {
-    if (!inviteGroupId() && appStore.groups()[0]) setInviteGroupId(appStore.groups()[0]!.id);
-  });
-  async function invite(event: SubmitEvent) {
-    event.preventDefault();
-    if (!inviteGroup()) return;
-    setMessage("Sending…");
-    try {
-      await inviteGroupMember(inviteGroup()!.id, { email: email() });
-      setMessage("Invite sent — their link signs them in and opens the group.");
-      setEmail("");
-      await appStore.sync();
-    } catch (caught) {
-      setMessage(caught instanceof Error ? caught.message : "Could not send invite");
-    }
-  }
+  const relationshipUserIds = createMemo(() => new Set(relationships().map((relationship) => relationship.userId)));
+  const contactsWithoutBalance = createMemo(() =>
+    (contactState()?.contacts ?? []).filter((contact) => !relationshipUserIds().has(contact.userId)),
+  );
   return (
     <div class="page-enter home-page space-y-5">
       <header class="home-heading">
@@ -704,14 +696,12 @@ function OverviewView(props: {
         <Card class="home-list-card overflow-hidden" role="tabpanel">
           <SectionHeading
             title="People"
-            detail={relationships().length ? "Net across all shared groups" : "No open balances"}
-            action={appStore.groups().length
-              ? <button type="button" class="list-add-action" onClick={() => setInviteOpen(true)}><UserPlus size={14} /> Invite</button>
-              : <button type="button" class="list-add-action" onClick={props.onCreateGroup}><Plus size={14} /> Create group</button>}
+            detail={relationships().length ? "Net across all shared groups" : contactsWithoutBalance().length ? "Connected on Tally" : "No open balances"}
+            action={<button type="button" class="list-add-action" onClick={() => setInviteOpen(true)}><UserPlus size={14} /> Invite</button>}
           />
           <For
             each={relationships()}
-            fallback={<div class="px-6 py-12 text-center"><ReceiptText class="mx-auto text-muted-foreground" size={25} /><p class="mt-3 text-sm text-muted-foreground">Add an expense and balances will appear here.</p></div>}
+            fallback={<Show when={!contactsWithoutBalance().length}><div class="px-6 py-12 text-center"><ReceiptText class="mx-auto text-muted-foreground" size={25} /><p class="mt-3 text-sm text-muted-foreground">Invite a friend or add an expense to get started.</p></div></Show>}
           >
             {(relationship, index) => {
               const personName = createMemo(() => nameFor(relationship.userId));
@@ -738,6 +728,18 @@ function OverviewView(props: {
               );
             }}
           </For>
+          <For each={contactsWithoutBalance()}>
+            {(contact) => (
+              <article class="relationship-row">
+                <Avatar name={contact.displayName} class="size-10 text-xs" />
+                <div class="min-w-0 flex-1 text-left">
+                  <strong class="block truncate text-sm">{contact.displayName}</strong>
+                  <span class="block truncate text-xs text-muted-foreground">Connected · no shared expenses yet</span>
+                </div>
+                <span class="inline-flex items-center gap-1 text-xs text-muted-foreground"><CheckCircle2 size={14} /> Joined</span>
+              </article>
+            )}
+          </For>
         </Card>
       </Show>
 
@@ -756,27 +758,11 @@ function OverviewView(props: {
         </Card>
       </Show>
 
-      <Dialog open={inviteOpen()} onOpenChange={(open) => { setInviteOpen(open); if (!open) setMessage(""); }}>
-        <Dialog.Portal>
-          <Dialog.Overlay class="composer-overlay fixed inset-0 z-40 bg-black/45" />
-          <div class="fixed inset-0 z-50 grid items-end sm:place-items-center sm:p-6">
-            <Dialog.Content class="composer-dialog invite-dialog w-full border border-border bg-card shadow-2xl outline-none sm:max-w-md sm:rounded-xl">
-              <header class="flex min-h-16 items-center justify-between border-b border-border px-5">
-                <div><Dialog.Title class="text-base font-semibold">Invite by email</Dialog.Title><Dialog.Description class="mt-0.5 text-xs text-muted-foreground">One link signs them in and opens the right group.</Dialog.Description></div>
-                <Dialog.CloseButton class="icon-button" aria-label="Close invite form"><X size={18} /></Dialog.CloseButton>
-              </header>
-              <form class="grid gap-4 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]" onSubmit={invite}>
-                <Show when={appStore.groups().length > 1}>
-                  <label class="grid gap-2 text-sm font-medium">Group<select class="form-control" value={inviteGroup()?.id} onInput={(event) => setInviteGroupId(event.currentTarget.value)} aria-label="Group for invitation"><For each={appStore.groups()}>{(group) => <option value={group.id}>{group.name}</option>}</For></select></label>
-                </Show>
-                <label class="grid gap-2 text-sm font-medium">Email address<input class="form-control" required type="email" autocomplete="email" value={email()} onInput={(event) => setEmail(event.currentTarget.value)} placeholder="friend@example.com" /></label>
-                <Button type="submit" class="w-full">Send invite</Button>
-                <Show when={message()}><p class="text-xs leading-5 text-muted-foreground">{message()}</p></Show>
-              </form>
-            </Dialog.Content>
-          </div>
-        </Dialog.Portal>
-      </Dialog>
+      <ContactInviteDialog
+        open={inviteOpen()}
+        onOpenChange={setInviteOpen}
+        onChanged={() => void refetchContacts()}
+      />
     </div>
   );
 }
@@ -1006,6 +992,15 @@ function AuthenticatedApp(props: { actorId: string }) {
       (localStorage.getItem("expenses-theme") as Theme | null) ?? "system",
     );
     void initializeStore(props.actorId);
+    const invitationToken = inviteTokenFromHash();
+    if (invitationToken) {
+      void acceptCurrentContactInvitation(invitationToken)
+        .then(() => {
+          clearInviteToken();
+          notify("You’re connected on Tally");
+        })
+        .catch((error) => notify(error instanceof Error ? error.message : "Could not accept the invitation"));
+    }
   });
   createEffect(() => {
     if (!selectedGroupId() && appStore.groups()[0])
@@ -1301,6 +1296,7 @@ function GoogleMark() {
 
 function AuthScreen() {
   const search = new URLSearchParams(location.search);
+  const invitationToken = inviteTokenFromHash();
   const [email, setEmail] = createSignal(
     search.get("email") ?? "",
   );
@@ -1343,6 +1339,11 @@ function AuthScreen() {
     setBusy("email");
     setMessage("");
     try {
+      if (invitationToken) {
+        await claimContactInvitation(invitationToken, email().trim());
+        setMessage("Check your inbox — the verification link signs you in and connects you to your inviter.");
+        return;
+      }
       const result = await authClient.signIn.magicLink({
         email: email().trim(),
         callbackURL: location.origin,
@@ -1373,11 +1374,13 @@ function AuthScreen() {
           <span class="mb-5 grid size-11 place-items-center rounded-2xl bg-primary/10 text-primary">
             <LockKeyhole size={19} />
           </span>
-          <h1 class="text-2xl font-semibold tracking-tight">Welcome back</h1>
+          <h1 class="text-2xl font-semibold tracking-tight">{invitationToken ? "You’re invited" : "Welcome back"}</h1>
           <p class="mt-2 text-sm leading-6 text-muted-foreground">
-            Sign in with the Google account or email address that was invited.
+            {invitationToken
+              ? "Verify the email you want to use. The invitation is bound to that identity before anyone is shown as joined."
+              : "Sign in with the Google account or email address that was invited."}
           </p>
-          <Show when={capabilities()?.google}>
+          <Show when={capabilities()?.google && !invitationToken}>
             <Button
               class="mt-6 h-12 w-full rounded-xl"
               type="button"
@@ -1390,6 +1393,11 @@ function AuthScreen() {
             </Button>
             <div class="auth-divider" aria-hidden="true"><span>or use email</span></div>
           </Show>
+          <Show when={capabilities()?.magicLink} fallback={
+            <p class="mt-5 rounded-xl border border-border bg-muted/60 p-3 text-sm text-muted-foreground">
+              Email links are not configured on this Tally server.
+            </p>
+          }>
           <form class="mt-6 grid gap-4" onSubmit={requestLink}>
             <label class="grid gap-2 text-sm font-medium">
               Email address
@@ -1414,9 +1422,10 @@ function AuthScreen() {
               type="submit"
               disabled={busy() !== null}
             >
-              {busy() === "email" ? "Sending…" : "Email me a sign-in link"}
+              {busy() === "email" ? "Sending…" : invitationToken ? "Verify email and join" : "Email me a sign-in link"}
             </Button>
           </form>
+          </Show>
           <Show when={message()}>
             <p class="mt-4 rounded-xl border border-border bg-muted/60 p-3 text-sm text-muted-foreground">
               {message()}
