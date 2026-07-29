@@ -16,7 +16,8 @@ const highConfidenceDetectors: Detector[] = [
 ];
 
 const assignmentPattern = /\b[A-Z][A-Z0-9_]*(?:SECRET|PASSWORD|TOKEN|API_KEY)[A-Z0-9_]*[ \t]*=[ \t]*["']?([A-Za-z0-9_+/.=-]{16,})/g;
-const safeValue = /(example|replace|placeholder|development|test-only|secrets\.|process\.env)/i;
+const propertyAssignmentPattern = /\b(?:authSecret|clientSecret|appPassword|password|token|apiKey)\s*:\s*["']([^"']{16,})["']/gi;
+const safeValue = /(example|replace|placeholder|development|test-only|not-a-real|fake|mock|fixture|secrets\.|process\.env)/i;
 
 function findings(content: string, includeGenericAssignments: boolean): string[] {
   const detected = highConfidenceDetectors
@@ -26,6 +27,10 @@ function findings(content: string, includeGenericAssignments: boolean): string[]
     for (const match of content.matchAll(assignmentPattern)) {
       const value = match[1] ?? "";
       if (!safeValue.test(value)) detected.push("credential-like assignment");
+    }
+    for (const match of content.matchAll(propertyAssignmentPattern)) {
+      const value = match[1] ?? "";
+      if (!safeValue.test(value)) detected.push("credential-like object property");
     }
   }
   return [...new Set(detected)];

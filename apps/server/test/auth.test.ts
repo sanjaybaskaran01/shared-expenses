@@ -53,21 +53,21 @@ describe("Google authentication configuration", () => {
     expect(() => resolveGoogleAuthConfig("client-id", undefined)).toThrow(
       "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured together",
     );
-    expect(() => resolveGoogleAuthConfig(undefined, "client-secret")).toThrow(
+    expect(() => resolveGoogleAuthConfig(undefined, "not-a-real-google-client-secret")).toThrow(
       "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured together",
     );
   });
 
   test("normalizes a complete credential pair", () => {
-    expect(resolveGoogleAuthConfig(" client-id ", " client-secret ")).toEqual({
+    expect(resolveGoogleAuthConfig(" client-id ", " not-a-real-google-client-secret ")).toEqual({
       clientId: "client-id",
-      clientSecret: "client-secret",
+      clientSecret: "not-a-real-google-client-secret",
     });
   });
 
   test("registers Google with encrypted OAuth token storage", () => {
     const database = new Database(":memory:");
-    const config = testConfig({ clientId: "client-id", clientSecret: "client-secret" });
+    const config = testConfig({ clientId: "client-id", clientSecret: "not-a-real-google-client-secret" });
     const contactInvites = new ContactInviteStore(database, { emailHashSecret: config.authSecret });
     const auth = createAuth(database, config, contactInvites);
     expect(auth.options.socialProviders?.google?.clientId).toBe("client-id");
@@ -83,6 +83,7 @@ describe("production authentication secret", () => {
     expect(() => validateProductionAuthSecret("development-only-secret-change-before-production")).toThrow();
     expect(() => validateProductionAuthSecret("replace-with-at-least-32-random-characters")).toThrow();
     expect(() => validateProductionAuthSecret("example-secret-that-is-intentionally-long-enough")).toThrow();
+    expect(() => validateProductionAuthSecret("test-only-auth-secret-not-for-production")).toThrow();
   });
 
   test("accepts a sufficiently long non-example secret", () => {
