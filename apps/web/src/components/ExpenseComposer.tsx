@@ -11,6 +11,7 @@ import UsersRound from "lucide-solid/icons/users-round";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { LocalExpense } from "../lib/db";
 import { isLocalToday, localDateValue } from "../lib/dates";
+import { validateExpenseForm, type ExpenseFormIssue } from "../lib/expense-form";
 import { appStore, calculateExpenseAllocations, calculateExpensePayers, createExpense, updateExpense, type SplitMethod } from "../lib/store";
 import { Avatar, Button } from "./ui";
 
@@ -63,8 +64,14 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   const [activeSplitParticipantId, setActiveSplitParticipantId] = createSignal<string>();
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal("");
+  const [formIssue, setFormIssue] = createSignal<ExpenseFormIssue>();
   let wasOpen = false;
   let initializedGroup = "";
+  let dialogRef: HTMLDivElement | undefined;
+  let amountInputRef: HTMLInputElement | undefined;
+  let descriptionInputRef: HTMLInputElement | undefined;
+  let payerControlRef: HTMLButtonElement | undefined;
+  let splitControlRef: HTMLButtonElement | undefined;
 
   const currentGroup = createMemo(() => appStore.groups().find((group) => group.id === groupId()));
   const groupMembers = createMemo(() => appStore.members().filter((member) => member.groupId === groupId() && member.status === "active"));
@@ -93,6 +100,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       setActivePanel("none");
       setActiveSplitParticipantId(undefined);
       setError("");
+      setFormIssue(undefined);
       if (editingExpense) {
         const participantIds = editingExpense.allocations.map(({ participantId }) => participantId);
         const equalAllocations = calculateExpenseAllocations({
@@ -155,7 +163,6 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
     }
   });
 
-  const canSave = createMemo(() => description().trim().length > 0 && allocations().length > 0 && payers().length > 0 && !saving());
   const splitSummary = createMemo(() => {
     const count = participants().length;
     const people = `${count} ${count === 1 ? "person" : "people"}`;
@@ -273,8 +280,28 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     const editingExpense = props.expense;
-    setSaving(true);
     setError("");
+    const issue = validateExpenseForm({
+      amount: amount(),
+      description: description(),
+      payersValid: payers().length > 0,
+      allocationsValid: allocations().length > 0,
+    });
+    setFormIssue(issue);
+    if (issue) {
+      setError(issue.message);
+      if (issue.field === "amount") amountInputRef?.focus();
+      else if (issue.field === "description") descriptionInputRef?.focus();
+      else if (issue.field === "payer") {
+        setActivePanel("payer");
+        queueMicrotask(() => payerControlRef?.focus());
+      } else {
+        setActivePanel("split");
+        queueMicrotask(() => splitControlRef?.focus());
+      }
+      return;
+    }
+    setSaving(true);
     try {
       const input = {
         groupId: groupId(),
@@ -307,9 +334,17 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       <Dialog.Portal>
         <Dialog.Overlay class="composer-overlay fixed inset-0 z-40 bg-black/45" />
         <div class="fixed inset-0 z-50 grid items-end sm:place-items-center sm:p-6">
-          <Dialog.Content class="composer-dialog max-h-[100dvh] w-full overflow-y-auto border border-border bg-card outline-none sm:max-h-[94dvh] sm:max-w-xl">
+          <Dialog.Content
+            ref={dialogRef}
+            role="dialog"
+            class="composer-dialog max-h-[100dvh] w-full overflow-y-auto border border-border bg-card outline-none sm:max-h-[94dvh] sm:max-w-xl"
+            onOpenAutoFocus={(event) => {
+              event.preventDefault();
+              queueMicrotask(() => props.expense ? dialogRef?.focus() : amountInputRef?.focus());
+            }}
+          >
             <header class="composer-header sticky top-0 z-20 grid min-h-14 grid-cols-[1fr_auto_1fr] items-center border-b border-border bg-card px-4">
-              <Dialog.CloseButton class="justify-self-start text-sm font-medium text-muted-foreground" aria-label="Cancel expense form">Cancel</Dialog.CloseButton>
+              <Dialog.CloseButton class="expense-cancel-action justify-self-start text-sm font-medium text-muted-foreground" aria-label="Cancel expense form">Cancel</Dialog.CloseButton>
               <div class="min-w-0 text-center">
                 <Dialog.Title class="truncate text-base font-semibold">{props.expense ? "Edit expense" : "Add an expense"}</Dialog.Title>
                 <Dialog.Description class="sr-only">{props.expense ? "Update this shared expense." : "Record a shared expense."}</Dialog.Description>
@@ -318,36 +353,54 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
             </header>
 
             <form class="grid gap-4 p-4 pb-0 sm:p-6 sm:pb-0" onSubmit={(event) => void submit(event)}>
-              <div class="expense-context-row">
-                <span class="target-icon"><UsersRound size={17} /></span>
-                <span class="min-w-0 flex-1"><small>{props.expense ? "Group" : "With"}</small><strong>{props.targetLabel ?? currentGroup()?.name ?? "Choose a group"}</strong><Show when={!props.expense && props.targetLabel && props.targetLabel !== currentGroup()?.name}><em>in {currentGroup()?.name}</em></Show></span>
-                <Show when={!props.expense && props.onChangeTarget}><button type="button" onClick={props.onChangeTarget}>Change <ChevronRight size={14} /></button></Show>
-              </div>
+              <Show when={!props.expense && props.onChangeTarget} fallback={
+                <div class="expense-context-row">
+                  <span class="target-icon"><UsersRound size={17} /></span>
+                  <span class="min-w-0 flex-1"><small>Group</small><strong>{currentGroup()?.name ?? "Choose a group"}</strong></span>
+                </div>
+              }>
+                <button
+                  type="button"
+                  class="expense-context-row w-full text-left"
+                  aria-label={`Change expense group, currently ${props.targetLabel ?? currentGroup()?.name ?? "not selected"}`}
+                  onClick={props.onChangeTarget}
+                >
+                  <span class="target-icon"><UsersRound size={17} /></span>
+                  <span class="min-w-0 flex-1"><small>With</small><strong>{props.targetLabel ?? currentGroup()?.name ?? "Choose a group"}</strong><Show when={props.targetLabel && props.targetLabel !== currentGroup()?.name}><em>in {currentGroup()?.name}</em></Show></span>
+                  <span class="expense-context-change">Change <ChevronRight size={14} /></span>
+                </button>
+              </Show>
 
               <label class="amount-stage">
                 <span class="micro-label">Total · {currency()}</span>
                 <span class="amount-native-row">
                   <span aria-hidden="true">{new Intl.NumberFormat(undefined, { style: "currency", currency: currency(), currencyDisplay: "narrowSymbol" }).formatToParts(0).find((part) => part.type === "currency")?.value ?? currency()}</span>
                   <input
+                    ref={amountInputRef}
                     class="money-type amount-native-input"
                     value={amount()}
-                    onInput={(event) => updateAmount(event.currentTarget.value)}
+                    onInput={(event) => {
+                      updateAmount(event.currentTarget.value);
+                      if (formIssue()?.field === "amount") { setFormIssue(undefined); setError(""); }
+                    }}
                     inputmode="decimal"
                     enterkeyhint="next"
                     autocomplete="off"
                     placeholder="0.00"
                     aria-label={`Total in ${currency()}`}
+                    aria-invalid={formIssue()?.field === "amount"}
+                    aria-describedby={formIssue()?.field === "amount" ? "expense-form-error" : undefined}
                   />
                 </span>
               </label>
 
-              <label class="description-field"><span class="sr-only">What was it for?</span><input value={description()} onInput={(event) => setDescription(event.currentTarget.value)} placeholder="What was it for?" maxlength={200} autocomplete="off" /></label>
+              <label class="description-field"><span class="sr-only">What was it for?</span><input ref={descriptionInputRef} value={description()} onInput={(event) => { setDescription(event.currentTarget.value); if (formIssue()?.field === "description") { setFormIssue(undefined); setError(""); } }} placeholder="What was it for?" maxlength={200} autocomplete="off" aria-invalid={formIssue()?.field === "description"} aria-describedby={formIssue()?.field === "description" ? "expense-form-error" : undefined} /></label>
 
               <div class="expense-quick-controls" aria-label="Expense options">
-                <button type="button" class="quick-control tone-payer" aria-expanded={activePanel() === "payer"} aria-controls="payer-panel" onClick={() => togglePanel("payer")}>
+                <button ref={payerControlRef} type="button" class="quick-control tone-payer" aria-expanded={activePanel() === "payer"} aria-controls="payer-panel" aria-invalid={formIssue()?.field === "payer"} aria-describedby={formIssue()?.field === "payer" ? "expense-form-error" : undefined} onClick={() => { if (formIssue()?.field === "payer") { setFormIssue(undefined); setError(""); } togglePanel("payer"); }}>
                   <span class="quick-control-icon"><UsersRound size={16} /></span><span><span class="micro-label">Paid by</span><strong>{payerSummary()}</strong></span><ChevronDown size={15} />
                 </button>
-                <button type="button" class="quick-control tone-split" aria-expanded={activePanel() === "split"} aria-controls="split-panel" onClick={() => togglePanel("split")}>
+                <button ref={splitControlRef} type="button" class="quick-control tone-split" aria-expanded={activePanel() === "split"} aria-controls="split-panel" aria-invalid={formIssue()?.field === "split"} aria-describedby={formIssue()?.field === "split" ? "expense-form-error" : undefined} onClick={() => { if (formIssue()?.field === "split") { setFormIssue(undefined); setError(""); } togglePanel("split"); }}>
                   <span class="quick-control-icon"><Scale size={16} /></span><span><span class="micro-label">Split</span><strong>{splitSummary()}</strong></span><ChevronDown size={15} />
                 </button>
                 <button type="button" class="quick-control tone-date" aria-expanded={activePanel() === "date"} aria-controls="date-panel" onClick={() => togglePanel("date")}>
@@ -358,10 +411,10 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
               <Show when={activePanel() === "payer"}>
                 <section id="payer-panel" class="disclosure-panel split-panel grid gap-3 border border-border p-4" aria-label="Choose who paid">
                   <div class="disclosure-heading"><div><p>Who paid?</p><small>Choose one person, or use multiple payers.</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
-                  <div class="flex items-center justify-end"><Show when={groupMembers().length > 1}><button type="button" class="flex items-center gap-1.5 text-xs font-semibold text-primary" onClick={enableMultiplePayers}><UsersRound size={14} />{payerIds().length > 1 ? "Use one payer" : "Multiple payers"}</button></Show></div>
+                  <div class="flex items-center justify-end"><Show when={groupMembers().length > 1}><button type="button" class="flex min-h-11 items-center gap-1.5 px-2 text-xs font-semibold text-primary" onClick={enableMultiplePayers}><UsersRound size={14} />{payerIds().length > 1 ? "Use one payer" : "Multiple payers"}</button></Show></div>
                   <Show when={payerIds().length > 1} fallback={<div class="payer-avatar-rail"><For each={groupMembers()}>{(member) => <button type="button" class="payer-avatar-choice" classList={{ active: payerIds()[0] === member.userId }} aria-pressed={payerIds()[0] === member.userId} onClick={() => { setPayerIds([member.userId]); setPayerValues({}); }}><Avatar name={member.displayName} class="size-9 text-xs" /><span>{member.userId === props.actorId ? "You" : member.displayName}</span></button>}</For></div>}>
                     <div class="divide-y divide-border rounded-xl border border-border bg-background/55">
-                      <For each={groupMembers()}>{(member) => <div class="flex min-h-14 items-center gap-3 px-3"><button type="button" class="grid size-6 place-items-center rounded-md border border-border" classList={{ "border-primary bg-primary text-primary-foreground": payerIds().includes(member.userId) }} onClick={() => togglePayer(member.userId)} aria-label={`Toggle ${member.displayName} as payer`} aria-pressed={payerIds().includes(member.userId)}><Show when={payerIds().includes(member.userId)}><Check size={14} /></Show></button><Avatar name={member.displayName} class="size-7 text-xs" /><span class="min-w-0 flex-1 truncate text-sm font-medium">{member.userId === props.actorId ? "You" : member.displayName}</span><div class="relative w-24"><input class="form-control h-9 text-right text-sm tabular-nums" disabled={!payerIds().includes(member.userId)} inputmode="decimal" value={payerValues()[member.userId] ?? ""} onInput={(event) => setPayerValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={`Amount paid by ${member.displayName}`} /></div></div>}</For>
+                      <For each={groupMembers()}>{(member) => <div class="flex min-h-14 items-center gap-2 px-2"><button type="button" class="participant-toggle grid size-11 place-items-center rounded-md border border-border" classList={{ "border-primary bg-primary text-primary-foreground": payerIds().includes(member.userId) }} onClick={() => togglePayer(member.userId)} aria-label={`Toggle ${member.displayName} as payer`} aria-pressed={payerIds().includes(member.userId)}><Show when={payerIds().includes(member.userId)}><Check size={14} /></Show></button><Avatar name={member.displayName} class="size-7 text-xs" /><span class="min-w-0 flex-1 truncate text-sm font-medium">{member.userId === props.actorId ? "You" : member.displayName}</span><div class="relative w-24"><input class="form-control h-11 text-right text-sm tabular-nums" disabled={!payerIds().includes(member.userId)} inputmode="decimal" value={payerValues()[member.userId] ?? ""} onInput={(event) => setPayerValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={`Amount paid by ${member.displayName}`} /></div></div>}</For>
                     </div>
                   </Show>
                 </section>
@@ -373,7 +426,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                   <div>
                     <p class="mb-2 text-sm font-medium">Split method</p>
                     <div class="split-mode-tabs grid grid-cols-4">
-                      <For each={splitMethods}>{(method) => <button type="button" class="h-9 rounded-md text-xs font-medium text-muted-foreground transition-all" classList={{ "bg-card text-foreground shadow-sm": splitMethod() === method.id }} aria-pressed={splitMethod() === method.id} onClick={() => chooseSplitMethod(method.id)}>{method.label}</button>}</For>
+                      <For each={splitMethods}>{(method) => <button type="button" class="h-11 rounded-md text-xs font-medium text-muted-foreground transition-[color,background-color,border-color,box-shadow,transform]" classList={{ "bg-card text-foreground shadow-sm": splitMethod() === method.id }} aria-pressed={splitMethod() === method.id} onClick={() => chooseSplitMethod(method.id)}>{method.label}</button>}</For>
                     </div>
                   </div>
                   <div class="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
@@ -382,13 +435,13 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                       const allocation = createMemo(() => allocations().find((item) => item.participantId === member.userId));
                       return (
                         <div class="split-person-row flex min-h-14 items-center gap-3 px-3" classList={{ active: activeSplitParticipantId() === member.userId }} onClick={() => selected() && (splitMethod() === "exact" || splitMethod() === "percentage") && setActiveSplitParticipantId(member.userId)}>
-                          <button type="button" class="grid size-6 shrink-0 place-items-center rounded-md border border-border transition-colors" classList={{ "border-primary bg-primary text-primary-foreground": selected() }} disabled={selected() && participants().length === 1} onClick={() => toggleParticipant(member.userId)} aria-label={(selected() && participants().length === 1 ? "Keep " : selected() ? "Exclude " : "Include ") + member.displayName} aria-pressed={selected()}><Show when={selected()}><Check size={14} /></Show></button>
+                          <button type="button" class="participant-toggle grid size-11 shrink-0 place-items-center rounded-md border border-border transition-colors" classList={{ "border-primary bg-primary text-primary-foreground": selected() }} disabled={selected() && participants().length === 1} onClick={() => toggleParticipant(member.userId)} aria-label={(selected() && participants().length === 1 ? "Keep " : selected() ? "Exclude " : "Include ") + member.displayName} aria-pressed={selected()}><Show when={selected()}><Check size={14} /></Show></button>
                           <Avatar name={member.displayName} class="size-7 text-xs" />
                           <span class="min-w-0 flex-1 truncate text-sm font-medium">{member.userId === props.actorId ? "You" : member.displayName}</span>
                           <Show when={splitMethod() === "equal"} fallback={<Show when={splitMethod() === "shares"} fallback={
                             <div class="relative w-24">
                               <Show when={splitMethod() === "exact" || splitMethod() === "adjustment"}><span class="absolute left-2.5 top-2 text-xs text-muted-foreground">{splitMethod() === "adjustment" ? "±" : currency()}</span></Show>
-                              <input class="form-control h-9 text-right text-sm tabular-nums" classList={{ "pl-6": splitMethod() === "exact" || splitMethod() === "adjustment", "pr-7": splitMethod() === "percentage" }} disabled={!selected()} inputmode="decimal" value={splitValues()[member.userId] ?? ""} onFocus={() => setActiveSplitParticipantId(member.userId)} onInput={(event) => setSplitValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={(splitMethod() === "percentage" ? "Percentage for " : splitMethod() === "adjustment" ? "Adjustment for " : "Amount for ") + member.displayName} />
+                              <input class="form-control h-11 text-right text-sm tabular-nums" classList={{ "pl-6": splitMethod() === "exact" || splitMethod() === "adjustment", "pr-7": splitMethod() === "percentage" }} disabled={!selected()} inputmode="decimal" value={splitValues()[member.userId] ?? ""} onFocus={() => setActiveSplitParticipantId(member.userId)} onInput={(event) => setSplitValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={(splitMethod() === "percentage" ? "Percentage for " : splitMethod() === "adjustment" ? "Adjustment for " : "Amount for ") + member.displayName} />
                               <Show when={splitMethod() === "percentage"}><span class="absolute right-2.5 top-2 text-xs text-muted-foreground">%</span></Show>
                             </div>
                           }><div class="share-stepper"><button type="button" onClick={() => changeShares(member.userId, -1)} aria-label={`Remove a share from ${member.displayName}`}>−</button><strong>{splitValues()[member.userId] ?? "1"}×</strong><button type="button" onClick={() => changeShares(member.userId, 1)} aria-label={`Add a share to ${member.displayName}`}>+</button></div></Show>}>
@@ -422,9 +475,9 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                 </section>
               </Show>
 
-              <Show when={error()}><p class="error-callout" role="alert">{error()}</p></Show>
+              <Show when={error()}><p id="expense-form-error" class="error-callout" role="alert">{error()}</p></Show>
               <footer class="sticky bottom-0 z-10 -mx-4 mt-1 grid gap-2 border-t border-border bg-card/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur sm:-mx-6 sm:px-6">
-                <Button class="h-11 w-full" type="submit" disabled={!canSave()}>
+                <Button class="h-11 w-full" type="submit" disabled={saving()}>
                   <Show when={saving()} fallback={<><Check size={16} /> {props.expense ? "Save changes" : `Add ${formatMinor(Math.round((Number(amount()) || 0) * 100), currency())}`}</>}><LoaderCircle class="animate-spin" size={16} /> Saving…</Show>
                 </Button>
                 <p class="micro-label text-center">Saved on this device first · syncs automatically</p>

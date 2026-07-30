@@ -32,6 +32,8 @@ export function ContactInviteDialog(props: {
   const [lastInviteUrl, setLastInviteUrl] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [message, setMessage] = createSignal("");
+  const [messageTone, setMessageTone] = createSignal<"status" | "error">("status");
+  let contentRef: HTMLDivElement | undefined;
 
   function applyState(value: ContactInviteState): void {
     mutate(value);
@@ -41,6 +43,7 @@ export function ContactInviteDialog(props: {
   async function createAndShare(mode: "share" | "message"): Promise<void> {
     setBusy(true);
     setMessage("");
+    setMessageTone("status");
     try {
       const invitation = await createContactInvitation();
       applyState(invitation);
@@ -68,6 +71,7 @@ export function ContactInviteDialog(props: {
             : "Invite ready. It can be claimed by one verified email.",
       );
     } catch (error) {
+      setMessageTone("error");
       setMessage(error instanceof Error ? error.message : "Could not create an invitation");
     } finally {
       setBusy(false);
@@ -76,6 +80,7 @@ export function ContactInviteDialog(props: {
 
   async function copyLatest(): Promise<void> {
     await navigator.clipboard.writeText(lastInviteUrl());
+    setMessageTone("status");
     setMessage("Invite link copied.");
   }
 
@@ -83,8 +88,10 @@ export function ContactInviteDialog(props: {
     setBusy(true);
     try {
       applyState(await revokeContactInvitation(id));
+      setMessageTone("status");
       setMessage("Invite revoked and its credit returned.");
     } catch (error) {
+      setMessageTone("error");
       setMessage(error instanceof Error ? error.message : "Could not revoke the invite");
     } finally {
       setBusy(false);
@@ -99,12 +106,21 @@ export function ContactInviteDialog(props: {
         props.onChanged?.();
         setLastInviteUrl("");
         setMessage("");
+        setMessageTone("status");
       }
     }}>
       <Dialog.Portal>
         <Dialog.Overlay class="composer-overlay fixed inset-0 z-40 bg-black/45" />
         <div class="fixed inset-0 z-50 grid items-end sm:place-items-center sm:p-6">
-          <Dialog.Content class="composer-dialog invite-dialog w-full border border-border bg-card shadow-2xl outline-none sm:max-w-md sm:rounded-xl">
+          <Dialog.Content
+            ref={contentRef}
+            role="dialog"
+            class="composer-dialog invite-dialog w-full border border-border bg-card shadow-2xl outline-none sm:max-w-md sm:rounded-xl"
+            onOpenAutoFocus={(event) => {
+              event.preventDefault();
+              queueMicrotask(() => contentRef?.focus());
+            }}
+          >
             <header class="flex min-h-16 items-center justify-between border-b border-border px-5">
               <div>
                 <Dialog.Title class="text-base font-semibold">Invite friends</Dialog.Title>
@@ -139,7 +155,7 @@ export function ContactInviteDialog(props: {
                 </button>
               </Show>
 
-              <Show when={message()}><p class="text-xs leading-5 text-muted-foreground">{message()}</p></Show>
+              <Show when={message()}><p class="text-xs leading-5 text-muted-foreground" role={messageTone() === "error" ? "alert" : "status"} aria-live={messageTone() === "error" ? "assertive" : "polite"}>{message()}</p></Show>
 
               <Show when={state()?.contacts.length}>
                 <section>
@@ -167,7 +183,7 @@ export function ContactInviteDialog(props: {
                             <strong class="block">{invite.status === "reserved" ? "Verifying email" : "Ready to share"}</strong>
                             <small class="text-muted-foreground">Expires {new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(invite.expiresAt))}</small>
                           </span>
-                          <button class="text-xs font-medium text-destructive" type="button" disabled={busy()} onClick={() => void revoke(invite.id)}>Revoke</button>
+                          <button class="min-h-11 px-2 text-xs font-medium text-destructive" type="button" disabled={busy()} onClick={() => void revoke(invite.id)}>Revoke</button>
                         </div>
                       )}
                     </For>

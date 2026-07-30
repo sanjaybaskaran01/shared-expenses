@@ -21,6 +21,8 @@ interface ExpenseTargetPickerProps {
 
 export function ExpenseTargetPicker(props: ExpenseTargetPickerProps) {
   const [query, setQuery] = createSignal("");
+  let contentRef: HTMLDivElement | undefined;
+  let searchRef: HTMLInputElement | undefined;
   const targets = createMemo(() => buildExpenseTargets(appStore.groups(), appStore.members(), props.actorId, props.preferredGroupId));
   const visible = createMemo(() => {
     const value = query().trim().toLocaleLowerCase();
@@ -38,7 +40,18 @@ export function ExpenseTargetPicker(props: ExpenseTargetPickerProps) {
     <Dialog.Portal>
       <Dialog.Overlay class="composer-overlay fixed inset-0 z-40 bg-black/45" />
       <div class="fixed inset-0 z-50 grid items-end sm:place-items-center sm:p-6">
-        <Dialog.Content class="composer-dialog max-h-[92dvh] w-full overflow-hidden rounded-t-[1.4rem] border border-border bg-card shadow-2xl outline-none sm:max-w-md sm:rounded-xl">
+        <Dialog.Content
+          ref={contentRef}
+          role="dialog"
+          class="composer-dialog max-h-[92dvh] w-full overflow-hidden rounded-t-[1.4rem] border border-border bg-card shadow-2xl outline-none sm:max-w-md sm:rounded-xl"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            queueMicrotask(() => {
+              if (matchMedia("(pointer: coarse)").matches) contentRef?.focus();
+              else searchRef?.focus();
+            });
+          }}
+        >
           <header class="flex min-h-16 items-center justify-between border-b border-border px-5">
             <div>
               <Dialog.Title class="text-base font-semibold tracking-[-.015em]">Who is this with?</Dialog.Title>
@@ -50,7 +63,7 @@ export function ExpenseTargetPicker(props: ExpenseTargetPickerProps) {
             <label class="relative block">
               <Search class="absolute left-3 top-3 text-muted-foreground" size={17} />
               <span class="sr-only">Search people and groups</span>
-              <input class="form-control h-11 pl-9" type="search" value={query()} onInput={(event) => setQuery(event.currentTarget.value)} placeholder="Search people or groups" autocomplete="off" />
+              <input ref={searchRef} class="form-control h-11 pl-9" type="search" value={query()} onInput={(event) => setQuery(event.currentTarget.value)} placeholder="Search people or groups" autocomplete="off" />
             </label>
           </div>
           <div class="max-h-[62dvh] overflow-y-auto px-2 py-2">
