@@ -21,6 +21,7 @@ export function FeedbackButton(props: { compact?: boolean; class?: string }) {
   const [error, setError] = createSignal("");
   let resetTimer: number | undefined;
   let closeTimer: number | undefined;
+  let messageRef: HTMLTextAreaElement | undefined;
 
   onCleanup(() => {
     if (resetTimer !== undefined) window.clearTimeout(resetTimer);
@@ -80,11 +81,18 @@ export function FeedbackButton(props: { compact?: boolean; class?: string }) {
         <Dialog.Portal>
           <Dialog.Overlay class="fixed inset-0 z-40 bg-black/45 data-[expanded]:animate-in data-[closed]:animate-out" />
           <div class="fixed inset-0 z-50 grid items-end sm:place-items-center sm:p-6">
-            <Dialog.Content class="w-full overflow-y-auto rounded-t-xl border border-border bg-card shadow-xl outline-none sm:max-w-md sm:rounded-xl">
+            <Dialog.Content
+              role="dialog"
+              class="w-full overflow-y-auto rounded-t-xl border border-border bg-card shadow-xl outline-none sm:max-w-md sm:rounded-xl"
+              onOpenAutoFocus={(event) => {
+                event.preventDefault();
+                queueMicrotask(() => messageRef?.focus());
+              }}
+            >
               <header class="flex h-14 items-center justify-between border-b border-border px-5">
                 <Dialog.Title class="text-base font-semibold">Send feedback</Dialog.Title>
                 <Dialog.CloseButton
-                  class="grid size-9 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                  class="icon-button"
                   aria-label="Close feedback form"
                 >
                   <X size={17} />
@@ -93,7 +101,7 @@ export function FeedbackButton(props: { compact?: boolean; class?: string }) {
               <Show
                 when={!sent()}
                 fallback={
-                  <div class="grid place-items-center gap-3 px-6 py-12 text-center">
+                  <div class="grid place-items-center gap-3 px-6 py-12 text-center" role="status" aria-live="polite">
                     <span class="feedback-success grid size-11 place-items-center rounded-md">
                       <Check size={20} />
                     </span>
@@ -105,7 +113,7 @@ export function FeedbackButton(props: { compact?: boolean; class?: string }) {
                   <div class="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      class="flex items-center justify-center gap-2 rounded-md border border-border px-3 py-2.5 text-sm font-medium transition-colors hover:bg-muted"
+                      class="flex min-h-11 items-center justify-center gap-2 rounded-md border border-border px-3 py-2.5 text-sm font-medium transition-colors hover:bg-muted"
                       classList={{ "border-primary bg-primary/5 ring-1 ring-primary": category() === "bug" }}
                       onClick={() => setCategory("bug")}
                       aria-pressed={category() === "bug"}
@@ -114,7 +122,7 @@ export function FeedbackButton(props: { compact?: boolean; class?: string }) {
                     </button>
                     <button
                       type="button"
-                      class="flex items-center justify-center gap-2 rounded-md border border-border px-3 py-2.5 text-sm font-medium transition-colors hover:bg-muted"
+                      class="flex min-h-11 items-center justify-center gap-2 rounded-md border border-border px-3 py-2.5 text-sm font-medium transition-colors hover:bg-muted"
                       classList={{ "border-primary bg-primary/5 ring-1 ring-primary": category() === "idea" }}
                       onClick={() => setCategory("idea")}
                       aria-pressed={category() === "idea"}
@@ -125,8 +133,8 @@ export function FeedbackButton(props: { compact?: boolean; class?: string }) {
                   <label class="grid gap-2 text-sm font-medium">
                     {category() === "bug" ? "What went wrong?" : "What would help?"}
                     <textarea
+                      ref={messageRef}
                       class="form-control min-h-28 resize-y py-2"
-                      autofocus
                       required
                       maxlength={4000}
                       value={message()}

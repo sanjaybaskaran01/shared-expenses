@@ -46,7 +46,14 @@ import { ExpenseTargetPicker } from "./components/ExpenseTargetPicker";
 import { FeedbackButton } from "./components/FeedbackDialog";
 import { GroupComposer } from "./components/GroupComposer";
 import { PaymentComposer } from "./components/PaymentComposer";
-import { Avatar, Button, Card } from "./components/ui";
+import {
+  AccessibleTabs,
+  Avatar,
+  Button,
+  Card,
+  tabId,
+  tabPanelId,
+} from "./components/ui";
 import {
   acceptCurrentContactInvitation,
   claimContactInvitation,
@@ -60,6 +67,13 @@ import {
 } from "./lib/auth";
 import { clearInviteToken, inviteTokenFromHash } from "./lib/contact-invites";
 import type { LocalExpense, LocalOperation } from "./lib/db";
+import {
+  decideExpenseLaunch,
+  decideGroupCreationDestination,
+  dialogHandoffDelay,
+  groupComposerOriginAfterOpenChange,
+  type GroupComposerOrigin,
+} from "./lib/expense-launch";
 import type { ExpenseTarget } from "./lib/expense-targets";
 import {
   computeBalances,
@@ -144,27 +158,32 @@ function ConnectionPill() {
         .filter((operation) => operation.syncStatus === "pending").length,
   );
   return (
-    <button
-      type="button"
-      class="connection-pill glass-control"
-      onClick={() => void appStore.sync()}
-      title={appStore.connectionMessage()}
-    >
-      <Switch>
-        <Match when={appStore.connection() === "online"}>
-          <Cloud class="text-foreground" size={14} />
-          <span>{pending() ? `${pending()} syncing` : "Synced"}</span>
-        </Match>
-        <Match when={appStore.connection() === "connecting"}>
-          <RefreshCw class="animate-spin" size={14} />
-          <span>Checking</span>
-        </Match>
-        <Match when={true}>
-          <CloudOff class="connection-warning" size={14} />
-          <span>{pending() ? `${pending()} on device` : "Offline"}</span>
-        </Match>
-      </Switch>
-    </button>
+    <>
+      <button
+        type="button"
+        class="connection-pill glass-control"
+        onClick={() => void appStore.sync()}
+        title={appStore.connectionMessage()}
+      >
+        <Switch>
+          <Match when={appStore.connection() === "online"}>
+            <Cloud class="text-foreground" size={14} />
+            <span>{pending() ? `${pending()} syncing` : "Synced"}</span>
+          </Match>
+          <Match when={appStore.connection() === "connecting"}>
+            <RefreshCw class="animate-spin" size={14} />
+            <span>Checking</span>
+          </Match>
+          <Match when={true}>
+            <CloudOff class="connection-warning" size={14} />
+            <span>{pending() ? `${pending()} on device` : "Offline"}</span>
+          </Match>
+        </Switch>
+      </button>
+      <span class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {appStore.connectionMessage()}
+      </span>
+    </>
   );
 }
 
@@ -330,10 +349,10 @@ function GroupsOverview(props: {
     <div class="page-enter space-y-5 sm:space-y-6">
       <header class="groups-overview-heading">
         <div>
-          <p class="eyebrow">Shared ledgers</p>
+          <p class="eyebrow">Your groups</p>
           <h1 class="page-title">Groups</h1>
           <p class="mt-1 text-sm text-muted-foreground">
-            A clear view of what each circle owes you—or what you owe them.
+            See what each group owes you—or what you owe.
           </p>
         </div>
         <Button class="create-group-action" onClick={props.onCreateGroup}>
@@ -345,7 +364,7 @@ function GroupsOverview(props: {
         fallback={
           <Card class="group-empty-state">
             <UsersRound size={28} />
-            <h2>Create your first shared ledger</h2>
+            <h2>Create your first group</h2>
             <p>Groups keep a trip, home, or event separate and easy to settle.</p>
             <Button onClick={props.onCreateGroup}><UsersRound size={16} /> Create group</Button>
           </Card>
@@ -538,23 +557,32 @@ function GroupsView(props: {
       >
         {(activeGroup) => (
           <>
-            <div class="group-view-tabs" role="tablist" aria-label={`${activeGroup.name} views`}>
-              <button type="button" role="tab" aria-selected={groupSection() === "expenses"} classList={{ active: groupSection() === "expenses" }} onClick={() => setGroupSection("expenses")}><ReceiptText size={16} /><span>Activity</span></button>
-              <button type="button" role="tab" aria-selected={groupSection() === "balances"} classList={{ active: groupSection() === "balances" }} onClick={() => setGroupSection("balances")}><Scale size={16} /><span>Balances</span></button>
-              <button type="button" role="tab" aria-selected={groupSection() === "insights"} classList={{ active: groupSection() === "insights" }} onClick={() => setGroupSection("insights")}><Activity size={16} /><span>Insights</span></button>
-            </div>
+            <AccessibleTabs
+              class="group-view-tabs"
+              items={[
+                { id: "expenses", label: "Activity", icon: () => <ReceiptText size={16} /> },
+                { id: "balances", label: "Balances", icon: () => <Scale size={16} /> },
+                { id: "insights", label: "Insights", icon: () => <Activity size={16} /> },
+              ] as const}
+              value={groupSection()}
+              onChange={setGroupSection}
+              ariaLabel={`${activeGroup.name} views`}
+              idPrefix="group-view"
+            />
 
             <Show when={groupSection() === "expenses"}>
-              <ExpenseList
-                groupId={activeGroup.id}
-                actorId={props.actorId}
-                onOpen={props.onOpenExpense}
-                onAdd={() => props.onAddExpense(activeGroup.id)}
-              />
+              <div id={tabPanelId("group-view", "expenses")} role="tabpanel" aria-labelledby={tabId("group-view", "expenses")}>
+                <ExpenseList
+                  groupId={activeGroup.id}
+                  actorId={props.actorId}
+                  onOpen={props.onOpenExpense}
+                  onAdd={() => props.onAddExpense(activeGroup.id)}
+                />
+              </div>
             </Show>
 
             <Show when={groupSection() === "balances"}>
-              <div class="page-enter space-y-3" role="tabpanel" aria-label="Group balances">
+              <div id={tabPanelId("group-view", "balances")} class="page-enter space-y-3" role="tabpanel" aria-labelledby={tabId("group-view", "balances")}>
                 <section class="balance-strip" aria-label={`${activeGroup.name} balance summary`}>
                   <div class="balance-cell balance-cell-in"><span class="micro-label">Coming in</span><strong class="money-type">{money(incoming(), currency())}</strong></div>
                   <div class="balance-cell balance-cell-out"><span class="micro-label">Going out</span><strong class="money-type">{money(outgoing(), currency())}</strong></div>
@@ -582,7 +610,7 @@ function GroupsView(props: {
             </Show>
 
             <Show when={groupSection() === "insights"}>
-              <Card id="insights" class="page-enter overflow-hidden" role="tabpanel">
+              <Card id={tabPanelId("group-view", "insights")} class="page-enter overflow-hidden" role="tabpanel" aria-labelledby={tabId("group-view", "insights")}>
                 <SectionHeading
                   title="Spending insights"
                   detail={`${money(total(), currency())} total`}
@@ -687,13 +715,20 @@ function OverviewView(props: {
         </For>
       </div>
 
-      <div class="home-list-tabs" role="tablist" aria-label="Home balance views">
-        <button type="button" role="tab" aria-selected={homeSection() === "people"} classList={{ active: homeSection() === "people" }} onClick={() => setHomeSection("people")}>People</button>
-        <button type="button" role="tab" aria-selected={homeSection() === "groups"} classList={{ active: homeSection() === "groups" }} onClick={() => setHomeSection("groups")}>Groups</button>
-      </div>
+      <AccessibleTabs
+        class="home-list-tabs"
+        items={[
+          { id: "people", label: "People" },
+          { id: "groups", label: "Groups" },
+        ] as const}
+        value={homeSection()}
+        onChange={setHomeSection}
+        ariaLabel="Home balance views"
+        idPrefix="home-balance"
+      />
 
       <Show when={homeSection() === "people"}>
-        <Card class="home-list-card overflow-hidden" role="tabpanel">
+        <Card id={tabPanelId("home-balance", "people")} class="home-list-card overflow-hidden" role="tabpanel" aria-labelledby={tabId("home-balance", "people")}>
           <SectionHeading
             title="People"
             detail={relationships().length ? "Net across all shared groups" : contactsWithoutBalance().length ? "Connected on Tally" : "No open balances"}
@@ -712,7 +747,7 @@ function OverviewView(props: {
               return (
                 <article class="relationship-row" style={{ "--row-index": index() }}>
                   <Avatar name={personName()} class="size-10 text-xs" />
-                  <button type="button" class="min-w-0 flex-1 text-left" onClick={() => props.onOpenGroup(relationship.groupIds[0]!)}>
+                  <button type="button" class="min-h-11 min-w-0 flex-1 text-left" onClick={() => props.onOpenGroup(relationship.groupIds[0]!)}>
                     <strong class="block truncate text-sm">{personName()}</strong>
                     <span class="block truncate text-xs text-muted-foreground">{groupNames(relationship.groupIds)}</span>
                   </button>
@@ -744,8 +779,8 @@ function OverviewView(props: {
       </Show>
 
       <Show when={homeSection() === "groups"}>
-        <Card class="home-list-card overflow-hidden" role="tabpanel">
-          <SectionHeading title="Groups" detail="Your shared ledgers" action={<button type="button" class="list-add-action" onClick={props.onCreateGroup}><UsersRound size={14} /> Create group</button>} />
+        <Card id={tabPanelId("home-balance", "groups")} class="home-list-card overflow-hidden" role="tabpanel" aria-labelledby={tabId("home-balance", "groups")}>
+          <SectionHeading title="Groups" detail="Your groups" action={<button type="button" class="list-add-action" onClick={props.onCreateGroup}><UsersRound size={14} /> Create group</button>} />
           <For each={appStore.groups()} fallback={<div class="px-6 py-12 text-center text-sm text-muted-foreground">Create a group to start splitting.</div>}>
             {(group) => (
               <button type="button" class="home-group-row" onClick={() => props.onOpenGroup(group.id)}>
@@ -815,7 +850,7 @@ function ActivityView(props: {
     <div class="page-enter space-y-5">
       <header>
         <h1 class="page-title">Activity</h1>
-        <p class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+        <p class="mt-2 flex items-center gap-2 text-xs text-muted-foreground" role="status" aria-live="polite">
           <span class="sync-dot" classList={{ pending: appStore.connection() !== "online" }} />
           {appStore.connection() === "online" ? "Synced" : "Saved on this device"} · just now
         </p>
@@ -826,7 +861,7 @@ function ActivityView(props: {
           each={activityDays()}
           fallback={
             <Card class="mt-4 px-6 py-12 text-center text-sm text-muted-foreground">
-              Activity appears after your first ledger change.
+              Activity appears after your first change.
             </Card>
           }
         >
@@ -839,15 +874,15 @@ function ActivityView(props: {
                 const actor = createMemo(() => operation.actorId === props.actorId ? "You" : memberName(operation.groupId, operation.actorId, props.actorId));
                 return <article class="activity-row">
                   <Avatar name={actor()} class="size-10 text-xs" />
-                  <button type="button" class="activity-row-main" disabled={!expense()} onClick={() => expense() && props.onOpenExpense(expense()!)}>
-                    <strong>{actor()} {activityCopy[operation.type] ?? "changed the ledger"}</strong>
-                    <span>{expense() ? `${expense()!.description} · ${group()?.name ?? "Shared group"}` : group()?.name ?? "Shared ledger"}</span>
+                  <button type="button" class="activity-row-main min-h-11" disabled={!expense()} onClick={() => expense() && props.onOpenExpense(expense()!)}>
+                    <strong>{actor()} {activityCopy[operation.type] ?? "updated the group"}</strong>
+                    <span>{expense() ? `${expense()!.description} · ${group()?.name ?? "Shared group"}` : group()?.name ?? "Shared group"}</span>
                     <time>{new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(operation.clientTimestamp))}</time>
                   </button>
                   <div class="activity-row-value">
                     <Show when={expense()}>{(item) => <strong>{money(item().amountMinor, item().currency)}</strong>}</Show>
                     <Show when={operation.type === "ExpenseVoided" && expense()?.status === "voided"}>
-                      <button onClick={() => expense() && void restore(expense()!)}>Restore</button>
+                      <button class="min-h-11 px-2" onClick={() => expense() && void restore(expense()!)}>Restore</button>
                     </Show>
                   </div>
                   <Show when={expense()}><ChevronRight size={15} class="activity-row-chevron" /></Show>
@@ -975,6 +1010,8 @@ function AuthenticatedApp(props: { actorId: string }) {
   const [targetPickerOpen, setTargetPickerOpen] = createSignal(false);
   const [detailOpen, setDetailOpen] = createSignal(false);
   const [groupOpen, setGroupOpen] = createSignal(false);
+  const [groupComposerOrigin, setGroupComposerOrigin] =
+    createSignal<GroupComposerOrigin>("groups");
   const [paymentOpen, setPaymentOpen] = createSignal(false);
   const [selectedGroupId, setSelectedGroupId] = createSignal<string>();
   const [selectedExpense, setSelectedExpense] = createSignal<LocalExpense>();
@@ -1042,24 +1079,41 @@ function AuthenticatedApp(props: { actorId: string }) {
     setTab("groups");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
+  function afterDialogClose(callback: () => void): void {
+    const coarsePointer = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    window.setTimeout(callback, dialogHandoffDelay(coarsePointer));
+  }
   function showGroupsOverview() {
     setGroupsMode("overview");
     setTab("groups");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
   function addExpense(id?: string) {
-    setPreferredTargetGroupId(id);
     setEditingExpense(undefined);
+    const decision = decideExpenseLaunch({
+      groups: appStore.groups(),
+      members: appStore.members(),
+      ...(id ? { groupId: id } : {}),
+    });
+    if (decision.kind === "compose") {
+      setPreferredTargetGroupId(id);
+      chooseExpenseTarget(decision.target);
+      return;
+    }
+    setExpenseTarget(undefined);
+    setPreferredTargetGroupId(undefined);
     window.setTimeout(() => setTargetPickerOpen(true), 0);
   }
-  function openGroupComposer() {
-    window.setTimeout(() => setGroupOpen(true), 0);
+  function openGroupComposer(origin: GroupComposerOrigin = "groups") {
+    setGroupComposerOrigin(origin);
+    if (origin === "expense") afterDialogClose(() => setGroupOpen(true));
+    else window.setTimeout(() => setGroupOpen(true), 0);
   }
   function chooseExpenseTarget(target: ExpenseTarget) {
     setExpenseTarget(target);
     setSelectedGroupId(target.groupId);
     setTargetPickerOpen(false);
-    window.setTimeout(() => setExpenseOpen(true), 0);
+    afterDialogClose(() => setExpenseOpen(true));
   }
   function openDetail(expense: LocalExpense) {
     setSelectedGroupId(expense.groupId);
@@ -1069,7 +1123,7 @@ function AuthenticatedApp(props: { actorId: string }) {
   function edit(expense: LocalExpense) {
     setDetailOpen(false);
     setEditingExpense(expense);
-    window.setTimeout(() => setExpenseOpen(true), 0);
+    afterDialogClose(() => setExpenseOpen(true));
   }
   function settle(
     settlement?: Settlement,
@@ -1083,6 +1137,7 @@ function AuthenticatedApp(props: { actorId: string }) {
   }
   return (
     <div class="app-shell min-h-dvh text-foreground md:grid md:grid-cols-[16rem_minmax(0,1fr)]">
+      <a class="skip-link" href="#main-content">Skip to content</a>
       <aside class="desktop-sidebar hidden md:sticky md:top-0 md:flex md:h-dvh md:flex-col">
         <div class="flex h-18 items-center gap-2.5 px-5">
           <BrandMark size={32} />
@@ -1116,7 +1171,7 @@ function AuthenticatedApp(props: { actorId: string }) {
             <span class="eyebrow">Groups</span>
             <button
               class="sidebar-create-group"
-              onClick={openGroupComposer}
+              onClick={() => openGroupComposer("groups")}
               aria-label="Create group"
             >
               <Plus size={14} /> Create
@@ -1140,7 +1195,7 @@ function AuthenticatedApp(props: { actorId: string }) {
           <FeedbackButton class="mb-2" />
           <ConnectionPill />
           <p class="mt-2 text-xs leading-5 text-muted-foreground">
-            Ledger changes save locally before syncing.
+            Changes save locally before syncing.
           </p>
         </div>
       </aside>
@@ -1151,13 +1206,13 @@ function AuthenticatedApp(props: { actorId: string }) {
             <Plus size={16} /> Add expense
           </button>
         </header>
-        <main class="app-main mx-auto w-full max-w-5xl px-4 pb-28 pt-5 sm:px-6 sm:pt-8 md:px-8 md:pb-12 lg:px-10">
+        <main id="main-content" tabindex={-1} class="app-main mx-auto w-full max-w-5xl px-4 pb-28 pt-5 sm:px-6 sm:pt-8 md:px-8 md:pb-12 lg:px-10">
           <Switch>
             <Match when={tab() === "overview"}>
               <OverviewView
                 actorId={props.actorId}
                 activeGroupId={selectedGroupId()}
-                onCreateGroup={openGroupComposer}
+                onCreateGroup={() => openGroupComposer("groups")}
                 onOpenGroup={selectGroup}
                 onSettle={settle}
               />
@@ -1172,7 +1227,7 @@ function AuthenticatedApp(props: { actorId: string }) {
                     onShowOverview={showGroupsOverview}
                     onAddExpense={addExpense}
                     onOpenExpense={openDetail}
-                    onCreateGroup={openGroupComposer}
+                    onCreateGroup={() => openGroupComposer("groups")}
                     onSettle={settle}
                     onToast={notify}
                   />
@@ -1181,7 +1236,7 @@ function AuthenticatedApp(props: { actorId: string }) {
                 <GroupsOverview
                   actorId={props.actorId}
                   onOpenGroup={selectGroup}
-                  onCreateGroup={openGroupComposer}
+                  onCreateGroup={() => openGroupComposer("groups")}
                 />
               </Show>
             </Match>
@@ -1217,7 +1272,7 @@ function AuthenticatedApp(props: { actorId: string }) {
         </For>
       </nav>
       <Show when={toast()}>
-        <div class="toast-enter toast-pill">
+        <div class="toast-enter toast-pill" role="status" aria-live="polite" aria-atomic="true">
           <CheckCircle2 size={16} />
           {toast()}
         </div>
@@ -1228,7 +1283,7 @@ function AuthenticatedApp(props: { actorId: string }) {
         preferredGroupId={preferredTargetGroupId()}
         onOpenChange={setTargetPickerOpen}
         onSelect={chooseExpenseTarget}
-        onCreateGroup={openGroupComposer}
+        onCreateGroup={() => openGroupComposer("expense")}
       />
       <ExpenseComposer
         open={expenseOpen()}
@@ -1245,11 +1300,15 @@ function AuthenticatedApp(props: { actorId: string }) {
         expense={editingExpense()}
         onOpenChange={(open) => {
           setExpenseOpen(open);
-          if (!open) setEditingExpense(undefined);
+          if (!open) {
+            setEditingExpense(undefined);
+            setExpenseTarget(undefined);
+          }
         }}
         onChangeTarget={() => {
+          setPreferredTargetGroupId(expenseTarget()?.groupId ?? selectedGroupId());
           setExpenseOpen(false);
-          window.setTimeout(() => setTargetPickerOpen(true), 0);
+          afterDialogClose(() => setTargetPickerOpen(true));
         }}
         onSaved={(mode) =>
           notify(mode === "updated" ? "Expense updated" : "Expense added")
@@ -1273,9 +1332,21 @@ function AuthenticatedApp(props: { actorId: string }) {
       />
       <GroupComposer
         open={groupOpen()}
-        onOpenChange={setGroupOpen}
-        onCreated={(id) => {
-          selectGroup(id);
+        onOpenChange={(open) => {
+          setGroupOpen(open);
+          setGroupComposerOrigin((origin) => groupComposerOriginAfterOpenChange(open, origin));
+        }}
+        onCreated={(id, groupName) => {
+          const destination = decideGroupCreationDestination(
+            groupComposerOrigin(),
+            appStore.groups(),
+            appStore.members(),
+            id,
+            groupName,
+          );
+          setGroupComposerOrigin("groups");
+          if (destination.kind === "compose") chooseExpenseTarget(destination.target);
+          else selectGroup(destination.groupId);
           notify("Group created");
         }}
       />
@@ -1297,13 +1368,17 @@ function GoogleMark() {
 function AuthScreen() {
   const search = new URLSearchParams(location.search);
   const invitationToken = inviteTokenFromHash();
+  const initialAuthFailed = search.get("auth") === "failed";
   const [email, setEmail] = createSignal(
     search.get("email") ?? "",
   );
   const [message, setMessage] = createSignal(
-    search.get("auth") === "failed"
+    initialAuthFailed
       ? "Sign-in could not be completed. Use the Google account or email address that was invited."
       : "",
+  );
+  const [messageTone, setMessageTone] = createSignal<"status" | "error">(
+    initialAuthFailed ? "error" : "status",
   );
   const [busy, setBusy] = createSignal<"google" | "email" | null>(null);
   const [capabilities] = createResource(async () => {
@@ -1317,6 +1392,7 @@ function AuthScreen() {
   async function signInWithGoogle() {
     setBusy("google");
     setMessage("");
+    setMessageTone("status");
     try {
       const result = await authClient.signIn.social({
         provider: "google",
@@ -1325,9 +1401,11 @@ function AuthScreen() {
         errorCallbackURL: `${location.origin}/?auth=failed`,
       });
       if (result.error) {
+        setMessageTone("error");
         setMessage(result.error.message ?? "Google sign-in could not be started.");
       }
     } catch {
+      setMessageTone("error");
       setMessage("The server is unavailable. Try the email link or continue on a previously signed-in device.");
     } finally {
       setBusy(null);
@@ -1338,6 +1416,7 @@ function AuthScreen() {
     event.preventDefault();
     setBusy("email");
     setMessage("");
+    setMessageTone("status");
     try {
       if (invitationToken) {
         await claimContactInvitation(invitationToken, email().trim());
@@ -1350,12 +1429,14 @@ function AuthScreen() {
         newUserCallbackURL: location.origin,
         errorCallbackURL: `${location.origin}/?auth=failed`,
       });
+      setMessageTone(result.error ? "error" : "status");
       setMessage(
         result.error
           ? (result.error.message ?? "Could not send the link.")
           : "Check your inbox — the secure link signs you in directly.",
       );
     } catch {
+      setMessageTone("error");
       setMessage(
         "The server is unavailable. Previously signed-in devices can continue offline.",
       );
@@ -1427,7 +1508,11 @@ function AuthScreen() {
           </form>
           </Show>
           <Show when={message()}>
-            <p class="mt-4 rounded-xl border border-border bg-muted/60 p-3 text-sm text-muted-foreground">
+            <p
+              class="mt-4 rounded-xl border border-border bg-muted/60 p-3 text-sm text-muted-foreground"
+              role={messageTone() === "error" ? "alert" : "status"}
+              aria-live={messageTone() === "error" ? "assertive" : "polite"}
+            >
               {message()}
             </p>
           </Show>

@@ -32,6 +32,8 @@ export function ExpenseDetail(props: ExpenseDetailProps) {
   const [confirmDelete, setConfirmDelete] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal("");
+  let detailRef: HTMLDivElement | undefined;
+  let deleteButtonRef: HTMLButtonElement | undefined;
   const group = createMemo(() => appStore.groups().find((item) => item.id === props.expense?.groupId));
   const members = createMemo(() => appStore.members().filter((member) => member.groupId === props.expense?.groupId));
   const memberName = (id: string) => id === props.actorId ? "You" : members().find((member) => member.userId === id)?.displayName ?? "Member";
@@ -85,7 +87,15 @@ export function ExpenseDetail(props: ExpenseDetailProps) {
       <Dialog.Portal>
         <Dialog.Overlay class="composer-overlay fixed inset-0 z-40 bg-black/45" />
         <div class="fixed inset-0 z-50 grid items-end sm:place-items-center sm:p-6">
-          <Dialog.Content class="composer-dialog glass-sheet max-h-[96dvh] w-full overflow-y-auto border border-border bg-card shadow-2xl outline-none sm:max-w-xl sm:rounded-xl">
+          <Dialog.Content
+            ref={detailRef}
+            role="dialog"
+            class="composer-dialog glass-sheet max-h-[96dvh] w-full overflow-y-auto border border-border bg-card shadow-2xl outline-none sm:max-w-xl sm:rounded-xl"
+            onOpenAutoFocus={(event) => {
+              event.preventDefault();
+              queueMicrotask(() => detailRef?.focus());
+            }}
+          >
             <header class="sticky top-0 z-20 flex min-h-16 items-center justify-between border-b border-border/70 bg-card/85 px-5 backdrop-blur-2xl">
               <div class="min-w-0"><Dialog.Title class="truncate text-base font-semibold">Expense details</Dialog.Title><Dialog.Description class="truncate text-xs text-muted-foreground">{group()?.name ?? "Shared group"}</Dialog.Description></div>
               <Dialog.CloseButton class="icon-button" aria-label="Close expense details"><X size={18} /></Dialog.CloseButton>
@@ -104,13 +114,13 @@ export function ExpenseDetail(props: ExpenseDetailProps) {
 
               <section>
                 <div class="mb-3 flex items-center justify-between"><h3 class="flex items-center gap-2 text-sm font-semibold"><MessageCircle size={16} /> Comments</h3><span class="text-xs text-muted-foreground">{comments().length}</span></div>
-                <div class="grid gap-2"><For each={comments()} fallback={<p class="rounded-lg bg-muted/55 px-4 py-5 text-center text-sm text-muted-foreground">No comments yet.</p>}>{(item) => <article class="rounded-lg bg-muted/65 p-3"><div class="flex items-center justify-between gap-3"><strong class="text-xs">{memberName(item.actorId)}</strong><time class="text-[11px] text-muted-foreground">{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(item.clientTimestamp))}</time></div><p class="mt-1 text-sm leading-5">{String((item.payload as Record<string, unknown>).body ?? "")}</p></article>}</For></div>
+                <div class="grid gap-2"><For each={comments()} fallback={<p class="rounded-lg bg-muted/55 px-4 py-5 text-center text-sm text-muted-foreground">No comments yet.</p>}>{(item) => <article class="rounded-lg bg-muted/65 p-3"><div class="flex items-center justify-between gap-3"><strong class="text-xs">{memberName(item.actorId)}</strong><time class="text-xs text-muted-foreground">{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(item.clientTimestamp))}</time></div><p class="mt-1 text-sm leading-5">{String((item.payload as Record<string, unknown>).body ?? "")}</p></article>}</For></div>
                 <form class="mt-3 flex gap-2" onSubmit={(event) => void submitComment(event)}><input class="form-control h-11" value={comment()} onInput={(event) => setComment(event.currentTarget.value)} placeholder="Add a comment" maxlength={2000} /><Button type="submit" size="icon" disabled={busy() || !comment().trim()} aria-label="Send comment"><ArrowRight size={17} /></Button></form>
               </section>
 
               <div class="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground"><CheckCircle2 size={14} class="text-primary" /> Version {expense.version} · {expense.syncStatus === "pending" ? "Saved on this device" : expense.syncStatus === "conflicted" ? "Needs conflict review" : "Verified by ledger"}</div>
               <Show when={error()}><p class="error-callout" role="alert">{error()}</p></Show>
-              <div class="grid grid-cols-2 gap-2"><Show when={expense.status === "active"} fallback={<Button class="col-span-2" onClick={() => void changeStatus()} disabled={busy()}><RotateCcw size={16} /> Restore expense</Button>}><Button variant="secondary" onClick={() => props.onEdit(expense)}><PencilLine size={16} /> Edit</Button><Button variant="destructive" onClick={() => setConfirmDelete(true)}><Trash2 size={16} /> Delete</Button></Show></div>
+              <div class="grid grid-cols-2 gap-2"><Show when={expense.status === "active"} fallback={<Button class="col-span-2" onClick={() => void changeStatus()} disabled={busy()}><RotateCcw size={16} /> Restore expense</Button>}><Button variant="secondary" onClick={() => props.onEdit(expense)}><PencilLine size={16} /> Edit</Button><Button ref={deleteButtonRef} variant="destructive" onClick={() => setConfirmDelete(true)}><Trash2 size={16} /> Delete</Button></Show></div>
             </div>}</Show>
           </Dialog.Content>
         </div>
@@ -120,7 +130,13 @@ export function ExpenseDetail(props: ExpenseDetailProps) {
         <AlertDialog.Portal>
           <AlertDialog.Overlay class="confirm-overlay fixed inset-0 z-[60] bg-black/55 backdrop-blur-[2px]" />
           <div class="fixed inset-0 z-[70] grid place-items-center p-5">
-            <AlertDialog.Content class="confirm-dialog w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-2xl outline-none">
+            <AlertDialog.Content
+              class="confirm-dialog w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-2xl outline-none"
+              onCloseAutoFocus={(event) => {
+                event.preventDefault();
+                queueMicrotask(() => deleteButtonRef?.focus());
+              }}
+            >
               <div class="confirm-danger-icon"><Trash2 size={19} /></div>
               <AlertDialog.Title class="mt-4 text-lg font-semibold tracking-tight">
                 Delete “{props.expense?.description ?? "this expense"}”?

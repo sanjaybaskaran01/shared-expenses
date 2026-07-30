@@ -1,6 +1,7 @@
 import { cva, type VariantProps } from "class-variance-authority";
-import { splitProps, type JSX } from "solid-js";
+import { For, splitProps, type JSX } from "solid-js";
 import { cn } from "../lib/cn";
+import { nextTabIndex } from "../lib/ui-navigation";
 
 const buttonVariants = cva(
   "ui-button inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
@@ -13,9 +14,9 @@ const buttonVariants = cva(
         destructive: "border border-destructive/20 bg-background text-destructive hover:bg-destructive/5",
       },
       size: {
-        default: "h-10 px-4 py-2",
-        sm: "h-9 rounded-md px-3",
-        icon: "size-9",
+        default: "min-h-11 px-4 py-2",
+        sm: "min-h-11 rounded-md px-3",
+        icon: "size-11",
       },
     },
     defaultVariants: { variant: "default", size: "default" },
@@ -50,5 +51,64 @@ export function Avatar(props: { name: string; class?: string }) {
         .map((part) => part.slice(0, 1).toUpperCase())
         .join("") || "?"}
     </span>
+  );
+}
+
+export interface TabItem<T extends string> {
+  id: T;
+  label: string;
+  icon?: () => JSX.Element;
+}
+
+interface AccessibleTabsProps<T extends string> {
+  items: readonly TabItem<T>[];
+  value: T;
+  onChange(value: T): void;
+  ariaLabel: string;
+  idPrefix: string;
+  class?: string;
+}
+
+export function tabId(idPrefix: string, value: string): string {
+  return `${idPrefix}-tab-${value}`;
+}
+
+export function tabPanelId(idPrefix: string, value: string): string {
+  return `${idPrefix}-panel-${value}`;
+}
+
+export function AccessibleTabs<T extends string>(props: AccessibleTabsProps<T>) {
+  const refs: HTMLButtonElement[] = [];
+
+  function onKeyDown(index: number, event: KeyboardEvent): void {
+    const nextIndex = nextTabIndex(index, props.items.length, event.key);
+    if (nextIndex === undefined) return;
+    event.preventDefault();
+    const next = props.items[nextIndex];
+    if (!next) return;
+    props.onChange(next.id);
+    queueMicrotask(() => refs[nextIndex]?.focus());
+  }
+
+  return (
+    <div class={props.class} role="tablist" aria-label={props.ariaLabel}>
+      <For each={props.items}>{(item, index) => (
+        <button
+          ref={(element) => { refs[index()] = element; }}
+          id={tabId(props.idPrefix, item.id)}
+          type="button"
+          role="tab"
+          tabindex={props.value === item.id ? 0 : -1}
+          aria-selected={props.value === item.id}
+          aria-controls={tabPanelId(props.idPrefix, item.id)}
+          classList={{ active: props.value === item.id }}
+          onClick={() => props.onChange(item.id)}
+          onKeyDown={(event) => onKeyDown(index(), event)}
+        >
+          {item.icon?.()}
+          <span>{item.label}</span>
+        </button>
+      )}</For>
+    </div>
   );
 }
