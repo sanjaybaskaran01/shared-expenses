@@ -121,7 +121,7 @@ function contextFromEnvironment(): ReleaseContext {
     launchdLabel: process.env.TALLY_LAUNCHD_LABEL ?? "com.tally.api",
     wranglerPath: resolve(repositoryRoot, "node_modules/.bin/wrangler"),
     wranglerConfig: resolve(repositoryRoot, "apps/web/wrangler.jsonc"),
-    workerName: process.env.TALLY_WORKER_NAME ?? "tally-web",
+    workerName: process.env.TALLY_WORKER_NAME ?? "shared-expenses-web",
   };
 }
 
@@ -482,6 +482,7 @@ async function rollbackWeb(context: ReleaseContext, previousVersion: string, pre
         await wrangler(context, [
           "deploy",
           "--config", context.wranglerConfig,
+          "--name", context.workerName,
           "--assets", join(cached.path, "web"),
         ]);
         await pollWebDeployment(fetchWithTimeout, {
@@ -534,6 +535,7 @@ async function deployWeb(
     await wrangler(context, [
       "deploy",
       "--config", context.wranglerConfig,
+      "--name", context.workerName,
       "--assets", join(artifactPath, "web"),
     ]);
     const version = await currentWorkerVersion(context);
@@ -619,7 +621,9 @@ async function run(): Promise<void> {
     if (releaseArguments.dryRun) {
       if (operations.includeWeb) {
         await timed(history, "Wrangler dry run", () => wrangler(context, [
-          "deploy", "--dry-run", "--config", context.wranglerConfig, "--assets", join(artifact.path, "web"),
+          "deploy", "--dry-run", "--config", context.wranglerConfig,
+          "--name", context.workerName,
+          "--assets", join(artifact.path, "web"),
         ]).then(() => undefined));
       }
       print(`dry run passed for ${repository.commit}`);
