@@ -12,6 +12,7 @@ backups/
 coverage/
 playwright-report/
 test-results/
+artifacts/scenario-lab/
 outputs/*.md
 .wrangler/
 /release-artifact/

@@ -1,5 +1,6 @@
 import { render } from "solid-js/web";
 import App from "./App";
+import { developmentIdentity } from "./lib/development-actor";
 import "./styles/app.css";
 
 if ("serviceWorker" in navigator) {
@@ -22,3 +23,10 @@ if ("serviceWorker" in navigator) {
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing application root");
 render(() => <App />, root);
+
+if (import.meta.env.DEV) {
+  const identity = developmentIdentity(location.search, true);
+  if (identity.scenario) {
+    void import("./lib/scenario-bridge").then(({ installScenarioBridge }) => installScenarioBridge(identity.actorId));
+  }
+}

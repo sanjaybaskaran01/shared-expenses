@@ -32,6 +32,17 @@ Open `http://localhost:5173`. Then verify everything with:
 bun run check
 ```
 
+## Four-person Scenario Lab
+
+Exercise the real interface as Maya, Dev, Mira, and Arjun in four isolated mobile browser profiles:
+
+```sh
+bun run scenario:lab           # headed; opens the live evidence report
+bun run scenario:lab:headless  # unattended verification
+```
+
+The lab runs simultaneous expenses, offline replay, an accepted write with a lost response, competing edits, and outsider authorization against a disposable SQLite ledger on random local ports. It never reads or mutates a development or production database. Each run writes an ignored HTML/JSON evidence package under `artifacts/scenario-lab/`. See [Scenario Lab](docs/scenario-lab.md) for its oracle, safety boundaries, and extension guide.
+
 ## One-origin self-hosting
 
 The simplest deployment keeps the browser, API, cookies, and CSP on one origin. Docker Compose builds both services, stores SQLite in one named volume, and exposes only the web gateway on localhost:

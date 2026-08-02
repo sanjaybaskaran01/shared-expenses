@@ -295,6 +295,7 @@ textarea.form-control { height: auto; } select.form-control { appearance: auto; 
 .expense-row-money span { display: block; margin-top: .26rem; color: var(--muted-foreground); font-size: .75rem; font-weight: 620; white-space: nowrap; }
 .expense-row-money span.money-in { color: var(--positive); }
 .expense-row-money span.money-out { color: var(--negative); }
+.expense-row-money span.sync-attention { color: var(--negative); font-weight: 720; }
 .expense-row-chevron { color: color-mix(in srgb, var(--muted-foreground) 60%, transparent); }
 .appearance-choice { display: grid; min-height: 5rem; place-items: center; align-content: center; gap: .4rem; border: 1px solid var(--border); border-radius: 1rem; background: color-mix(in srgb, var(--card) 70%, transparent); color: var(--muted-foreground); font-size: .75rem; font-weight: 650; transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease; }
 .appearance-choice.active { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); background: color-mix(in srgb, var(--primary) 10%, var(--card)); color: var(--primary); }

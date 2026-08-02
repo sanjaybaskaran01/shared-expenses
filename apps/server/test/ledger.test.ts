@@ -92,6 +92,13 @@ describe("ledger ingestion", () => {
     ]);
   });
 
+  test("identifies every active group member for realtime fan-out", () => {
+    expect(store.activeMemberIdsForGroups(["group-1"])).toEqual(["user-1", "user-2"]);
+    expect(store.activeMemberIdsForGroups([])).toEqual([]);
+    db.query("UPDATE group_members SET status = 'removed' WHERE group_id = ? AND user_id = ?").run("group-1", "user-2");
+    expect(store.activeMemberIdsForGroups(["group-1"])).toEqual(["user-1"]);
+  });
+
   test("is idempotent by operation UUID", async () => {
     const operation = await signedOperation(privateKey);
     await store.push("user-1", [operation]);

@@ -24,9 +24,12 @@
     "assets": "bun apps/web/scripts/generate-assets.ts",
     "recovery:new-generation": "bun scripts/rotate-generation.ts",
     "security:audit": "bun scripts/security-audit.ts",
+    "scenario:lab": "bun scripts/scenario-lab/run.ts",
+    "scenario:lab:headless": "bun scripts/scenario-lab/run.ts --headless",
     "check": "bun run security:audit && bun run validate && bun run build"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@types/bun": "1.3.14",
     "typescript": "7.0.2",
     "wrangler": "4.114.0"

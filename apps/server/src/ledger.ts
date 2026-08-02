@@ -160,6 +160,17 @@ export class LedgerStore {
     );
   }
 
+  activeMemberIdsForGroups(groupIds: readonly string[]): string[] {
+    const actorIds = new Set<string>();
+    for (const groupId of new Set(groupIds)) {
+      const rows = this.db.query<{ user_id: string }, [string]>(
+        "SELECT user_id FROM group_members WHERE group_id = ? AND status = 'active'",
+      ).all(groupId);
+      for (const { user_id } of rows) actorIds.add(user_id);
+    }
+    return [...actorIds].sort();
+  }
+
   bootstrapGroup(input: {
     id: string;
     name: string;

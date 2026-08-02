@@ -66,6 +66,7 @@ import {
   signOutAndClearLocalLedger,
 } from "./lib/auth";
 import { clearInviteToken, inviteTokenFromHash } from "./lib/contact-invites";
+import { developmentIdentity } from "./lib/development-actor";
 import type { LocalExpense, LocalOperation } from "./lib/db";
 import {
   decideExpenseLaunch,
@@ -310,8 +311,13 @@ function ExpenseList(props: {
                         <span classList={{
                           "money-in": expense.yourNetMinor > 0,
                           "money-out": expense.yourNetMinor < 0,
+                          "sync-attention": expense.syncStatus === "conflicted" || expense.syncStatus === "rejected",
                         }}>
-                          {expense.status === "voided"
+                          {expense.syncStatus === "conflicted"
+                            ? "needs review"
+                            : expense.syncStatus === "rejected"
+                              ? "not synced"
+                              : expense.status === "voided"
                             ? "deleted"
                             : expense.yourNetMinor > 0
                               ? `you’re owed ${money(expense.yourNetMinor, expense.currency)}`
@@ -1530,7 +1536,7 @@ export default function App() {
   const [offlineActorId] = createResource(getOfflineActorId);
   const actorId = createMemo(() =>
     import.meta.env.DEV
-      ? "dev-user"
+      ? developmentIdentity(location.search, true).actorId
       : (session().data?.user.id ?? offlineActorId()),
   );
   return (

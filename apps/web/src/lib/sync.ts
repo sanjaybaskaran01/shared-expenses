@@ -1,5 +1,5 @@
 import type { JsonValue, OperationEnvelope } from "@expenses/protocol";
-import { apiBaseUrl, bootstrapDevelopment, getSnapshot, pullOperations, pushOperations, registerDevice } from "./api";
+import { apiBaseUrl, bootstrapDevelopment, developmentActorId, getSnapshot, pullOperations, pushOperations, registerDevice } from "./api";
 import { localDb, type LocalExpense, type LocalOperation } from "./db";
 import { ensureDevice } from "./device";
 
@@ -36,18 +36,25 @@ export function expenseFromOperation(
   };
 }
 
+export function remoteProjectionSyncStatus(
+  currentStatus: LocalExpense["syncStatus"] | undefined,
+): LocalExpense["syncStatus"] {
+  return currentStatus === "conflicted" || currentStatus === "rejected" ? currentStatus : "accepted";
+}
+
 async function applyRemote(operation: OperationEnvelope, currentActorId: string): Promise<void> {
   const localOperation: LocalOperation = { ...operation, syncStatus: "accepted" };
   await localDb.operations.put(localOperation);
   const existingExpense = await localDb.expenses.get(operation.targetId);
-  const expense = expenseFromOperation(operation, "accepted", currentActorId, existingExpense?.createdBy);
+  const projectionStatus = remoteProjectionSyncStatus(existingExpense?.syncStatus);
+  const expense = expenseFromOperation(operation, projectionStatus, currentActorId, existingExpense?.createdBy);
   if (expense) await localDb.expenses.put(expense);
   if (operation.type === "ExpenseVoided") {
     await localDb.expenses.update(operation.targetId, {
       status: "voided",
       version: operation.baseVersion + 1,
       updatedAt: operation.receivedAt ?? operation.clientTimestamp,
-      syncStatus: "accepted",
+      syncStatus: projectionStatus,
     });
   }
   if (operation.type === "ExpenseRestored") {
@@ -55,7 +62,7 @@ async function applyRemote(operation: OperationEnvelope, currentActorId: string)
       status: "active",
       version: operation.baseVersion + 1,
       updatedAt: operation.receivedAt ?? operation.clientTimestamp,
-      syncStatus: "accepted",
+      syncStatus: projectionStatus,
     });
   }
   if (operation.type === "GroupCurrencyChanged") {
@@ -69,15 +76,45 @@ async function applyRemote(operation: OperationEnvelope, currentActorId: string)
 
 export type ConnectionState = "connecting" | "online" | "offline" | "error";
 
+export class SyncRequestQueue {
+  private running: Promise<void> | undefined;
+  private rerunRequested = false;
+
+  run(task: () => Promise<void>): Promise<void> {
+    if (this.running) {
+      this.rerunRequested = true;
+      return this.running;
+    }
+    const execution = (async () => {
+      do {
+        this.rerunRequested = false;
+        await task();
+      } while (this.rerunRequested);
+    })();
+    this.running = execution;
+    void execution.then(
+      () => {
+        if (this.running === execution) this.running = undefined;
+      },
+      () => {
+        if (this.running === execution) this.running = undefined;
+      },
+    );
+    return execution;
+  }
+}
+
 export class SyncEngine {
   private eventSource: EventSource | undefined;
-  private syncing = false;
+  private readonly requests = new SyncRequestQueue();
 
   constructor(private readonly onState: (state: ConnectionState, message?: string) => void) {}
 
   async sync(): Promise<void> {
-    if (this.syncing) return;
-    this.syncing = true;
+    return this.requests.run(() => this.syncOnce());
+  }
+
+  private async syncOnce(): Promise<void> {
     this.onState("connecting");
     try {
       const device = await ensureDevice();
@@ -175,14 +212,14 @@ export class SyncEngine {
       this.ensureEvents();
     } catch (error) {
       this.onState(navigator.onLine ? "error" : "offline", error instanceof Error ? error.message : "Sync unavailable");
-    } finally {
-      this.syncing = false;
     }
   }
 
   private ensureEvents(): void {
     if (this.eventSource) return;
-    this.eventSource = new EventSource(`${apiBaseUrl}/api/v1/sync/events`, { withCredentials: true });
+    const eventsUrl = new URL(`${apiBaseUrl}/api/v1/sync/events`);
+    if (import.meta.env.DEV) eventsUrl.searchParams.set("devUser", developmentActorId);
+    this.eventSource = new EventSource(eventsUrl, { withCredentials: true });
     this.eventSource.addEventListener("sequence", () => void this.sync());
     this.eventSource.onerror = () => {
       this.eventSource?.close();
