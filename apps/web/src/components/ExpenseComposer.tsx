@@ -12,6 +12,7 @@ import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { LocalExpense } from "../lib/db";
 import { isLocalToday, localDateValue } from "../lib/dates";
 import { validateExpenseForm, type ExpenseFormIssue } from "../lib/expense-form";
+import { describeExpenseOutcome } from "../lib/group-insights";
 import { appStore, calculateExpenseAllocations, calculateExpensePayers, createExpense, updateExpense, type SplitMethod } from "../lib/store";
 import { Avatar, Button } from "./ui";
 
@@ -28,10 +29,10 @@ interface ExpenseComposerProps {
 }
 
 const splitMethods: Array<{ id: SplitMethod; label: string }> = [
-  { id: "equal", label: "Evenly" },
+  { id: "equal", label: "Equal" },
   { id: "shares", label: "Shares" },
-  { id: "exact", label: "Exact" },
-  { id: "percentage", label: "%" },
+  { id: "exact", label: "Amounts" },
+  { id: "percentage", label: "Percent" },
 ];
 
 const categories = ["General", "Dining out", "Groceries", "Liquor", "Rent", "Household supplies", "Utilities", "Transportation", "Gas/fuel", "Taxi", "Plane", "Hotel", "Entertainment", "Games", "Medical expenses", "Gifts", "Education", "Pets"];
@@ -78,7 +79,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   const payerSummary = createMemo(() => {
     if (payerIds().length > 1) return `${payerIds().length} people`;
     const payerId = payerIds()[0];
-    return payerId === props.actorId ? "you" : groupMembers().find((member) => member.userId === payerId)?.displayName ?? "someone";
+    return payerId === props.actorId ? "You" : groupMembers().find((member) => member.userId === payerId)?.displayName ?? "Someone";
   });
 
   createEffect(() => {
@@ -166,11 +167,22 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   const splitSummary = createMemo(() => {
     const count = participants().length;
     const people = `${count} ${count === 1 ? "person" : "people"}`;
-    if (splitMethod() === "equal") return `Evenly · ${people}`;
-    if (splitMethod() === "exact") return `Exact · ${people}`;
-    if (splitMethod() === "percentage") return `Percentage · ${people}`;
+    if (splitMethod() === "equal") return `Equal · ${people}`;
+    if (splitMethod() === "exact") return `By amount · ${people}`;
+    if (splitMethod() === "percentage") return `By percent · ${people}`;
     if (splitMethod() === "shares") return `Shares · ${people}`;
     return `Adjusted · ${people}`;
+  });
+
+  const outcome = createMemo(() => describeExpenseOutcome(
+    payers().find((payer) => payer.participantId === props.actorId)?.amountMinor ?? 0,
+    allocations().find((allocation) => allocation.participantId === props.actorId)?.amountMinor ?? 0,
+  ));
+
+  const outcomeHeadline = createMemo(() => {
+    if (outcome().direction === "back") return `This expense changes your balance by +${formatMinor(outcome().differenceMinor, currency())}`;
+    if (outcome().direction === "owe") return `This expense changes your balance by −${formatMinor(outcome().differenceMinor, currency())}`;
+    return "This expense does not change your balance";
   });
 
   function initializeValues(method: SplitMethod): void {
@@ -396,23 +408,30 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
 
               <label class="description-field"><span class="sr-only">What was it for?</span><input ref={descriptionInputRef} value={description()} onInput={(event) => { setDescription(event.currentTarget.value); if (formIssue()?.field === "description") { setFormIssue(undefined); setError(""); } }} placeholder="What was it for?" maxlength={200} autocomplete="off" aria-invalid={formIssue()?.field === "description"} aria-describedby={formIssue()?.field === "description" ? "expense-form-error" : undefined} /></label>
 
-              <div class="expense-quick-controls" aria-label="Expense options">
+              <div class="expense-quick-controls" aria-label="Expense details">
                 <button ref={payerControlRef} type="button" class="quick-control tone-payer" aria-expanded={activePanel() === "payer"} aria-controls="payer-panel" aria-invalid={formIssue()?.field === "payer"} aria-describedby={formIssue()?.field === "payer" ? "expense-form-error" : undefined} onClick={() => { if (formIssue()?.field === "payer") { setFormIssue(undefined); setError(""); } togglePanel("payer"); }}>
-                  <span class="quick-control-icon"><UsersRound size={16} /></span><span><span class="micro-label">Paid by</span><strong>{payerSummary()}</strong></span><ChevronDown size={15} />
+                  <span class="quick-control-icon"><UsersRound size={16} /></span><span class="quick-control-label">Paid by</span><strong>{payerSummary()}</strong><ChevronDown size={15} />
                 </button>
                 <button ref={splitControlRef} type="button" class="quick-control tone-split" aria-expanded={activePanel() === "split"} aria-controls="split-panel" aria-invalid={formIssue()?.field === "split"} aria-describedby={formIssue()?.field === "split" ? "expense-form-error" : undefined} onClick={() => { if (formIssue()?.field === "split") { setFormIssue(undefined); setError(""); } togglePanel("split"); }}>
-                  <span class="quick-control-icon"><Scale size={16} /></span><span><span class="micro-label">Split</span><strong>{splitSummary()}</strong></span><ChevronDown size={15} />
+                  <span class="quick-control-icon"><Scale size={16} /></span><span class="quick-control-label">Split</span><strong>{splitSummary()}</strong><ChevronDown size={15} />
                 </button>
                 <button type="button" class="quick-control tone-date" aria-expanded={activePanel() === "date"} aria-controls="date-panel" onClick={() => togglePanel("date")}>
-                  <span class="quick-control-icon"><CalendarDays size={16} /></span><span><span class="micro-label">When</span><strong>{isLocalToday(date()) ? "Today" : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(`${date()}T12:00:00`))}</strong></span><ChevronDown size={15} />
+                  <span class="quick-control-icon"><CalendarDays size={16} /></span><span class="quick-control-label">Date</span><strong>{isLocalToday(date()) ? "Today" : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(`${date()}T12:00:00`))}</strong><ChevronDown size={15} />
                 </button>
               </div>
+
+              <Show when={Number(amount()) > 0 && payers().length > 0 && allocations().length > 0}>
+                <section class="expense-outcome" aria-label="Effect of this expense">
+                  <div><span>Your part of this expense</span><strong>{outcomeHeadline()}</strong></div>
+                  <p>You paid {formatMinor(outcome().actorPaidMinor, currency())} · your share is {formatMinor(outcome().actorShareMinor, currency())}</p>
+                </section>
+              </Show>
 
               <Show when={activePanel() === "payer"}>
                 <section id="payer-panel" class="disclosure-panel split-panel grid gap-3 border border-border p-4" aria-label="Choose who paid">
                   <div class="disclosure-heading"><div><p>Who paid?</p><small>Choose one person, or use multiple payers.</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
                   <div class="flex items-center justify-end"><Show when={groupMembers().length > 1}><button type="button" class="flex min-h-11 items-center gap-1.5 px-2 text-xs font-semibold text-primary" onClick={enableMultiplePayers}><UsersRound size={14} />{payerIds().length > 1 ? "Use one payer" : "Multiple payers"}</button></Show></div>
-                  <Show when={payerIds().length > 1} fallback={<div class="payer-avatar-rail"><For each={groupMembers()}>{(member) => <button type="button" class="payer-avatar-choice" classList={{ active: payerIds()[0] === member.userId }} aria-pressed={payerIds()[0] === member.userId} onClick={() => { setPayerIds([member.userId]); setPayerValues({}); }}><Avatar name={member.displayName} class="size-9 text-xs" /><span>{member.userId === props.actorId ? "You" : member.displayName}</span></button>}</For></div>}>
+                  <Show when={payerIds().length > 1} fallback={<div class="payer-avatar-rail"><For each={groupMembers()}>{(member) => <button type="button" class="payer-avatar-choice" classList={{ active: payerIds()[0] === member.userId }} aria-pressed={payerIds()[0] === member.userId} onClick={() => { setPayerIds([member.userId]); setPayerValues({}); setActivePanel("none"); }}><Avatar name={member.displayName} class="size-9 text-xs" /><span>{member.userId === props.actorId ? "You" : member.displayName}</span></button>}</For></div>}>
                     <div class="divide-y divide-border rounded-xl border border-border bg-background/55">
                       <For each={groupMembers()}>{(member) => <div class="flex min-h-14 items-center gap-2 px-2"><button type="button" class="participant-toggle grid size-11 place-items-center rounded-md border border-border" classList={{ "border-primary bg-primary text-primary-foreground": payerIds().includes(member.userId) }} onClick={() => togglePayer(member.userId)} aria-label={`Toggle ${member.displayName} as payer`} aria-pressed={payerIds().includes(member.userId)}><Show when={payerIds().includes(member.userId)}><Check size={14} /></Show></button><Avatar name={member.displayName} class="size-7 text-xs" /><span class="min-w-0 flex-1 truncate text-sm font-medium">{member.userId === props.actorId ? "You" : member.displayName}</span><div class="relative w-24"><input class="form-control h-11 text-right text-sm tabular-nums" disabled={!payerIds().includes(member.userId)} inputmode="decimal" value={payerValues()[member.userId] ?? ""} onInput={(event) => setPayerValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={`Amount paid by ${member.displayName}`} /></div></div>}</For>
                     </div>
@@ -422,7 +441,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
 
               <Show when={activePanel() === "split"}>
                 <section id="split-panel" class="disclosure-panel split-panel grid gap-4 border border-border p-4" aria-label="Choose how to split">
-                  <div class="disclosure-heading"><div><p>How is it split?</p><small>Evenly is the fastest default. Adjust only if needed.</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
+                  <div class="disclosure-heading"><div><p>Who owes what?</p><small>{splitMethod() === "equal" ? "The total is divided equally among everyone selected." : splitMethod() === "shares" ? "Give someone more shares when they should cover more of the total." : splitMethod() === "exact" ? "Enter the exact amount each person should cover." : "Enter the percentage each person should cover."}</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
                   <div>
                     <p class="mb-2 text-sm font-medium">Split method</p>
                     <div class="split-mode-tabs grid grid-cols-4">
@@ -459,8 +478,8 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                 <section id="date-panel" class="disclosure-panel split-panel grid gap-3 border border-border p-4" aria-label="Choose expense date">
                   <div class="disclosure-heading"><div><p>When was it?</p><small>Today is selected by default.</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
                   <div class="date-choice-row">
-                    <button type="button" classList={{ active: isLocalToday(date()) }} onClick={() => setDate(localDateValue())}>Today</button>
-                    <label><span class="sr-only">Expense date</span><input class="form-control" type="date" value={date()} onInput={(event) => setDate(event.currentTarget.value)} /></label>
+                    <button type="button" classList={{ active: isLocalToday(date()) }} onClick={() => { setDate(localDateValue()); setActivePanel("none"); }}>Today</button>
+                    <label><span class="sr-only">Expense date</span><input class="form-control" type="date" value={date()} onInput={(event) => setDate(event.currentTarget.value)} onChange={() => setActivePanel("none")} /></label>
                   </div>
                 </section>
               </Show>

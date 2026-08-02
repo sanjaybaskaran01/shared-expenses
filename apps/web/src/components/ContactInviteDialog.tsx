@@ -135,16 +135,20 @@ export function ContactInviteDialog(props: {
               <section class="invite-credit-panel">
                 <div>
                   <span class="micro-label">Invitations available</span>
-                  <strong>{state()?.creditsRemaining ?? "—"} of {state()?.creditsTotal ?? 5}</strong>
+                  <strong>{state.loading ? "Checking…" : state.error ? "Connect to check" : `${state()?.creditsRemaining ?? 0} of ${state()?.creditsTotal ?? 5}`}</strong>
                 </div>
                 <UserPlus size={20} />
               </section>
 
+              <Show when={state.error}>
+                <p class="invite-offline-note" role="status">Connect to the internet to create a new link. Your contacts and existing invitations are unchanged.</p>
+              </Show>
+
               <div class="grid grid-cols-2 gap-2">
-                <Button disabled={busy() || state()?.creditsRemaining === 0} onClick={() => void createAndShare("share")}>
+                <Button disabled={busy() || state.loading || Boolean(state.error) || state()?.creditsRemaining === 0} onClick={() => void createAndShare("share")}>
                   <Send size={16} /> Share invite
                 </Button>
-                <Button variant="secondary" disabled={busy() || state()?.creditsRemaining === 0} onClick={() => void createAndShare("message")}>
+                <Button variant="secondary" disabled={busy() || state.loading || Boolean(state.error) || state()?.creditsRemaining === 0} onClick={() => void createAndShare("message")}>
                   <MessageCircle size={16} /> Message
                 </Button>
               </div>

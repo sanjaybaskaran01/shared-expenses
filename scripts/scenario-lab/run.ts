@@ -221,7 +221,7 @@ async function recordStep(
 async function prepareExpense(page: Page, description: string, amount: string): Promise<() => Promise<void>> {
   await page.getByRole("button", { name: "Add expense", exact: true }).click();
   const targetDialog = page.getByRole("dialog", { name: "Who is this with?" });
-  await targetDialog.getByRole("button", { name: `${groupName} 4 people`, exact: true }).click();
+  await targetDialog.getByTestId("expense-target-group:scenario-goa-trip").click();
   const composer = page.getByRole("dialog", { name: "Add an expense" });
   await composer.getByLabel("Total in USD").fill(amount);
   await composer.getByPlaceholder("What was it for?").fill(description);

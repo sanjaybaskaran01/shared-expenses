@@ -14,6 +14,7 @@ interface PaymentComposerProps {
   groupId?: string | undefined;
   currency: string;
   suggested?: Settlement | undefined;
+  blocked?: boolean | undefined;
   onOpenChange(open: boolean): void;
   onSaved(): void;
 }
@@ -27,6 +28,21 @@ export function PaymentComposer(props: PaymentComposerProps) {
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal("");
   const members = createMemo(() => appStore.members().filter((member) => member.groupId === props.groupId && member.status === "active"));
+  const payerName = createMemo(() => members().find((member) => member.userId === payerId())?.displayName ?? "Payer");
+  const recipientName = createMemo(() => members().find((member) => member.userId === recipientId())?.displayName ?? "Recipient");
+  const amountMinor = createMemo(() => Math.round((Number(amount()) || 0) * 100));
+  const suggestedRemainingMinor = createMemo(() => {
+    const suggested = props.suggested;
+    if (!suggested || suggested.payerId !== payerId() || suggested.recipientId !== recipientId()) return undefined;
+    return suggested.amountMinor - amountMinor();
+  });
+  const outcome = createMemo(() => {
+    const remaining = suggestedRemainingMinor();
+    if (remaining === 0) return `This settles the suggested balance between ${payerName()} and ${recipientName()}.`;
+    if (remaining !== undefined && remaining > 0) return `${payerName()} will still owe ${recipientName()} ${new Intl.NumberFormat(undefined, { style: "currency", currency: props.currency }).format(remaining / 100)}.`;
+    if (remaining !== undefined && remaining < 0) return `This is ${new Intl.NumberFormat(undefined, { style: "currency", currency: props.currency }).format(Math.abs(remaining) / 100)} more than the suggested balance.`;
+    return `This records ${payerName()} paying ${recipientName()} ${new Intl.NumberFormat(undefined, { style: "currency", currency: props.currency }).format(amountMinor() / 100)}.`;
+  });
   let wasOpen = false;
   let amountInputRef: HTMLInputElement | undefined;
   createEffect(() => {
@@ -44,6 +60,10 @@ export function PaymentComposer(props: PaymentComposerProps) {
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     if (!props.groupId) return;
+    if (props.blocked) {
+      setError("Review the provisional expense before recording a payment.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -86,8 +106,12 @@ export function PaymentComposer(props: PaymentComposerProps) {
               <label class="grid gap-2 text-sm font-medium">Amount<div class="relative"><span class="absolute left-3 top-3 text-xs font-semibold text-muted-foreground">{props.currency}</span><input ref={amountInputRef} class="form-control amount-control h-12 pl-14" inputmode="decimal" aria-label={`Payment amount in ${props.currency}`} value={amount()} onInput={(event) => setAmount(event.currentTarget.value)} placeholder="0.00" /></div></label>
               <label class="grid gap-2 text-sm font-medium">Date<input class="form-control" type="date" value={date()} onInput={(event) => setDate(event.currentTarget.value)} /></label>
               <label class="grid gap-2 text-sm font-medium">Note<textarea class="form-control min-h-20 py-2" value={note()} onInput={(event) => setNote(event.currentTarget.value)} placeholder="Optional note" /></label>
+              <Show when={amountMinor() > 0 && payerId() !== recipientId()}>
+                <section class="payment-outcome"><span>After recording</span><strong>{outcome()}</strong><p>Everyone in this group can see the record after it syncs.</p></section>
+              </Show>
+              <Show when={props.blocked}><p class="error-callout" role="alert">Settlement is paused until the provisional expense is reviewed.</p></Show>
               <Show when={error()}><p class="error-callout" role="alert">{error()}</p></Show>
-              <Button class="h-12 w-full" type="submit" disabled={busy() || !amount() || payerId() === recipientId()}>
+              <Button class="h-12 w-full" type="submit" disabled={busy() || props.blocked || !amount() || payerId() === recipientId()}>
                 <Show when={busy()} fallback={<><Check size={16} /> Record payment</>}><LoaderCircle class="animate-spin" size={16} /> Saving…</Show>
               </Button>
             </form>
