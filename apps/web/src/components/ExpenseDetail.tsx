@@ -10,6 +10,7 @@ import Trash2 from "lucide-solid/icons/trash-2";
 import X from "lucide-solid/icons/x";
 import { For, Show, createMemo, createSignal } from "solid-js";
 import type { LocalExpense } from "../lib/db";
+import { latestExpenseChange } from "../lib/expense-history";
 import { expenseComments } from "../lib/ledger-view";
 import { addComment, appStore, restoreExpense, voidExpense } from "../lib/store";
 import { Avatar, Button } from "./ui";
@@ -38,6 +39,7 @@ export function ExpenseDetail(props: ExpenseDetailProps) {
   const members = createMemo(() => appStore.members().filter((member) => member.groupId === props.expense?.groupId));
   const memberName = (id: string) => id === props.actorId ? "You" : members().find((member) => member.userId === id)?.displayName ?? "Member";
   const comments = createMemo(() => props.expense ? expenseComments(appStore.operations(), props.expense.id) : []);
+  const latestChange = createMemo(() => props.expense ? latestExpenseChange(appStore.operations(), props.expense.id) : undefined);
 
   async function submitComment(event: SubmitEvent): Promise<void> {
     event.preventDefault();
@@ -118,7 +120,10 @@ export function ExpenseDetail(props: ExpenseDetailProps) {
                 <form class="mt-3 flex gap-2" onSubmit={(event) => void submitComment(event)}><input class="form-control h-11" value={comment()} onInput={(event) => setComment(event.currentTarget.value)} placeholder="Add a comment" maxlength={2000} /><Button type="submit" size="icon" disabled={busy() || !comment().trim()} aria-label="Send comment"><ArrowRight size={17} /></Button></form>
               </section>
 
-              <div class="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground"><CheckCircle2 size={14} class="text-primary" /> Version {expense.version} · {expense.syncStatus === "pending" ? "Saved on this device" : expense.syncStatus === "conflicted" ? "Needs conflict review" : expense.syncStatus === "rejected" ? "Needs correction before syncing" : "Verified by ledger"}</div>
+              <section class="expense-provenance" aria-label="Expense history and sync status">
+                <CheckCircle2 size={15} class="text-primary" />
+                <div><strong>{expense.version === 1 ? `Added by ${memberName(expense.createdBy)}` : `Last changed by ${memberName(latestChange()?.actorId ?? expense.createdBy)}`}</strong><span>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(latestChange()?.clientTimestamp ?? expense.updatedAt))} · {expense.syncStatus === "pending" ? "waiting to sync" : expense.syncStatus === "conflicted" ? "conflict needs review" : expense.syncStatus === "rejected" ? "not accepted by the server" : "accepted by the server"}</span></div>
+              </section>
               <Show when={error()}><p class="error-callout" role="alert">{error()}</p></Show>
               <div class="grid grid-cols-2 gap-2"><Show when={expense.status === "active"} fallback={<Button class="col-span-2" onClick={() => void changeStatus()} disabled={busy()}><RotateCcw size={16} /> Restore expense</Button>}><Button variant="secondary" onClick={() => props.onEdit(expense)}><PencilLine size={16} /> Edit</Button><Button ref={deleteButtonRef} variant="destructive" onClick={() => setConfirmDelete(true)}><Trash2 size={16} /> Delete</Button></Show></div>
             </div>}</Show>
@@ -142,10 +147,10 @@ export function ExpenseDetail(props: ExpenseDetailProps) {
                 Delete “{props.expense?.description ?? "this expense"}”?
               </AlertDialog.Title>
               <AlertDialog.Description class="mt-2 text-sm leading-6 text-muted-foreground">
-                This removes it from everyone’s balances in {group()?.name ?? "this group"}. The ledger keeps an audit record, so it can be restored later from Activity.
+                This removes it from everyone’s balances in {group()?.name ?? "this group"}. A record stays in Activity, so you can restore it later.
               </AlertDialog.Description>
               <div class="mt-5 grid grid-cols-2 gap-2">
-                <Button variant="secondary" onClick={() => setConfirmDelete(false)}>Keep it</Button>
+                <Button variant="secondary" onClick={() => setConfirmDelete(false)}>Cancel</Button>
                 <Button variant="destructive" disabled={busy()} onClick={() => void changeStatus()}>
                   <Trash2 size={16} /> {busy() ? "Deleting…" : "Delete expense"}
                 </Button>

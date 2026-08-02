@@ -1,4 +1,4 @@
-import type { LocalGroup, LocalMember } from "./db";
+import type { LocalExpense, LocalGroup, LocalMember, LocalOperation } from "./db";
 
 export interface ExpenseTarget {
   key: string;
@@ -7,6 +7,29 @@ export interface ExpenseTarget {
   label: string;
   detail: string;
   participantIds?: string[];
+}
+
+export function mostRecentExpenseGroupId(
+  expenses: readonly LocalExpense[],
+  operations: readonly LocalOperation[] = [],
+  actorId?: string,
+): string | undefined {
+  if (actorId) {
+    const expenseById = new Map(expenses.map((expense) => [expense.id, expense]));
+    const ownGroupId = operations
+      .filter((operation) => operation.actorId === actorId && (operation.type === "ExpenseCreated" || operation.type === "ExpenseAmended"))
+      .slice()
+      .sort((left, right) => right.clientTimestamp.localeCompare(left.clientTimestamp) || right.id.localeCompare(left.id))
+      .map((operation) => expenseById.get(operation.targetId)?.groupId)
+      .find(Boolean);
+    if (ownGroupId) return ownGroupId;
+  }
+  return expenses
+    .filter((expense) => expense.status === "active")
+    .filter((expense) => !actorId || expense.createdBy === actorId)
+    .slice()
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
+    ?.groupId;
 }
 
 export function buildExpenseTargets(

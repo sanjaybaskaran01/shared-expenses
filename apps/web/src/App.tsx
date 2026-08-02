@@ -75,10 +75,12 @@ import {
   groupComposerOriginAfterOpenChange,
   type GroupComposerOrigin,
 } from "./lib/expense-launch";
-import type { ExpenseTarget } from "./lib/expense-targets";
+import { mostRecentExpenseGroupId, type ExpenseTarget } from "./lib/expense-targets";
+import { buildGroupInsights, buildGroupReconciliation, settlementBlockerCount, summarizeOperationHealth } from "./lib/group-insights";
 import {
   computeBalances,
   computeRelationshipBalances,
+  simplifyBalances,
   type Settlement,
 } from "./lib/ledger-view";
 import { appStore, changeGroupCurrency, initializeStore, restoreExpense } from "./lib/store";
@@ -108,6 +110,10 @@ function money(amountMinor: number, currency = "USD", compact = false): string {
 
 function expenseDate(value: string): Date {
   return new Date(`${value}T12:00:00`);
+}
+
+function monthLabel(value: string): string {
+  return new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(`${value}-15T12:00:00`));
 }
 
 function CategoryMark(props: { category: string }) {
@@ -307,8 +313,7 @@ function ExpenseList(props: {
                         </span>
                       </div>
                       <div class="expense-row-money">
-                        <strong>{money(expense.amountMinor, expense.currency)}</strong>
-                        <span classList={{
+                        <strong classList={{
                           "money-in": expense.yourNetMinor > 0,
                           "money-out": expense.yourNetMinor < 0,
                           "sync-attention": expense.syncStatus === "conflicted" || expense.syncStatus === "rejected",
@@ -320,11 +325,12 @@ function ExpenseList(props: {
                               : expense.status === "voided"
                             ? "deleted"
                             : expense.yourNetMinor > 0
-                              ? `you’re owed ${money(expense.yourNetMinor, expense.currency)}`
+                              ? `+${money(expense.yourNetMinor, expense.currency)}`
                               : expense.yourNetMinor < 0
-                                ? `you owe ${money(-expense.yourNetMinor, expense.currency)}`
-                                : "included"}
-                        </span>
+                                ? `−${money(-expense.yourNetMinor, expense.currency)}`
+                                : money(0, expense.currency)}
+                        </strong>
+                        <span>{expense.status === "voided" ? money(expense.amountMinor, expense.currency) : `${money(expense.amountMinor, expense.currency)} total`}</span>
                       </div>
                       <ChevronRight size={15} class="expense-row-chevron" />
                     </button>;
@@ -496,23 +502,23 @@ function GroupsView(props: {
           member.status === "active",
       ),
   );
-  const total = createMemo(() =>
-    activeExpenses()
-      .filter((expense) => expense.currency === currency())
-      .reduce((sum, expense) => sum + expense.amountMinor, 0),
-  );
-  const yourShare = createMemo(() =>
-    activeExpenses()
-      .filter((expense) => expense.currency === currency())
-      .reduce(
-        (sum, expense) =>
-          sum +
-          (expense.allocations.find(
-            (item) => item.participantId === props.actorId,
-          )?.amountMinor ?? 0),
-        0,
-      ),
-  );
+  const insights = createMemo(() => buildGroupInsights(activeExpenses(), currency(), props.actorId));
+  const reconciliation = createMemo(() => buildGroupReconciliation(
+    activeExpenses(),
+    appStore.operations(),
+    group()?.id ?? "",
+    currency(),
+    props.actorId,
+  ));
+  const reconciliationTitle = createMemo(() => {
+    const balanceMinor = reconciliation().balanceMinor;
+    if (balanceMinor > 0) return `Why are you owed ${money(balanceMinor, currency())}?`;
+    if (balanceMinor < 0) return `Why do you owe ${money(Math.abs(balanceMinor), currency())}?`;
+    return "Why is your balance settled?";
+  });
+  const settlementBlockers = createMemo(() => settlementBlockerCount(appStore.expenses(), group()?.id ?? "", currency()));
+  const settlementPlan = createMemo(() => settlementBlockers() > 0 ? [] : simplifyBalances(balances()));
+  const syncHealth = createMemo(() => summarizeOperationHealth(appStore.operations(), group()?.id ?? ""));
 
   return (
     <div class="page-enter space-y-5 sm:space-y-6">
@@ -529,18 +535,9 @@ function GroupsView(props: {
           </Show>
         </div>
         <Show when={group()}>
-          <label class="group-currency-setting">
-            <span>Group currency</span>
-            <select
-              value={group()?.settlementCurrency}
-              disabled={hasLedgerEntries() || changingCurrency()}
-              onChange={(event) => void updateCurrency(event.currentTarget.value)}
-              aria-describedby="group-currency-note"
-            >
-              <option value="USD">USD</option><option value="CAD">CAD</option><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="INR">INR</option>
-            </select>
-            <small id="group-currency-note">{hasLedgerEntries() ? "Locked after first entry" : "Editable until first entry"}</small>
-          </label>
+          <Show when={hasLedgerEntries()} fallback={<label class="group-currency-setting"><span>Group currency</span><select value={group()?.settlementCurrency} disabled={changingCurrency()} onChange={(event) => void updateCurrency(event.currentTarget.value)} aria-describedby="group-currency-note"><option value="USD">USD</option><option value="CAD">CAD</option><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="INR">INR</option></select><small id="group-currency-note">Editable until the first entry</small></label>}>
+            <span class="group-currency-badge" aria-label={`Group currency ${group()?.settlementCurrency}, locked after the first entry`} title="Group currency is locked after the first entry">{group()?.settlementCurrency}</span>
+          </Show>
         </Show>
       </header>
       <Show
@@ -589,6 +586,9 @@ function GroupsView(props: {
 
             <Show when={groupSection() === "balances"}>
               <div id={tabPanelId("group-view", "balances")} class="page-enter space-y-3" role="tabpanel" aria-labelledby={tabId("group-view", "balances")}>
+                <Show when={settlementBlockers() > 0}>
+                  <section class="settlement-warning" role="status"><div><strong>Settlement paused</strong><span>{settlementBlockers()} provisional {settlementBlockers() === 1 ? "expense needs" : "expenses need"} review before anyone records a payment.</span></div><button type="button" onClick={() => setGroupSection("expenses")}>View activity</button></section>
+                </Show>
                 <section class="balance-strip" aria-label={`${activeGroup.name} balance summary`}>
                   <div class="balance-cell balance-cell-in"><span class="micro-label">Coming in</span><strong class="money-type">{money(incoming(), currency())}</strong></div>
                   <div class="balance-cell balance-cell-out"><span class="micro-label">Going out</span><strong class="money-type">{money(outgoing(), currency())}</strong></div>
@@ -606,7 +606,7 @@ function GroupsView(props: {
                           <Avatar name={member.displayName} class="person-avatar" />
                           <div class="min-w-0 flex-1"><strong class="block truncate">{member.displayName}</strong><span class="micro-label block truncate">{related() || activeGroup.name}</span></div>
                           <div class="shrink-0 text-right"><strong class="money-type block" classList={{ "money-in": balance() < 0, "money-out": balance() > 0 }}>{balance() === 0 ? money(0, currency()) : `${balance() < 0 ? "+" : "−"}${money(Math.abs(balance()), currency())}`}</strong><span class="micro-label">{balance() < 0 ? "owes you" : balance() > 0 ? "you owe" : "settled"}</span></div>
-                          <button class="ink-action" type="button" disabled={!settlement()} onClick={() => props.onSettle(settlement(), currency())}>{balance() > 0 ? "Pay" : "Settle"}</button>
+                          <button class="ink-action" type="button" disabled={!settlement() || settlementBlockers() > 0} onClick={() => props.onSettle(settlement(), currency())}>{balance() > 0 ? "Pay" : "Settle"}</button>
                         </article>
                       );
                     }}
@@ -618,14 +618,51 @@ function GroupsView(props: {
             <Show when={groupSection() === "insights"}>
               <Card id={tabPanelId("group-view", "insights")} class="page-enter overflow-hidden" role="tabpanel" aria-labelledby={tabId("group-view", "insights")}>
                 <SectionHeading
-                  title="Spending insights"
-                  detail={`${money(total(), currency())} total`}
-                  action={<div class="flex items-center gap-2"><select class="insight-currency" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)} aria-label="Insights currency"><For each={currenciesFor(activeGroup.id)}>{(item) => <option value={item}>{item}</option>}</For></select><div class="segmented-control"><button classList={{ active: chartMode() === "category" }} aria-pressed={chartMode() === "category"} onClick={() => setChartMode("category")}>Category</button><button classList={{ active: chartMode() === "month" }} aria-pressed={chartMode() === "month"} onClick={() => setChartMode("month")}>Months</button></div></div>}
+                  title="Group insights"
+                  detail={`${insights().expenseCount} ${insights().expenseCount === 1 ? "expense" : "expenses"} · all time`}
+                  action={<select class="insight-currency" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)} aria-label="Insights currency"><For each={currenciesFor(activeGroup.id)}>{(item) => <option value={item}>{item}</option>}</For></select>}
                 />
-                <div class="p-4">
-                  <div class="mb-1 grid grid-cols-2 gap-3"><div class="metric-tile"><span>Total spent</span><strong>{money(total(), currency(), true)}</strong></div><div class="metric-tile"><span>Your share</span><strong>{money(yourShare(), currency(), true)}</strong></div></div>
-                  <Show when={total() > 0} fallback={<div class="grid h-48 place-items-center text-sm text-muted-foreground">Charts appear after your first expense.</div>}>
-                    <Suspense fallback={<div class="grid h-52 place-items-center text-xs text-muted-foreground">Preparing chart…</div>}><SpendingChart expenses={expenses()} currency={currency()} mode={chartMode()} /></Suspense>
+                <div class="grid gap-5 p-4 sm:p-5">
+                  <Show when={insights().totalMinor > 0} fallback={<div class="grid min-h-48 place-items-center px-6 text-center"><div><ReceiptText class="mx-auto text-muted-foreground" size={26} /><h3 class="mt-3 text-sm font-semibold">Insights start with an expense</h3><p class="mt-1 text-xs leading-5 text-muted-foreground">Add a shared expense to see your share, trends, and what drove the total.</p></div></div>}>
+                    <section class="insight-hero" aria-label="Your share of group spending">
+                      <div>
+                        <span>Your share</span>
+                        <strong class="money-type">{money(insights().yourShareMinor, currency())}</strong>
+                        <p>of {money(insights().totalMinor, currency())} across {insights().expenseCount} {insights().expenseCount === 1 ? "expense" : "expenses"}</p>
+                      </div>
+                      <div class="insight-paid"><span>You paid</span><strong>{money(insights().paidByYouMinor, currency())}</strong></div>
+                    </section>
+
+                    <section class="insight-reconciliation" aria-labelledby="reconciliation-title">
+                      <header><div><h3 id="reconciliation-title">{reconciliationTitle()}</h3><p>From {reconciliation().expenseCount} {reconciliation().expenseCount === 1 ? "expense" : "expenses"} and {reconciliation().paymentCount} recorded {reconciliation().paymentCount === 1 ? "payment" : "payments"}.</p></div><button type="button" onClick={() => setGroupSection("balances")}>Sources <ChevronRight size={14} /></button></header>
+                      <dl>
+                        <div><dt>You paid</dt><dd>+{money(reconciliation().paidByYouMinor, currency())}</dd></div>
+                        <div><dt>Your share</dt><dd>−{money(reconciliation().yourShareMinor, currency())}</dd></div>
+                        <Show when={reconciliation().paymentsSentMinor > 0}><div><dt>Payments you sent</dt><dd>+{money(reconciliation().paymentsSentMinor, currency())}</dd></div></Show>
+                        <Show when={reconciliation().paymentsReceivedMinor > 0}><div><dt>Payments you received</dt><dd>−{money(reconciliation().paymentsReceivedMinor, currency())}</dd></div></Show>
+                        <div class="insight-reconciliation-total"><dt>Current balance</dt><dd>{reconciliation().balanceMinor > 0 ? `+${money(reconciliation().balanceMinor, currency())}` : reconciliation().balanceMinor < 0 ? `−${money(Math.abs(reconciliation().balanceMinor), currency())}` : money(0, currency())}</dd></div>
+                      </dl>
+                    </section>
+
+                    <section class="insight-settlement" aria-labelledby="settlement-plan-title">
+                      <header><div><h3 id="settlement-plan-title">{settlementBlockers() > 0 ? "Settlement paused" : "Simplest way to settle"}</h3><p>{settlementBlockers() > 0 ? `${settlementBlockers()} provisional ${settlementBlockers() === 1 ? "expense needs" : "expenses need"} review` : settlementPlan().length ? `${settlementPlan().length} ${settlementPlan().length === 1 ? "transfer" : "transfers"} clears the group` : "No payments needed"}</p></div><button type="button" onClick={() => setGroupSection(settlementBlockers() > 0 ? "expenses" : "balances")}>{settlementBlockers() > 0 ? "View activity" : "Review"} <ChevronRight size={14} /></button></header>
+                      <Show when={settlementBlockers() === 0 && settlementPlan().length} fallback={<p class="insight-settled-copy">{settlementBlockers() > 0 ? "Resolve the flagged change before recording a settlement." : `Everyone is settled in ${currency()}.`}</p>}>
+                        <div class="insight-transfer-list"><For each={settlementPlan()}>{(settlement) => <div><span>{memberName(activeGroup.id, settlement.payerId, props.actorId)} pays {memberName(activeGroup.id, settlement.recipientId, props.actorId)}</span><strong>{money(settlement.amountMinor, currency())}</strong></div>}</For></div>
+                      </Show>
+                    </section>
+
+                    <div class="insight-story-grid">
+                      <Show when={insights().topCategory}>{(top) => <article class="insight-story"><span>Top category</span><strong>{top().name}</strong><p>{money(top().amountMinor, currency())} · {top().percentage}% of group spending</p></article>}</Show>
+                      <Show when={insights().monthTrend} fallback={<article class="insight-story"><span>Typical expense</span><strong>{money(insights().averageMinor, currency())}</strong><p>Average across this group</p></article>}>
+                        {(trend) => <article class="insight-story"><span>Latest month</span><strong>{trend().differenceMinor === 0 ? "No change" : `${money(Math.abs(trend().differenceMinor), currency())} ${trend().differenceMinor > 0 ? "higher" : "lower"}`}</strong><p>{monthLabel(trend().currentMonth)} vs {monthLabel(trend().previousMonth)} · {Math.abs(trend().percentageChange)}%</p></article>}
+                      </Show>
+                      <article class="insight-story" classList={{ "insight-story-attention": syncHealth().attention > 0 || syncHealth().pending > 0 }} role="status"><span>Ledger health</span><strong>{syncHealth().attention > 0 ? `${syncHealth().attention} ${syncHealth().attention === 1 ? "change needs" : "changes need"} review` : syncHealth().pending > 0 ? `${syncHealth().pending} ${syncHealth().pending === 1 ? "change" : "changes"} waiting` : "No sync problems"}</strong><p>{syncHealth().attention > 0 ? "Conflicted or rejected changes" : syncHealth().pending > 0 ? "Safe on this device until sync" : "No queued or rejected group changes"}</p></article>
+                    </div>
+
+                    <section class="insight-chart-shell" aria-labelledby="insight-chart-title">
+                      <header><div><h3 id="insight-chart-title">Where the money went</h3><p>Compare categories or monthly totals.</p></div><div class="segmented-control"><button classList={{ active: chartMode() === "category" }} aria-pressed={chartMode() === "category"} onClick={() => setChartMode("category")}>Category</button><button classList={{ active: chartMode() === "month" }} aria-pressed={chartMode() === "month"} onClick={() => setChartMode("month")}>Months</button></div></header>
+                      <Suspense fallback={<div class="grid h-52 place-items-center text-xs text-muted-foreground">Preparing chart…</div>}><SpendingChart expenses={expenses()} currency={currency()} mode={chartMode()} /></Suspense>
+                    </section>
                   </Show>
                 </div>
               </Card>
@@ -749,7 +786,8 @@ function OverviewView(props: {
               const settlement = createMemo<Settlement>(() => relationship.amountMinor > 0
                 ? { payerId: relationship.userId, recipientId: props.actorId, amountMinor: relationship.amountMinor }
                 : { payerId: props.actorId, recipientId: relationship.userId, amountMinor: Math.abs(relationship.amountMinor) });
-              const canSettleHere = relationship.groupIds.length === 1;
+              const needsReview = createMemo(() => relationship.groupIds.length === 1 && settlementBlockerCount(appStore.expenses(), relationship.groupIds[0]!, relationship.currency) > 0);
+              const canSettleHere = createMemo(() => relationship.groupIds.length === 1 && !needsReview());
               return (
                 <article class="relationship-row" style={{ "--row-index": index() }}>
                   <Avatar name={personName()} class="size-10 text-xs" />
@@ -761,8 +799,8 @@ function OverviewView(props: {
                     <span class="relationship-direction">{relationship.amountMinor > 0 ? "owes you" : "you owe"}</span>
                     <strong class="block text-sm tabular-nums" classList={{ "money-in": relationship.amountMinor > 0, "money-out": relationship.amountMinor < 0 }}>{money(Math.abs(relationship.amountMinor), relationship.currency)}</strong>
                   </div>
-                  <button type="button" class="relationship-action" onClick={() => canSettleHere ? props.onSettle(settlement(), relationship.currency, relationship.groupIds[0]!) : props.onOpenGroup(relationship.groupIds[0]!)}>
-                    <span class="relationship-action-label">{canSettleHere ? "Settle" : "View"}</span>
+                  <button type="button" class="relationship-action" onClick={() => canSettleHere() ? props.onSettle(settlement(), relationship.currency, relationship.groupIds[0]!) : props.onOpenGroup(relationship.groupIds[0]!)}>
+                    <span class="relationship-action-label">{canSettleHere() ? "Settle" : needsReview() ? "Review" : "View"}</span>
                     <ChevronRight class="relationship-action-chevron" size={16} />
                   </button>
                 </article>
@@ -902,7 +940,7 @@ function ActivityView(props: {
   );
 }
 
-function AccountView(props: { displayName: string }) {
+function AccountView(props: { displayName: string; email: string | undefined }) {
   const [theme, setTheme] = createSignal<Theme>(
     (localStorage.getItem("expenses-theme") as Theme | null) ?? "system",
   );
@@ -922,7 +960,7 @@ function AccountView(props: { displayName: string }) {
           <Avatar name={props.displayName} class="size-14 text-lg" />
           <div class="min-w-0 flex-1">
             <h2 class="font-semibold">{props.displayName}</h2>
-            <p class="text-sm text-muted-foreground">Passwordless account</p>
+            <p class="truncate text-sm text-muted-foreground">{props.email ?? "Offline account on this device"}</p>
           </div>
           <Show when={!import.meta.env.DEV}>
             <Button
@@ -972,18 +1010,18 @@ function AccountView(props: { displayName: string }) {
           each={[
             {
               icon: ShieldCheck,
-              title: "Signed operations",
-              detail: "P-256 device key active",
+              title: "Protected on this device",
+              detail: "This device signs changes so edits can be attributed",
             },
             {
               icon: Cloud,
-              title: "Offline-first",
-              detail: "New entries queue safely on this device",
+              title: "Works offline",
+              detail: "New entries stay safe here until sync resumes",
             },
             {
               icon: Scale,
-              title: "Auditable balances",
-              detail: "Every edit remains in the ledger",
+              title: "Reviewable history",
+              detail: "Edits and deletions remain visible in Activity",
             },
           ]}
         >
@@ -1009,7 +1047,7 @@ function AccountView(props: { displayName: string }) {
   );
 }
 
-function AuthenticatedApp(props: { actorId: string }) {
+function AuthenticatedApp(props: { actorId: string; email: string | undefined }) {
   const [tab, setTab] = createSignal<Tab>("overview");
   const [groupsMode, setGroupsMode] = createSignal<"overview" | "detail">("overview");
   const [expenseOpen, setExpenseOpen] = createSignal(false);
@@ -1107,7 +1145,12 @@ function AuthenticatedApp(props: { actorId: string }) {
       return;
     }
     setExpenseTarget(undefined);
-    setPreferredTargetGroupId(undefined);
+    const rememberedGroupId = localStorage.getItem(`tally:last-expense-group:${props.actorId}`) ?? undefined;
+    setPreferredTargetGroupId(
+      rememberedGroupId && appStore.groups().some((group) => group.id === rememberedGroupId)
+        ? rememberedGroupId
+        : mostRecentExpenseGroupId(appStore.expenses(), appStore.operations(), props.actorId),
+    );
     window.setTimeout(() => setTargetPickerOpen(true), 0);
   }
   function openGroupComposer(origin: GroupComposerOrigin = "groups") {
@@ -1116,6 +1159,7 @@ function AuthenticatedApp(props: { actorId: string }) {
     else window.setTimeout(() => setGroupOpen(true), 0);
   }
   function chooseExpenseTarget(target: ExpenseTarget) {
+    localStorage.setItem(`tally:last-expense-group:${props.actorId}`, target.groupId);
     setExpenseTarget(target);
     setSelectedGroupId(target.groupId);
     setTargetPickerOpen(false);
@@ -1136,7 +1180,15 @@ function AuthenticatedApp(props: { actorId: string }) {
     currency = activeGroup()?.settlementCurrency ?? "USD",
     groupId?: string,
   ) {
-    if (groupId) setSelectedGroupId(groupId);
+    const targetGroupId = groupId ?? activeGroup()?.id;
+    if (targetGroupId && settlementBlockerCount(appStore.expenses(), targetGroupId, currency) > 0) {
+      setSelectedGroupId(targetGroupId);
+      setGroupsMode("detail");
+      setTab("groups");
+      notify("Settlement paused · review the provisional expense first");
+      return;
+    }
+    if (targetGroupId) setSelectedGroupId(targetGroupId);
     setSuggestedSettlement(settlement);
     setPaymentCurrency(currency);
     window.setTimeout(() => setPaymentOpen(true), 0);
@@ -1254,7 +1306,7 @@ function AuthenticatedApp(props: { actorId: string }) {
               />
             </Match>
             <Match when={tab() === "account"}>
-              <AccountView displayName={displayName()} />
+              <AccountView displayName={displayName()} email={props.email} />
             </Match>
           </Switch>
         </main>
@@ -1333,6 +1385,7 @@ function AuthenticatedApp(props: { actorId: string }) {
         groupId={selectedGroupId()}
         currency={paymentCurrency()}
         suggested={suggestedSettlement()}
+        blocked={settlementBlockerCount(appStore.expenses(), selectedGroupId() ?? "", paymentCurrency()) > 0}
         onOpenChange={setPaymentOpen}
         onSaved={() => notify("Payment recorded")}
       />
@@ -1551,7 +1604,7 @@ export default function App() {
       }
     >
       <Show when={actorId()} keyed fallback={<AuthScreen />}>
-        {(id) => <AuthenticatedApp actorId={id} />}
+        {(id) => <AuthenticatedApp actorId={id} email={session().data?.user.email} />}
       </Show>
     </Show>
   );

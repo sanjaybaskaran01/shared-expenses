@@ -29,6 +29,8 @@ export function ExpenseTargetPicker(props: ExpenseTargetPickerProps) {
     return value ? targets().filter((target) => `${target.label} ${target.detail}`.toLocaleLowerCase().includes(value)) : targets();
   });
   const groups = createMemo(() => visible().filter((target) => target.kind === "group"));
+  const recentGroup = createMemo(() => query().trim() ? undefined : groups().find((target) => target.groupId === props.preferredGroupId));
+  const otherGroups = createMemo(() => groups().filter((target) => target.key !== recentGroup()?.key));
   const people = createMemo(() => visible().filter((target) => target.kind === "person"));
 
   function choose(target: ExpenseTarget): void {
@@ -67,9 +69,17 @@ export function ExpenseTargetPicker(props: ExpenseTargetPickerProps) {
             </label>
           </div>
           <div class="max-h-[62dvh] overflow-y-auto px-2 py-2">
-            <Show when={groups().length}>
+            <Show when={recentGroup()}>{(target) => <>
+              <p class="target-section-label">Recent</p>
+              <button class="target-row" type="button" data-testid={`expense-target-${target().key}`} onClick={() => choose(target())}>
+                <span class="target-icon"><UsersRound size={17} /></span>
+                <span class="min-w-0 flex-1"><strong>{target().label}</strong><small>{target().detail} · last used</small></span>
+                <ChevronRight size={16} class="text-muted-foreground" />
+              </button>
+            </>}</Show>
+            <Show when={otherGroups().length}>
               <p class="target-section-label">Groups</p>
-              <For each={groups()}>{(target) => <button class="target-row" type="button" onClick={() => choose(target)}>
+              <For each={otherGroups()}>{(target) => <button class="target-row" type="button" data-testid={`expense-target-${target.key}`} onClick={() => choose(target)}>
                 <span class="target-icon"><UsersRound size={17} /></span>
                 <span class="min-w-0 flex-1"><strong>{target.label}</strong><small>{target.detail}</small></span>
                 <ChevronRight size={16} class="text-muted-foreground" />
@@ -77,7 +87,7 @@ export function ExpenseTargetPicker(props: ExpenseTargetPickerProps) {
             </Show>
             <Show when={people().length}>
               <p class="target-section-label mt-3">People</p>
-              <For each={people()}>{(target) => <button class="target-row" type="button" onClick={() => choose(target)}>
+              <For each={people()}>{(target) => <button class="target-row" type="button" data-testid={`expense-target-${target.key}`} onClick={() => choose(target)}>
                 <Avatar name={target.label} class="size-9 text-xs" />
                 <span class="min-w-0 flex-1"><strong>{target.label}</strong><small>Shared in {target.detail}</small></span>
                 <ChevronRight size={16} class="text-muted-foreground" />

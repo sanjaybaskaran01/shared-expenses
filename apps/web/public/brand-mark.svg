@@ -1,8 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
   <title id="title">Tally logo</title>
-  <desc id="desc">A T monogram balanced between paired ledger strokes.</desc>
-  <rect width="512" height="512" rx="112" fill="#132F3A"/>
-  <path fill="#FBFAF8" d="M108 126h296l-20 50H282v204l-26 31-26-31V176H128z"/>
-  <path fill="#6EA58E" d="M116 238l54 29v117h-54zM396 238l-54 29v117h54z"/>
-  <path fill="#C6E0D4" d="M190 275l28 15v94h-28zM322 275l-28 15v94h28z"/>
+  <desc id="desc">Four light tally marks crossed by a warm clay stroke.</desc>
+  <rect width="512" height="512" rx="108" fill="#13252D"/>
+  <path d="M148 150V362M220 150V362M292 150V362M364 150V362" fill="none" stroke="#FBFAF6" stroke-width="38" stroke-linecap="round"/>
+  <path d="M122 332L390 180" fill="none" stroke="#D97852" stroke-width="44" stroke-linecap="round"/>
 </svg>
