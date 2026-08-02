@@ -4,6 +4,10 @@ import type {
   OperationEnvelope,
   SyncPushResult,
 } from "@expenses/protocol";
+import { developmentIdentity } from "./development-actor";
+
+const development = developmentIdentity(globalThis.location?.search ?? "", import.meta.env.DEV);
+export const developmentActorId = development.actorId;
 
 export const apiBaseUrl = import.meta.env.VITE_API_URL ||
   (import.meta.env.DEV ? "http://localhost:3000" : (globalThis.location?.origin ?? "http://localhost:3000"));
@@ -11,7 +15,7 @@ export const apiBaseUrl = import.meta.env.VITE_API_URL ||
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  if (import.meta.env.DEV) headers.set("X-Dev-User", "dev-user");
+  if (import.meta.env.DEV) headers.set("X-Dev-User", development.actorId);
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
     headers,
@@ -37,7 +41,7 @@ export interface RemoteSnapshot {
 }
 
 export async function bootstrapDevelopment(): Promise<void> {
-  if (!import.meta.env.DEV) return;
+  if (!import.meta.env.DEV || development.scenario) return;
   await apiFetch("/api/v1/dev/bootstrap", { method: "POST", body: "{}" });
 }
 

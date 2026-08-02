@@ -86,7 +86,8 @@ function validContactInviteToken(value: string): boolean {
 
 async function currentActor(request: Request): Promise<string | null> {
   if (config.devAuthBypass) {
-    return request.headers.get("x-dev-user") ?? "dev-user";
+    const candidate = request.headers.get("x-dev-user") ?? new URL(request.url).searchParams.get("devUser") ?? "dev-user";
+    return /^[a-z][a-z0-9-]{0,47}$/.test(candidate) ? candidate : "dev-user";
   }
   const session = await auth.api.getSession({ headers: request.headers });
   return session?.user.emailVerified ? session.user.id : null;
@@ -386,7 +387,15 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
       return errorResponse(request, 400, "INVALID_BATCH", "operations must be an array");
     }
     const result = await ledger.push(actorId, body.operations as OperationEnvelope<JsonValue>[]);
-    if (result.accepted.length > 0) publish(actorId, result.latestServerSequence);
+    if (result.accepted.length > 0) {
+      const acceptedIds = new Set(result.accepted.map(({ id }) => id));
+      const groupIds = body.operations
+        .filter(({ id }) => acceptedIds.has(id))
+        .map(({ groupId }) => groupId);
+      for (const memberId of ledger.activeMemberIdsForGroups(groupIds)) {
+        publish(memberId, ledger.latestSequenceFor(memberId));
+      }
+    }
     return json(request, result);
   }
 

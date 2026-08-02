@@ -1,8 +1,40 @@
 import { describe, expect, test } from "bun:test";
 import type { OperationEnvelope } from "@expenses/protocol";
-import { expenseFromOperation } from "../src/lib/sync";
+import { SyncRequestQueue, expenseFromOperation, remoteProjectionSyncStatus } from "../src/lib/sync";
+
+describe("sync request queue", () => {
+  test("coalesces requests received during a sync into one immediate rerun", async () => {
+    const queue = new SyncRequestQueue();
+    let releaseFirst!: () => void;
+    const firstBlocked = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let runs = 0;
+    const task = async () => {
+      runs += 1;
+      if (runs === 1) await firstBlocked;
+    };
+
+    const first = queue.run(task);
+    const second = queue.run(task);
+    const third = queue.run(task);
+    expect(runs).toBe(1);
+
+    releaseFirst();
+    await Promise.all([first, second, third]);
+    expect(runs).toBe(2);
+  });
+});
 
 describe("remote expense projection", () => {
+  test("keeps reviewable local outcomes visible when the canonical projection arrives", () => {
+    expect(remoteProjectionSyncStatus("conflicted")).toBe("conflicted");
+    expect(remoteProjectionSyncStatus("rejected")).toBe("rejected");
+    expect(remoteProjectionSyncStatus("pending")).toBe("accepted");
+    expect(remoteProjectionSyncStatus("accepted")).toBe("accepted");
+    expect(remoteProjectionSyncStatus(undefined)).toBe("accepted");
+  });
+
   test("calculates the balance for the current user, not the operation author", () => {
     const operation: OperationEnvelope = {
       id: "operation-1",
