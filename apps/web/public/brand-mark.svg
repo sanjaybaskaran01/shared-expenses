@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
-  <title id="title">Tally logo</title>
-  <desc id="desc">Four light tally marks crossed by a warm clay stroke.</desc>
-  <rect width="512" height="512" rx="108" fill="#13252D"/>
-  <path d="M148 150V362M220 150V362M292 150V362M364 150V362" fill="none" stroke="#FBFAF6" stroke-width="38" stroke-linecap="round"/>
-  <path d="M122 332L390 180" fill="none" stroke="#D97852" stroke-width="44" stroke-linecap="round"/>
+  <title id="title">Tallied logo</title>
+  <desc id="desc">A precise T and coral check mark representing a split that has been settled.</desc>
+  <rect width="512" height="512" rx="104" fill="#1D1E21"/>
+  <path d="M130 148H382M256 148V350" fill="none" stroke="#F6F5F1" stroke-width="42" stroke-linecap="round"/>
+  <path d="M178 301L226 349L342 233" fill="none" stroke="#FF6B4A" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

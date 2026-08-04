@@ -163,7 +163,7 @@ export function ContactInviteDialog(props: {
 
               <Show when={state()?.contacts.length}>
                 <section>
-                  <h3 class="micro-label mb-2">On Tally</h3>
+                  <h3 class="micro-label mb-2">On Tallied</h3>
                   <div class="divide-y divide-border/60 rounded-lg border border-border">
                     <For each={state()?.contacts}>{(contact) => (
                       <div class="flex items-center gap-3 px-3 py-3">
@@ -196,7 +196,7 @@ export function ContactInviteDialog(props: {
               </Show>
 
               <p class="text-xs leading-5 text-muted-foreground">
-                Tally never uploads your address book. On iPhone, the share sheet or Messages lets you choose a recipient privately.
+                Tallied never uploads your address book. On iPhone, the share sheet or Messages lets you choose a recipient privately. Anyone with the link can claim it once, so confirm who joined before sharing expenses.
               </p>
             </div>
           </Dialog.Content>

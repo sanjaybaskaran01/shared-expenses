@@ -289,6 +289,14 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
     setActiveSplitParticipantId(target);
   }
 
+  function keepSplitInputVisible(element: HTMLInputElement, participantId: string): void {
+    setActiveSplitParticipantId(participantId);
+    queueMicrotask(() => element.scrollIntoView({
+      block: "center",
+      behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+    }));
+  }
+
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     const editingExpense = props.expense;
@@ -433,7 +441,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                   <div class="flex items-center justify-end"><Show when={groupMembers().length > 1}><button type="button" class="flex min-h-11 items-center gap-1.5 px-2 text-xs font-semibold text-primary" onClick={enableMultiplePayers}><UsersRound size={14} />{payerIds().length > 1 ? "Use one payer" : "Multiple payers"}</button></Show></div>
                   <Show when={payerIds().length > 1} fallback={<div class="payer-avatar-rail"><For each={groupMembers()}>{(member) => <button type="button" class="payer-avatar-choice" classList={{ active: payerIds()[0] === member.userId }} aria-pressed={payerIds()[0] === member.userId} onClick={() => { setPayerIds([member.userId]); setPayerValues({}); setActivePanel("none"); }}><Avatar name={member.displayName} class="size-9 text-xs" /><span>{member.userId === props.actorId ? "You" : member.displayName}</span></button>}</For></div>}>
                     <div class="divide-y divide-border rounded-xl border border-border bg-background/55">
-                      <For each={groupMembers()}>{(member) => <div class="flex min-h-14 items-center gap-2 px-2"><button type="button" class="participant-toggle grid size-11 place-items-center rounded-md border border-border" classList={{ "border-primary bg-primary text-primary-foreground": payerIds().includes(member.userId) }} onClick={() => togglePayer(member.userId)} aria-label={`Toggle ${member.displayName} as payer`} aria-pressed={payerIds().includes(member.userId)}><Show when={payerIds().includes(member.userId)}><Check size={14} /></Show></button><Avatar name={member.displayName} class="size-7 text-xs" /><span class="min-w-0 flex-1 truncate text-sm font-medium">{member.userId === props.actorId ? "You" : member.displayName}</span><div class="relative w-24"><input class="form-control h-11 text-right text-sm tabular-nums" disabled={!payerIds().includes(member.userId)} inputmode="decimal" value={payerValues()[member.userId] ?? ""} onInput={(event) => setPayerValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={`Amount paid by ${member.displayName}`} /></div></div>}</For>
+                      <For each={groupMembers()}>{(member) => <div class="flex min-h-14 items-center gap-2 px-2"><button type="button" role="checkbox" class="participant-toggle grid size-11 place-items-center rounded-md border border-border" classList={{ "border-primary bg-primary text-primary-foreground": payerIds().includes(member.userId) }} onClick={() => togglePayer(member.userId)} aria-label={`${member.displayName} paid`} aria-checked={payerIds().includes(member.userId)}><Show when={payerIds().includes(member.userId)}><Check size={14} /></Show></button><Avatar name={member.displayName} class="size-7 text-xs" /><span class="min-w-0 flex-1 truncate text-sm font-medium">{member.userId === props.actorId ? "You" : member.displayName}</span><div class="relative w-24"><input class="form-control h-11 text-right text-sm tabular-nums" disabled={!payerIds().includes(member.userId)} inputmode="decimal" value={payerValues()[member.userId] ?? ""} onInput={(event) => setPayerValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={`Amount paid by ${member.displayName}`} /></div></div>}</For>
                     </div>
                   </Show>
                 </section>
@@ -448,19 +456,19 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                       <For each={splitMethods}>{(method) => <button type="button" class="h-11 rounded-md text-xs font-medium text-muted-foreground transition-[color,background-color,border-color,box-shadow,transform]" classList={{ "bg-card text-foreground shadow-sm": splitMethod() === method.id }} aria-pressed={splitMethod() === method.id} onClick={() => chooseSplitMethod(method.id)}>{method.label}</button>}</For>
                     </div>
                   </div>
-                  <div class="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+                  <div class="split-people-list divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
                     <For each={groupMembers()}>{(member) => {
                       const selected = createMemo(() => participants().includes(member.userId));
                       const allocation = createMemo(() => allocations().find((item) => item.participantId === member.userId));
                       return (
                         <div class="split-person-row flex min-h-14 items-center gap-3 px-3" classList={{ active: activeSplitParticipantId() === member.userId }} onClick={() => selected() && (splitMethod() === "exact" || splitMethod() === "percentage") && setActiveSplitParticipantId(member.userId)}>
-                          <button type="button" class="participant-toggle grid size-11 shrink-0 place-items-center rounded-md border border-border transition-colors" classList={{ "border-primary bg-primary text-primary-foreground": selected() }} disabled={selected() && participants().length === 1} onClick={() => toggleParticipant(member.userId)} aria-label={(selected() && participants().length === 1 ? "Keep " : selected() ? "Exclude " : "Include ") + member.displayName} aria-pressed={selected()}><Show when={selected()}><Check size={14} /></Show></button>
+                          <button type="button" role="checkbox" class="participant-toggle grid size-11 shrink-0 place-items-center rounded-md border border-border transition-colors" classList={{ "border-primary bg-primary text-primary-foreground": selected() }} disabled={selected() && participants().length === 1} onClick={() => toggleParticipant(member.userId)} aria-label={`Include ${member.displayName}`} aria-checked={selected()}><Show when={selected()}><Check size={14} /></Show></button>
                           <Avatar name={member.displayName} class="size-7 text-xs" />
                           <span class="min-w-0 flex-1 truncate text-sm font-medium">{member.userId === props.actorId ? "You" : member.displayName}</span>
                           <Show when={splitMethod() === "equal"} fallback={<Show when={splitMethod() === "shares"} fallback={
                             <div class="relative w-24">
                               <Show when={splitMethod() === "exact" || splitMethod() === "adjustment"}><span class="absolute left-2.5 top-2 text-xs text-muted-foreground">{splitMethod() === "adjustment" ? "±" : currency()}</span></Show>
-                              <input class="form-control h-11 text-right text-sm tabular-nums" classList={{ "pl-6": splitMethod() === "exact" || splitMethod() === "adjustment", "pr-7": splitMethod() === "percentage" }} disabled={!selected()} inputmode="decimal" value={splitValues()[member.userId] ?? ""} onFocus={() => setActiveSplitParticipantId(member.userId)} onInput={(event) => setSplitValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={(splitMethod() === "percentage" ? "Percentage for " : splitMethod() === "adjustment" ? "Adjustment for " : "Amount for ") + member.displayName} />
+                              <input class="form-control h-11 text-right text-sm tabular-nums" classList={{ "pl-6": splitMethod() === "exact" || splitMethod() === "adjustment", "pr-7": splitMethod() === "percentage" }} disabled={!selected()} inputmode="decimal" value={splitValues()[member.userId] ?? ""} onFocus={(event) => keepSplitInputVisible(event.currentTarget, member.userId)} onInput={(event) => setSplitValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={(splitMethod() === "percentage" ? "Percentage for " : splitMethod() === "adjustment" ? "Adjustment for " : "Amount for ") + member.displayName} />
                               <Show when={splitMethod() === "percentage"}><span class="absolute right-2.5 top-2 text-xs text-muted-foreground">%</span></Show>
                             </div>
                           }><div class="share-stepper"><button type="button" onClick={() => changeShares(member.userId, -1)} aria-label={`Remove a share from ${member.displayName}`}>−</button><strong>{splitValues()[member.userId] ?? "1"}×</strong><button type="button" onClick={() => changeShares(member.userId, 1)} aria-label={`Add a share to ${member.displayName}`}>+</button></div></Show>}>

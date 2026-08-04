@@ -1,4 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const repositoryRoot = resolve(import.meta.dir, "..");
 
 interface Detector {
   name: string;
@@ -38,6 +41,7 @@ function findings(content: string, includeGenericAssignments: boolean): string[]
 
 function command(arguments_: string[], input?: Uint8Array): Uint8Array {
   const result = Bun.spawnSync(arguments_, {
+    cwd: repositoryRoot,
     ...(input ? { stdin: input } : {}),
     stdout: "pipe",
     stderr: "pipe",
@@ -48,6 +52,7 @@ function command(arguments_: string[], input?: Uint8Array): Uint8Array {
 
 async function commandAsync(arguments_: string[], input?: Uint8Array): Promise<Uint8Array> {
   const process = Bun.spawn(arguments_, {
+    cwd: repositoryRoot,
     stdin: input ? "pipe" : "ignore",
     stdout: "pipe",
     stderr: "pipe",
@@ -74,6 +79,31 @@ interface TrackedIndexFile {
   objectId: string;
 }
 
+interface GitObject {
+  objectId: string;
+  type: string;
+  bytes: Uint8Array;
+}
+
+function parseGitObjectBatch(objects: Uint8Array): GitObject[] {
+  const parsed: GitObject[] = [];
+  let offset = 0;
+  while (offset < objects.length) {
+    let headerEnd = offset;
+    while (headerEnd < objects.length && objects[headerEnd] !== 10) headerEnd += 1;
+    if (headerEnd === objects.length) throw new Error("Could not parse Git object batch header");
+    const [objectId, type, sizeValue] = new TextDecoder().decode(objects.subarray(offset, headerEnd)).split(" ");
+    const size = Number(sizeValue);
+    if (!objectId || !type || !Number.isFinite(size) || size < 0) throw new Error("Could not parse Git object batch metadata");
+    const contentStart = headerEnd + 1;
+    const contentEnd = contentStart + size;
+    if (contentEnd > objects.length) throw new Error(`Truncated Git object ${objectId}`);
+    parsed.push({ objectId, type, bytes: objects.subarray(contentStart, contentEnd) });
+    offset = contentEnd + 1;
+  }
+  return parsed;
+}
+
 function trackedIndexFiles(): TrackedIndexFile[] {
   return new TextDecoder().decode(command(["git", "ls-files", "--stage", "-z"]))
     .split("\0")
@@ -95,15 +125,10 @@ function modifiedTrackedFiles(): Set<string> {
 
 async function indexedBlobs(files: readonly TrackedIndexFile[]): Promise<Map<string, Uint8Array>> {
   const objectIds = [...new Set(files.map(({ objectId }) => objectId))];
-  const blobs = new Map<string, Uint8Array>();
-  for (let offset = 0; offset < objectIds.length; offset += 24) {
-    const entries = await Promise.all(
-      objectIds.slice(offset, offset + 24).map(async (objectId) =>
-        [objectId, await commandAsync(["git", "cat-file", "blob", objectId])] as const),
-    );
-    for (const [objectId, bytes] of entries) blobs.set(objectId, bytes);
-  }
-  return blobs;
+  if (objectIds.length === 0) return new Map();
+  const input = new TextEncoder().encode(`${objectIds.join("\n")}\n`);
+  const objects = parseGitObjectBatch(await commandAsync(["git", "cat-file", "--batch"], input));
+  return new Map(objects.map(({ objectId, bytes }) => [objectId, bytes]));
 }
 
 async function scanTrackedTree(): Promise<Array<{ target: string; detectors: string[] }>> {
@@ -112,7 +137,8 @@ async function scanTrackedTree(): Promise<Array<{ target: string; detectors: str
   const indexedFiles = trackedIndexFiles();
   const blobs = await indexedBlobs(indexedFiles.filter(({ path }) => !modified.has(path)));
   for (const { path, objectId } of indexedFiles) {
-    if (modified.has(path) && !existsSync(path)) continue;
+    const absolutePath = resolve(repositoryRoot, path);
+    if (modified.has(path) && !existsSync(absolutePath)) continue;
     if (/\.env(?:\.|$)/.test(path) && !path.endsWith(".env.example")) {
       results.push({ target: path, detectors: ["tracked environment file"] });
       continue;
@@ -121,7 +147,7 @@ async function scanTrackedTree(): Promise<Array<{ target: string; detectors: str
       results.push({ target: path, detectors: ["tracked sensitive file type"] });
       continue;
     }
-    const bytes = modified.has(path) ? readFileSync(path) : blobs.get(objectId);
+    const bytes = modified.has(path) ? readFileSync(absolutePath) : blobs.get(objectId);
     if (!bytes) throw new Error(`Missing indexed Git blob for ${path}`);
     if (bytes.includes(0)) continue;
     const detected = findings(bytes.toString("utf8"), true);
@@ -130,28 +156,34 @@ async function scanTrackedTree(): Promise<Array<{ target: string; detectors: str
   return results;
 }
 
-function scanEveryLocalGitBlob(): Array<{ target: string; detectors: string[] }> {
+async function scanEveryLocalGitBlob(): Promise<Array<{ target: string; detectors: string[] }>> {
   const listing = new TextDecoder().decode(command([
     "git",
     "cat-file",
     "--batch-all-objects",
     "--batch-check=%(objectname) %(objecttype) %(objectsize)",
   ]));
-  const results: Array<{ target: string; detectors: string[] }> = [];
-  for (const line of listing.trim().split("\n")) {
+  const objectIds = listing.trim().split("\n").flatMap((line) => {
     const [objectId, type, sizeValue] = line.split(" ");
     const size = Number(sizeValue);
-    if (!objectId || type !== "blob" || !Number.isFinite(size) || size > 2_000_000) continue;
-    const bytes = command(["git", "cat-file", "blob", objectId]);
-    if (bytes.includes(0)) continue;
-    const detected = findings(new TextDecoder().decode(bytes), false);
-    if (detected.length) results.push({ target: `git object ${objectId}`, detectors: detected });
+    return objectId && type === "blob" && Number.isFinite(size) && size <= 2_000_000 ? [objectId] : [];
+  });
+  const input = new TextEncoder().encode(`${objectIds.join("\n")}\n`);
+  const objects = parseGitObjectBatch(await commandAsync(["git", "cat-file", "--batch"], input));
+  const results: Array<{ target: string; detectors: string[] }> = [];
+  for (const { objectId, type, bytes } of objects) {
+    if (type === "blob" && bytes.length <= 2_000_000) {
+      if (!bytes.includes(0)) {
+        const detected = findings(new TextDecoder().decode(bytes), false);
+        if (detected.length) results.push({ target: `git object ${objectId}`, detectors: detected });
+      }
+    }
   }
   return results;
 }
 
 const allObjects = Bun.argv.includes("--all-objects");
-const results = [...await scanTrackedTree(), ...(allObjects ? scanEveryLocalGitBlob() : [])];
+const results = [...await scanTrackedTree(), ...(allObjects ? await scanEveryLocalGitBlob() : [])];
 if (results.length) {
   for (const result of results) console.error(`${result.target}: ${result.detectors.join(", ")}`);
   console.error("Security audit failed. Values are intentionally omitted from this report.");

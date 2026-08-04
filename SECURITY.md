@@ -2,7 +2,7 @@
 
 Use GitHub's private vulnerability reporting for suspected vulnerabilities. Do not open a public issue containing real expense data, identity data, tokens, device keys, databases, receipts, environment files, host details, or provider credentials.
 
-Tally is pre-1.0. Only the latest commit on `main` receives fixes.
+Tallied is pre-1.0. Only the latest commit on `main` receives fixes.
 
 ## Supported security baseline
 

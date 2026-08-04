@@ -46,6 +46,7 @@ import { ExpenseTargetPicker } from "./components/ExpenseTargetPicker";
 import { FeedbackButton } from "./components/FeedbackDialog";
 import { GroupComposer } from "./components/GroupComposer";
 import { PaymentComposer } from "./components/PaymentComposer";
+import { RelationshipDetail } from "./components/RelationshipDetail";
 import {
   AccessibleTabs,
   Avatar,
@@ -66,6 +67,7 @@ import {
   signOutAndClearLocalLedger,
 } from "./lib/auth";
 import { clearInviteToken, inviteTokenFromHash } from "./lib/contact-invites";
+import { paymentActivityDetails } from "./lib/activity-view";
 import { developmentIdentity } from "./lib/development-actor";
 import type { LocalExpense, LocalOperation } from "./lib/db";
 import {
@@ -81,6 +83,7 @@ import {
   computeBalances,
   computeRelationshipBalances,
   simplifyBalances,
+  type RelationshipBalance,
   type Settlement,
 } from "./lib/ledger-view";
 import { appStore, changeGroupCurrency, initializeStore, restoreExpense } from "./lib/store";
@@ -164,13 +167,19 @@ function ConnectionPill() {
         .operations()
         .filter((operation) => operation.syncStatus === "pending").length,
   );
+  const connectionLabel = createMemo(() => {
+    if (appStore.connection() === "online") return pending() ? `${pending()} changes syncing` : "Synced";
+    if (appStore.connection() === "connecting") return "Checking connection";
+    return pending() ? `Offline, ${pending()} changes saved on this device` : "Offline";
+  });
   return (
     <>
       <button
         type="button"
         class="connection-pill glass-control"
         onClick={() => void appStore.sync()}
-        title={appStore.connectionMessage()}
+        aria-label={connectionLabel()}
+        title={connectionLabel()}
       >
         <Switch>
           <Match when={appStore.connection() === "online"}>
@@ -259,7 +268,7 @@ function ExpenseList(props: {
         action={
           <Show when={props.onAdd}>
             <button class="list-add-action" type="button" onClick={() => props.onAdd?.()}>
-              <Plus size={14} /> Add
+              <Plus size={14} /> Add expense
             </button>
           </Show>
         }
@@ -330,7 +339,7 @@ function ExpenseList(props: {
                                 ? `−${money(-expense.yourNetMinor, expense.currency)}`
                                 : money(0, expense.currency)}
                         </strong>
-                        <span>{expense.status === "voided" ? money(expense.amountMinor, expense.currency) : `${money(expense.amountMinor, expense.currency)} total`}</span>
+                        <span>{expense.status === "voided" ? `deleted · ${money(expense.amountMinor, expense.currency)}` : expense.yourNetMinor > 0 ? "you lent" : expense.yourNetMinor < 0 ? "you owe" : "settled"}</span>
                       </div>
                       <ChevronRight size={15} class="expense-row-chevron" />
                     </button>;
@@ -634,7 +643,7 @@ function GroupsView(props: {
                     </section>
 
                     <section class="insight-reconciliation" aria-labelledby="reconciliation-title">
-                      <header><div><h3 id="reconciliation-title">{reconciliationTitle()}</h3><p>From {reconciliation().expenseCount} {reconciliation().expenseCount === 1 ? "expense" : "expenses"} and {reconciliation().paymentCount} recorded {reconciliation().paymentCount === 1 ? "payment" : "payments"}.</p></div><button type="button" onClick={() => setGroupSection("balances")}>Sources <ChevronRight size={14} /></button></header>
+                      <header><div><h3 id="reconciliation-title">{reconciliationTitle()}</h3><p>From {reconciliation().expenseCount} {reconciliation().expenseCount === 1 ? "expense" : "expenses"} and {reconciliation().paymentCount} recorded {reconciliation().paymentCount === 1 ? "payment" : "payments"}.</p></div><button type="button" onClick={() => setGroupSection("balances")}>See balances <ChevronRight size={14} /></button></header>
                       <dl>
                         <div><dt>You paid</dt><dd>+{money(reconciliation().paidByYouMinor, currency())}</dd></div>
                         <div><dt>Your share</dt><dd>−{money(reconciliation().yourShareMinor, currency())}</dd></div>
@@ -645,7 +654,7 @@ function GroupsView(props: {
                     </section>
 
                     <section class="insight-settlement" aria-labelledby="settlement-plan-title">
-                      <header><div><h3 id="settlement-plan-title">{settlementBlockers() > 0 ? "Settlement paused" : "Simplest way to settle"}</h3><p>{settlementBlockers() > 0 ? `${settlementBlockers()} provisional ${settlementBlockers() === 1 ? "expense needs" : "expenses need"} review` : settlementPlan().length ? `${settlementPlan().length} ${settlementPlan().length === 1 ? "transfer" : "transfers"} clears the group` : "No payments needed"}</p></div><button type="button" onClick={() => setGroupSection(settlementBlockers() > 0 ? "expenses" : "balances")}>{settlementBlockers() > 0 ? "View activity" : "Review"} <ChevronRight size={14} /></button></header>
+                      <header><div><h3 id="settlement-plan-title">{settlementBlockers() > 0 ? "Settlement paused" : "Simplest way to settle"}</h3><p>{settlementBlockers() > 0 ? `${settlementBlockers()} provisional ${settlementBlockers() === 1 ? "expense needs" : "expenses need"} review` : settlementPlan().length ? `${settlementPlan().length} ${settlementPlan().length === 1 ? "transfer" : "transfers"} clears the group` : "No payments needed"}</p></div><button type="button" onClick={() => setGroupSection(settlementBlockers() > 0 ? "expenses" : "balances")}>{settlementBlockers() > 0 ? "View activity" : "See balances"} <ChevronRight size={14} /></button></header>
                       <Show when={settlementBlockers() === 0 && settlementPlan().length} fallback={<p class="insight-settled-copy">{settlementBlockers() > 0 ? "Resolve the flagged change before recording a settlement." : `Everyone is settled in ${currency()}.`}</p>}>
                         <div class="insight-transfer-list"><For each={settlementPlan()}>{(settlement) => <div><span>{memberName(activeGroup.id, settlement.payerId, props.actorId)} pays {memberName(activeGroup.id, settlement.recipientId, props.actorId)}</span><strong>{money(settlement.amountMinor, currency())}</strong></div>}</For></div>
                       </Show>
@@ -682,6 +691,7 @@ function OverviewView(props: {
   onSettle(settlement: Settlement, currency: string, groupId: string): void;
 }) {
   const [inviteOpen, setInviteOpen] = createSignal(false);
+  const [selectedRelationship, setSelectedRelationship] = createSignal<RelationshipBalance>();
   const [homeSection, setHomeSection] = createSignal<"people" | "groups">("people");
   const [contactState, { refetch: refetchContacts }] = createResource(async () => {
     try {
@@ -725,6 +735,8 @@ function OverviewView(props: {
     appStore.members().filter((member) => member.groupId === groupId && member.status === "active").length;
   const groupExpenseCount = (groupId: string) =>
     appStore.expenses().filter((expense) => expense.groupId === groupId && expense.status === "active").length;
+  const groupBalance = (groupId: string, currency: string) =>
+    computeBalances(appStore.expenses(), appStore.operations(), groupId, currency)[props.actorId] ?? 0;
   const relationshipUserIds = createMemo(() => new Set(relationships().map((relationship) => relationship.userId)));
   const contactsWithoutBalance = createMemo(() =>
     (contactState()?.contacts ?? []).filter((contact) => !relationshipUserIds().has(contact.userId)),
@@ -734,7 +746,7 @@ function OverviewView(props: {
       <header class="home-heading">
         <h1 class="page-title">Your balances</h1>
         <p class="home-summary-copy">
-          Across {relationships().length} {relationships().length === 1 ? "person" : "people"} · {appStore.groups().length} {appStore.groups().length === 1 ? "group" : "groups"}
+          {relationships().length} open {relationships().length === 1 ? "balance" : "balances"} · {appStore.groups().length} {appStore.groups().length === 1 ? "group" : "groups"}
         </p>
       </header>
 
@@ -761,8 +773,8 @@ function OverviewView(props: {
       <AccessibleTabs
         class="home-list-tabs"
         items={[
-          { id: "people", label: "People" },
-          { id: "groups", label: "Groups" },
+          { id: "people", label: "By person" },
+          { id: "groups", label: "By group" },
         ] as const}
         value={homeSection()}
         onChange={setHomeSection}
@@ -774,7 +786,7 @@ function OverviewView(props: {
         <Card id={tabPanelId("home-balance", "people")} class="home-list-card overflow-hidden" role="tabpanel" aria-labelledby={tabId("home-balance", "people")}>
           <SectionHeading
             title="People"
-            detail={relationships().length ? "Net across all shared groups" : contactsWithoutBalance().length ? "Connected on Tally" : "No open balances"}
+            detail={relationships().length ? "Net across all shared groups" : contactsWithoutBalance().length ? "Connected on Tallied" : "No open balances"}
             action={<button type="button" class="list-add-action" onClick={() => setInviteOpen(true)}><UserPlus size={14} /> Invite</button>}
           />
           <For
@@ -791,7 +803,7 @@ function OverviewView(props: {
               return (
                 <article class="relationship-row" style={{ "--row-index": index() }}>
                   <Avatar name={personName()} class="size-10 text-xs" />
-                  <button type="button" class="min-h-11 min-w-0 flex-1 text-left" onClick={() => props.onOpenGroup(relationship.groupIds[0]!)}>
+                  <button type="button" class="min-h-11 min-w-0 flex-1 text-left" aria-label={`View balance details with ${personName()}`} onClick={() => setSelectedRelationship(relationship)}>
                     <strong class="block truncate text-sm">{personName()}</strong>
                     <span class="block truncate text-xs text-muted-foreground">{groupNames(relationship.groupIds)}</span>
                   </button>
@@ -799,9 +811,15 @@ function OverviewView(props: {
                     <span class="relationship-direction">{relationship.amountMinor > 0 ? "owes you" : "you owe"}</span>
                     <strong class="block text-sm tabular-nums" classList={{ "money-in": relationship.amountMinor > 0, "money-out": relationship.amountMinor < 0 }}>{money(Math.abs(relationship.amountMinor), relationship.currency)}</strong>
                   </div>
-                  <button type="button" class="relationship-action" onClick={() => canSettleHere() ? props.onSettle(settlement(), relationship.currency, relationship.groupIds[0]!) : props.onOpenGroup(relationship.groupIds[0]!)}>
+                  <button
+                    type="button"
+                    class="relationship-action"
+                    classList={{ "relationship-action-settle": canSettleHere() }}
+                    aria-label={canSettleHere() ? `Settle balance with ${personName()}` : needsReview() ? `Review balance with ${personName()}` : `View shared groups with ${personName()}`}
+                    onClick={() => canSettleHere() ? props.onSettle(settlement(), relationship.currency, relationship.groupIds[0]!) : setSelectedRelationship(relationship)}
+                  >
                     <span class="relationship-action-label">{canSettleHere() ? "Settle" : needsReview() ? "Review" : "View"}</span>
-                    <ChevronRight class="relationship-action-chevron" size={16} />
+                    <Show when={!canSettleHere()}><ChevronRight class="relationship-action-chevron" size={16} /></Show>
                   </button>
                 </article>
               );
@@ -826,13 +844,15 @@ function OverviewView(props: {
         <Card id={tabPanelId("home-balance", "groups")} class="home-list-card overflow-hidden" role="tabpanel" aria-labelledby={tabId("home-balance", "groups")}>
           <SectionHeading title="Groups" detail="Your groups" action={<button type="button" class="list-add-action" onClick={props.onCreateGroup}><UsersRound size={14} /> Create group</button>} />
           <For each={appStore.groups()} fallback={<div class="px-6 py-12 text-center text-sm text-muted-foreground">Create a group to start splitting.</div>}>
-            {(group) => (
-              <button type="button" class="home-group-row" onClick={() => props.onOpenGroup(group.id)}>
+            {(group) => {
+              const balance = createMemo(() => groupBalance(group.id, group.settlementCurrency));
+              return <button type="button" class="home-group-row" onClick={() => props.onOpenGroup(group.id)}>
                 <Avatar name={group.name} class="size-10 text-xs" />
                 <span class="min-w-0 flex-1 text-left"><strong>{group.name}</strong><small>{groupMemberCount(group.id)} {groupMemberCount(group.id) === 1 ? "person" : "people"} · {groupExpenseCount(group.id)} active {groupExpenseCount(group.id) === 1 ? "expense" : "expenses"}</small></span>
+                <span class="home-group-balance"><small>{balance() > 0 ? "you’re owed" : balance() < 0 ? "you owe" : "settled"}</small><strong>{money(Math.abs(balance()), group.settlementCurrency)}</strong></span>
                 <ChevronRight size={16} />
-              </button>
-            )}
+              </button>;
+            }}
           </For>
         </Card>
       </Show>
@@ -841,6 +861,14 @@ function OverviewView(props: {
         open={inviteOpen()}
         onOpenChange={setInviteOpen}
         onChanged={() => void refetchContacts()}
+      />
+      <RelationshipDetail
+        open={Boolean(selectedRelationship())}
+        actorId={props.actorId}
+        relationship={selectedRelationship()}
+        onOpenChange={(open) => { if (!open) setSelectedRelationship(undefined); }}
+        onOpenGroup={props.onOpenGroup}
+        onSettle={props.onSettle}
       />
     </div>
   );
@@ -914,17 +942,24 @@ function ActivityView(props: {
             <Card class="activity-day-card overflow-hidden">
               <For each={day.operations}>{(operation) => {
                 const expense = createMemo(() => appStore.expenses().find((item) => item.id === operation.targetId));
+                const payment = createMemo(() => paymentActivityDetails(operation));
                 const group = createMemo(() => appStore.groups().find((item) => item.id === operation.groupId));
                 const actor = createMemo(() => operation.actorId === props.actorId ? "You" : memberName(operation.groupId, operation.actorId, props.actorId));
                 return <article class="activity-row">
                   <Avatar name={actor()} class="size-10 text-xs" />
-                  <button type="button" class="activity-row-main min-h-11" disabled={!expense()} onClick={() => expense() && props.onOpenExpense(expense()!)}>
+                  <Show when={expense()} fallback={
+                    <div class="activity-row-main min-h-11">
+                      <strong>{actor()} {activityCopy[operation.type] ?? "updated the group"}</strong>
+                      <span>{payment() ? `${memberName(operation.groupId, payment()!.payerId, props.actorId)} paid ${memberName(operation.groupId, payment()!.recipientId, props.actorId)} · ${group()?.name ?? "Shared group"}${payment()!.note ? ` · ${payment()!.note}` : ""}` : group()?.name ?? "Shared group"}</span>
+                      <time>{new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(operation.clientTimestamp))}</time>
+                    </div>
+                  }>{(item) => <button type="button" class="activity-row-main min-h-11" onClick={() => props.onOpenExpense(item())}>
                     <strong>{actor()} {activityCopy[operation.type] ?? "updated the group"}</strong>
-                    <span>{expense() ? `${expense()!.description} · ${group()?.name ?? "Shared group"}` : group()?.name ?? "Shared group"}</span>
+                    <span>{item().description} · {group()?.name ?? "Shared group"}</span>
                     <time>{new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(operation.clientTimestamp))}</time>
-                  </button>
+                  </button>}</Show>
                   <div class="activity-row-value">
-                    <Show when={expense()}>{(item) => <strong>{money(item().amountMinor, item().currency)}</strong>}</Show>
+                    <Show when={expense()} fallback={<Show when={payment()}>{(item) => <><strong>{money(item().amountMinor, item().currency)}</strong><span class="activity-payment-label">payment</span></>}</Show>}>{(item) => <strong>{money(item().amountMinor, item().currency)}</strong>}</Show>
                     <Show when={operation.type === "ExpenseVoided" && expense()?.status === "voided"}>
                       <button class="min-h-11 px-2" onClick={() => expense() && void restore(expense()!)}>Restore</button>
                     </Show>
@@ -1067,21 +1102,35 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
     createSignal<Settlement>();
   const [paymentCurrency, setPaymentCurrency] = createSignal("USD");
   const [toast, setToast] = createSignal("");
+  const [inviteRecovery, setInviteRecovery] = createSignal<"idle" | "accepting" | "waiting">(
+    inviteTokenFromHash() ? "accepting" : "idle",
+  );
+  const [inviteRecoveryMessage, setInviteRecoveryMessage] = createSignal("");
   let toastTimer = 0;
+  async function acceptPendingInvitation(): Promise<void> {
+    const invitationToken = inviteTokenFromHash();
+    if (!invitationToken) {
+      setInviteRecovery("idle");
+      return;
+    }
+    setInviteRecovery("accepting");
+    setInviteRecoveryMessage("");
+    try {
+      await acceptCurrentContactInvitation(invitationToken);
+      clearInviteToken();
+      setInviteRecovery("idle");
+      notify("You’re connected on Tallied");
+    } catch (error) {
+      setInviteRecovery("waiting");
+      setInviteRecoveryMessage(error instanceof Error ? error.message : "Could not verify this invitation");
+    }
+  }
   onMount(() => {
     applyTheme(
       (localStorage.getItem("expenses-theme") as Theme | null) ?? "system",
     );
     void initializeStore(props.actorId);
-    const invitationToken = inviteTokenFromHash();
-    if (invitationToken) {
-      void acceptCurrentContactInvitation(invitationToken)
-        .then(() => {
-          clearInviteToken();
-          notify("You’re connected on Tally");
-        })
-        .catch((error) => notify(error instanceof Error ? error.message : "Could not accept the invitation"));
-    }
+    if (inviteTokenFromHash()) void acceptPendingInvitation();
   });
   createEffect(() => {
     if (!selectedGroupId() && appStore.groups()[0])
@@ -1153,6 +1202,10 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
     );
     window.setTimeout(() => setTargetPickerOpen(true), 0);
   }
+  function addFromCurrentContext(): void {
+    if (tab() === "groups" && groupsMode() === "detail" && selectedGroupId()) addExpense(selectedGroupId());
+    else addExpense();
+  }
   function openGroupComposer(origin: GroupComposerOrigin = "groups") {
     setGroupComposerOrigin(origin);
     if (origin === "expense") afterDialogClose(() => setGroupOpen(true));
@@ -1199,12 +1252,12 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
       <aside class="desktop-sidebar hidden md:sticky md:top-0 md:flex md:h-dvh md:flex-col">
         <div class="flex h-18 items-center gap-2.5 px-5">
           <BrandMark size={32} />
-          <strong>Tally</strong>
+          <strong class="brand-wordmark">Tallied</strong>
         </div>
         <div class="px-3 pb-3">
           <Button
             class="h-11 w-full justify-start"
-            onClick={() => addExpense()}
+            onClick={addFromCurrentContext}
           >
             <Plus size={17} /> Add expense
           </Button>
@@ -1259,12 +1312,25 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
       </aside>
       <div class="min-w-0">
         <header class="mobile-header md:hidden">
-          <span class="flex items-center gap-2"><BrandMark size={28} /><strong class="mobile-wordmark">Tally</strong></span>
-          <button class="mobile-add-action" type="button" onClick={() => addExpense()}>
-            <Plus size={16} /> Add expense
-          </button>
+          <span class="flex items-center gap-2"><BrandMark size={28} /><strong class="mobile-wordmark">Tallied</strong></span>
+          <span class="mobile-header-actions">
+            <ConnectionPill />
+            <button class="mobile-add-action" type="button" onClick={addFromCurrentContext}>
+              <Plus size={16} /> Add expense
+            </button>
+          </span>
         </header>
         <main id="main-content" tabindex={-1} class="app-main mx-auto w-full max-w-5xl px-4 pb-28 pt-5 sm:px-6 sm:pt-8 md:px-8 md:pb-12 lg:px-10">
+          <Show when={inviteRecovery() !== "idle"}>
+            <section class="invite-recovery-banner" role={inviteRecovery() === "waiting" ? "alert" : "status"} aria-live={inviteRecovery() === "waiting" ? "assertive" : "polite"}>
+              <div>
+                <strong>{inviteRecovery() === "accepting" ? "Verifying your invitation…" : "Your invitation is saved"}</strong>
+                <p>{inviteRecovery() === "accepting" ? "Tallied is connecting this account to your inviter." : "Reconnect to verify and join. Wait to add shared expenses until this finishes; offline drafts are not connected to the invitation yet."}</p>
+                <Show when={inviteRecoveryMessage()}><small>{inviteRecoveryMessage()}</small></Show>
+              </div>
+              <Show when={inviteRecovery() === "waiting"}><Button variant="secondary" onClick={() => void acceptPendingInvitation()}>Retry</Button></Show>
+            </section>
+          </Show>
           <Switch>
             <Match when={tab() === "overview"}>
               <OverviewView
@@ -1508,7 +1574,7 @@ function AuthScreen() {
       <div class="w-full max-w-sm">
         <div class="mb-6 flex items-center justify-center gap-2.5 text-white">
           <BrandMark size={38} />
-          <strong class="text-lg">Tally</strong>
+          <strong class="brand-wordmark text-lg">Tallied</strong>
         </div>
         <Card class="glass-auth rounded-xl p-6 sm:p-8">
           <span class="mb-5 grid size-11 place-items-center rounded-2xl bg-primary/10 text-primary">
@@ -1535,7 +1601,7 @@ function AuthScreen() {
           </Show>
           <Show when={capabilities()?.magicLink} fallback={
             <p class="mt-5 rounded-xl border border-border bg-muted/60 p-3 text-sm text-muted-foreground">
-              Email links are not configured on this Tally server.
+              Email links are not configured on this Tallied server.
             </p>
           }>
           <form class="mt-6 grid gap-4" onSubmit={requestLink}>

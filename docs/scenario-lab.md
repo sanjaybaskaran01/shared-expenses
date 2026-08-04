@@ -1,6 +1,6 @@
 # Four-person Scenario Lab
 
-The Scenario Lab is a deterministic, zero-cost multi-user system test for Tally. It operates the real mobile interface as four people at the same time, then compares every device with an independent view of the SQLite ledger.
+The Scenario Lab is a deterministic, zero-cost multi-user system test for Tallied. It operates the real mobile interface as four people at the same time, then compares every device with an independent view of the SQLite ledger.
 
 It deliberately uses scripted actors instead of an LLM for the acceptance layer. The same inputs, barriers, and invariants produce reproducible failures; an exploratory AI user can be added later without weakening the deterministic gate.
 
@@ -24,6 +24,8 @@ If neither supported browser is installed, run `bunx playwright install chromium
 ## What it tests
 
 Each run creates four isolated browser contexts at 390×844. Cookies, device keys, IndexedDB, and sync cursors are separate for Maya, Dev, Mira, and Arjun.
+
+Exploratory persona sessions must use the same isolation. Query parameters in several tabs of one shared browser session do not isolate IndexedDB, identity, or sync state and can create false causality between actors. Give each persona its own browser context and development identity; use the deterministic lab as the authority for attribution and convergence.
 
 1. **Four-way create:** all four people prepare a different expense and one barrier releases the four submit actions together. Realtime propagation must converge without a forced refresh.
 2. **Offline replay:** Maya loses connectivity, records a purchase locally, and reconnects. The server must not see it early, and every device must eventually see it once.

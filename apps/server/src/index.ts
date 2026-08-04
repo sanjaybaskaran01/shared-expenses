@@ -73,7 +73,7 @@ function errorResponse(request: Request, status: number, code: string, message: 
 }
 
 function safeSubjectLabel(value: string): string {
-  return value.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) || "a Tally user";
+  return value.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) || "a Tallied user";
 }
 
 function validEmail(value: string): boolean {
@@ -533,7 +533,7 @@ const server = Bun.serve({
   },
 });
 
-console.info(`Tally API listening on ${server.url}`);
+console.info(`Tallied API listening on ${server.url}`);
 
 function shutdown(): void {
   stopEmailWorker();

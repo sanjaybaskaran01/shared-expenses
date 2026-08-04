@@ -321,7 +321,7 @@ export async function pollWebDeployment(
         throw new Error(`service worker cache policy is unsafe: ${workerCacheControl || "missing"}`);
       }
       const manifest = await manifestResponse.json() as { name?: string };
-      if (manifest.name !== "Tally") throw new Error(`manifest name is ${manifest.name ?? "missing"}`);
+      if (manifest.name !== "Tallied") throw new Error(`manifest name is ${manifest.name ?? "missing"}`);
       return metadata;
     } catch (error) {
       lastError = error;
