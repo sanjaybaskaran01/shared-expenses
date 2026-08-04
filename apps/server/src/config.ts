@@ -109,7 +109,7 @@ export function loadConfig(): AppConfig {
       secure: booleanEnv("SMTP_SECURE", true),
       ...(smtpUser ? { user: smtpUser } : {}),
       ...(smtpPassword ? { appPassword: smtpPassword } : {}),
-      from: smtpFrom || "Tally <tally@example.com>",
+      from: smtpFrom || "Tallied <tally@example.com>",
     },
   };
 }

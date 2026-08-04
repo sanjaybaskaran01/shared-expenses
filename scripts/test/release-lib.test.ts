@@ -185,7 +185,7 @@ describe("web release verification", () => {
       const path = new URL(String(input)).pathname;
       if (path === "/release.json") return Response.json({ commit, version: "0.1.0", builtAt: "now" });
       if (path === "/tally-sw.js") return new Response("self.skipWaiting()", { headers: { "cache-control": "no-cache" } });
-      if (path === "/manifest.webmanifest") return Response.json({ name: "Tally" });
+      if (path === "/manifest.webmanifest") return Response.json({ name: "Tallied" });
       return new Response("<script src='/assets/app.js'></script>");
     };
 
@@ -205,7 +205,7 @@ describe("web release verification", () => {
       const path = new URL(String(input)).pathname;
       if (path === "/release.json") return Response.json({ commit });
       if (path === "/tally-sw.js") return new Response("worker", { headers: { "cache-control": "public, max-age=3600" } });
-      if (path === "/manifest.webmanifest") return Response.json({ name: "Tally" });
+      if (path === "/manifest.webmanifest") return Response.json({ name: "Tallied" });
       return new Response("<script src='/assets/app.js'></script>");
     };
     await expect(

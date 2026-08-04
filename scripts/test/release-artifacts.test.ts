@@ -13,12 +13,12 @@ async function fixture(): Promise<{ root: string; output: string }> {
   await mkdir(join(root, "apps/web/dist/assets"), { recursive: true });
   await mkdir(join(root, "apps/server/dist"), { recursive: true });
   await mkdir(join(root, "apps/server/migrations"), { recursive: true });
-  await writeFile(join(root, "apps/web/dist/index.html"), "<title>Tally</title><script src='/assets/app.js'></script>");
+  await writeFile(join(root, "apps/web/dist/index.html"), "<title>Tallied</title><script src='/assets/app.js'></script>");
   await writeFile(join(root, "apps/web/dist/assets/app.js"), "console.log('tally')");
   await writeFile(join(root, "apps/web/dist/assets/app.js.map"), "{}");
   await writeFile(join(root, "apps/web/dist/brand-concept.png"), "unused");
   await writeFile(join(root, "apps/web/dist/tally-sw.js"), "self.skipWaiting()");
-  await writeFile(join(root, "apps/web/dist/manifest.webmanifest"), JSON.stringify({ name: "Tally" }));
+  await writeFile(join(root, "apps/web/dist/manifest.webmanifest"), JSON.stringify({ name: "Tallied" }));
   await writeFile(join(root, "apps/server/dist/index.js"), "Bun.serve({fetch(){return new Response('ok')}})");
   await writeFile(join(root, "apps/server/migrations/001.sql"), "CREATE TABLE IF NOT EXISTS test (id TEXT);");
   return { root, output: join(root, "release-artifact") };

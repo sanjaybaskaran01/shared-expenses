@@ -133,7 +133,7 @@ async function main(): Promise<void> {
     version: packageJson.version,
     builtAt,
   });
-  console.log(`Built Tally release ${manifest.commit} at ${outputDirectory}`);
+  console.log(`Built Tallied release ${manifest.commit} at ${outputDirectory}`);
 }
 
 if (import.meta.main) {

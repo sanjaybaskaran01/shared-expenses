@@ -2,7 +2,7 @@
 
 ## Current status
 
-Tally has two data paths:
+Tallied has two data paths:
 
 | Path | Status | Server can read expense content? | Used by the current UI? |
 |---|---|---:|---:|
@@ -33,7 +33,7 @@ The implementation lives in the protocol package, browser crypto library, v2 API
 
 ## Migration gates
 
-Before marking Tally end-to-end encrypted:
+Before marking Tallied end-to-end encrypted:
 
 1. Move all expense creation, projection, sync, and attachments to v2.
 2. Add existing-device approval and a user-controlled recovery-key flow.

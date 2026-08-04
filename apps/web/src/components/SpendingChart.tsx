@@ -2,7 +2,7 @@ import { BarChart, LineChart } from "echarts/charts";
 import { GridComponent, TooltipComponent } from "echarts/components";
 import * as echarts from "echarts/core";
 import { SVGRenderer } from "echarts/renderers";
-import { createEffect, onCleanup, onMount } from "solid-js";
+import { createEffect, createMemo, For, onCleanup, onMount } from "solid-js";
 import type { LocalExpense } from "../lib/db";
 
 echarts.use([BarChart, LineChart, GridComponent, TooltipComponent, SVGRenderer]);
@@ -20,6 +20,22 @@ function money(value: number, currency: string): string {
 export function SpendingChart(props: SpendingChartProps) {
   let root!: HTMLDivElement;
   let chart: echarts.ECharts | undefined;
+  const accessibleEntries = createMemo(() => {
+    const expenses = props.expenses.filter((expense) => expense.status === "active" && expense.currency === props.currency);
+    const totals = new Map<string, number>();
+    for (const expense of expenses) {
+      const key = props.mode === "category" ? expense.category : expense.expenseDate.slice(0, 7);
+      totals.set(key, (totals.get(key) ?? 0) + expense.amountMinor);
+    }
+    const entries = [...totals];
+    entries.sort(([left, leftValue], [right, rightValue]) => props.mode === "category" ? rightValue - leftValue : left.localeCompare(right));
+    return entries.slice(-6).map(([key, value]) => ({
+      label: props.mode === "category"
+        ? key
+        : new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(`${key}-15T12:00:00`)),
+      value,
+    }));
+  });
 
   function render(): void {
     if (!chart) return;
@@ -71,5 +87,13 @@ export function SpendingChart(props: SpendingChartProps) {
   });
   createEffect(render);
 
-  return <div ref={root} class="h-52 w-full" role="img" aria-label={`${props.mode === "category" ? "Spending by category" : "Monthly spending"} chart`} />;
+  return (
+    <figure aria-label={`${props.mode === "category" ? "Spending by category" : "Monthly spending"} chart`}>
+      <div ref={root} class="h-52 w-full" aria-hidden="true" />
+      <figcaption class="sr-only">
+        <span>{props.mode === "category" ? "Spending by category" : "Monthly spending"}</span>
+        <ul><For each={accessibleEntries()}>{(entry) => <li>{entry.label}: {money(entry.value, props.currency)}</li>}</For></ul>
+      </figcaption>
+    </figure>
+  );
 }

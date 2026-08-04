@@ -1,9 +1,9 @@
 {
-  "name": "Tally",
-  "short_name": "Tally",
+  "name": "Tallied",
+  "short_name": "Tallied",
   "description": "Split simply. Settle clearly.",
-  "theme_color": "#fbfaf8",
-  "background_color": "#fbfaf8",
+  "theme_color": "#f6f5f1",
+  "background_color": "#f6f5f1",
   "display": "standalone",
   "start_url": "/",
   "icons": [

@@ -7,6 +7,7 @@ import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { appStore, recordPayment } from "../lib/store";
 import { localDateValue } from "../lib/dates";
 import type { Settlement } from "../lib/ledger-view";
+import { validatePaymentForm, type PaymentFormIssue } from "../lib/payment-form";
 import { Button } from "./ui";
 
 interface PaymentComposerProps {
@@ -27,6 +28,7 @@ export function PaymentComposer(props: PaymentComposerProps) {
   const [note, setNote] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal("");
+  const [formIssue, setFormIssue] = createSignal<PaymentFormIssue>();
   const members = createMemo(() => appStore.members().filter((member) => member.groupId === props.groupId && member.status === "active"));
   const payerName = createMemo(() => members().find((member) => member.userId === payerId())?.displayName ?? "Payer");
   const recipientName = createMemo(() => members().find((member) => member.userId === recipientId())?.displayName ?? "Recipient");
@@ -45,6 +47,7 @@ export function PaymentComposer(props: PaymentComposerProps) {
   });
   let wasOpen = false;
   let amountInputRef: HTMLInputElement | undefined;
+  let payerSelectRef: HTMLSelectElement | undefined;
   createEffect(() => {
     if (props.open && !wasOpen) {
       setPayerId(props.suggested?.payerId ?? members()[0]?.userId ?? "");
@@ -53,6 +56,7 @@ export function PaymentComposer(props: PaymentComposerProps) {
       setDate(localDateValue());
       setNote("");
       setError("");
+      setFormIssue(undefined);
     }
     wasOpen = props.open;
   });
@@ -60,12 +64,20 @@ export function PaymentComposer(props: PaymentComposerProps) {
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     if (!props.groupId) return;
+    setError("");
+    setFormIssue(undefined);
     if (props.blocked) {
       setError("Review the provisional expense before recording a payment.");
       return;
     }
+    const issue = validatePaymentForm({ amount: amount(), payerId: payerId(), recipientId: recipientId() });
+    if (issue) {
+      setFormIssue(issue);
+      setError(issue.message);
+      queueMicrotask(() => issue.field === "amount" ? amountInputRef?.focus() : payerSelectRef?.focus());
+      return;
+    }
     setBusy(true);
-    setError("");
     try {
       await recordPayment({ groupId: props.groupId, payerId: payerId(), recipientId: recipientId(), amount: amount(), currency: props.currency, paymentDate: date(), note: note() });
       props.onOpenChange(false);
@@ -99,19 +111,19 @@ export function PaymentComposer(props: PaymentComposerProps) {
             </header>
             <form class="grid gap-5 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]" onSubmit={(event) => void submit(event)}>
               <div class="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
-                <label class="grid gap-2 text-sm font-medium">Payer<select class="form-control" value={payerId()} onInput={(event) => setPayerId(event.currentTarget.value)}><For each={members()}>{(member) => <option value={member.userId}>{member.displayName}</option>}</For></select></label>
+                <label class="grid gap-2 text-sm font-medium">Payer<select ref={payerSelectRef} class="form-control" value={payerId()} aria-invalid={formIssue()?.field === "participants"} aria-describedby={formIssue()?.field === "participants" ? "payment-form-error" : undefined} onInput={(event) => setPayerId(event.currentTarget.value)}><For each={members()}>{(member) => <option value={member.userId}>{member.displayName}</option>}</For></select></label>
                 <ArrowRight class="mb-3 text-muted-foreground" size={17} />
-                <label class="grid gap-2 text-sm font-medium">Recipient<select class="form-control" value={recipientId()} onInput={(event) => setRecipientId(event.currentTarget.value)}><For each={members()}>{(member) => <option value={member.userId}>{member.displayName}</option>}</For></select></label>
+                <label class="grid gap-2 text-sm font-medium">Recipient<select class="form-control" value={recipientId()} aria-invalid={formIssue()?.field === "participants"} aria-describedby={formIssue()?.field === "participants" ? "payment-form-error" : undefined} onInput={(event) => setRecipientId(event.currentTarget.value)}><For each={members()}>{(member) => <option value={member.userId}>{member.displayName}</option>}</For></select></label>
               </div>
-              <label class="grid gap-2 text-sm font-medium">Amount<div class="relative"><span class="absolute left-3 top-3 text-xs font-semibold text-muted-foreground">{props.currency}</span><input ref={amountInputRef} class="form-control amount-control h-12 pl-14" inputmode="decimal" aria-label={`Payment amount in ${props.currency}`} value={amount()} onInput={(event) => setAmount(event.currentTarget.value)} placeholder="0.00" /></div></label>
+              <label class="grid gap-2 text-sm font-medium">Amount<div class="relative"><span class="absolute left-3 top-3 text-xs font-semibold text-muted-foreground">{props.currency}</span><input ref={amountInputRef} class="form-control amount-control h-12 pl-14" inputmode="decimal" aria-label={`Payment amount in ${props.currency}`} aria-invalid={formIssue()?.field === "amount"} aria-describedby={formIssue()?.field === "amount" ? "payment-form-error" : undefined} value={amount()} onInput={(event) => setAmount(event.currentTarget.value)} placeholder="0.00" /></div></label>
               <label class="grid gap-2 text-sm font-medium">Date<input class="form-control" type="date" value={date()} onInput={(event) => setDate(event.currentTarget.value)} /></label>
               <label class="grid gap-2 text-sm font-medium">Note<textarea class="form-control min-h-20 py-2" value={note()} onInput={(event) => setNote(event.currentTarget.value)} placeholder="Optional note" /></label>
               <Show when={amountMinor() > 0 && payerId() !== recipientId()}>
                 <section class="payment-outcome"><span>After recording</span><strong>{outcome()}</strong><p>Everyone in this group can see the record after it syncs.</p></section>
               </Show>
               <Show when={props.blocked}><p class="error-callout" role="alert">Settlement is paused until the provisional expense is reviewed.</p></Show>
-              <Show when={error()}><p class="error-callout" role="alert">{error()}</p></Show>
-              <Button class="h-12 w-full" type="submit" disabled={busy() || props.blocked || !amount() || payerId() === recipientId()}>
+              <Show when={error()}><p id="payment-form-error" class="error-callout" role="alert">{error()}</p></Show>
+              <Button class="h-12 w-full" type="submit" disabled={busy() || props.blocked}>
                 <Show when={busy()} fallback={<><Check size={16} /> Record payment</>}><LoaderCircle class="animate-spin" size={16} /> Saving…</Show>
               </Button>
             </form>

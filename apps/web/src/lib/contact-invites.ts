@@ -12,10 +12,10 @@ export function clearInviteToken(): void {
 export type InvitationShareResult = "shared" | "copied" | "cancelled";
 
 export async function shareInvitation(url: string): Promise<InvitationShareResult> {
-  const text = "Join me on Tally to split shared expenses and keep balances clear.";
+  const text = "Join me on Tallied to split shared expenses and keep balances clear.";
   if (navigator.share) {
     try {
-      await navigator.share({ title: "Join me on Tally", text, url });
+      await navigator.share({ title: "Join me on Tallied", text, url });
       return "shared";
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return "cancelled";
@@ -52,7 +52,7 @@ export async function pickContactForMessage(): Promise<ContactPickerEntry | unde
 }
 
 export function messageInvitation(url: string, phone = ""): void {
-  const text = `Join me on Tally to split shared expenses: ${url}`;
+  const text = `Join me on Tallied to split shared expenses: ${url}`;
   const recipient = phone.replace(/[^+\d]/g, "");
   // iOS accepts '&body=' for SMS composition; Android accepts '?body='.
   const separator = /iPad|iPhone|iPod/.test(navigator.userAgent) ? "&" : "?";

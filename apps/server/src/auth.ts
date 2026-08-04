@@ -70,7 +70,7 @@ export function createAuth(db: Database, config: AppConfig, contactInvites: Cont
     );
   };
   return betterAuth({
-    appName: "Tally",
+    appName: "Tallied",
     database: db,
     baseURL: config.publicApiUrl,
     secret: config.authSecret,
@@ -116,20 +116,20 @@ export function createAuth(db: Database, config: AppConfig, contactInvites: Cont
             ? contactInvites.invitationContext(contactInvitationId, email)
             : null;
           const subject = contactInvitation
-            ? `${contactInvitation.inviterName} invited you to Tally`
+            ? `${contactInvitation.inviterName} invited you to Tallied`
             : invitation
             ? `${invitation.inviterName} invited you to ${invitation.groupName}`
-            : "Your secure Tally sign-in link";
+            : "Your secure Tallied sign-in link";
           const text = contactInvitation
-            ? `${contactInvitation.inviterName} invited you to connect on Tally. Open this single-use link to verify your email, join, and sign in: ${url}`
+            ? `${contactInvitation.inviterName} invited you to connect on Tallied. Open this single-use link to verify your email, join, and sign in: ${url}`
             : invitation
-            ? `${invitation.inviterName} invited you to join ${invitation.groupName} on Tally. Open this single-use link to join and sign in: ${url}`
-            : `Open this single-use link to sign in to Tally: ${url}`;
+            ? `${invitation.inviterName} invited you to join ${invitation.groupName} on Tallied. Open this single-use link to join and sign in: ${url}`
+            : `Open this single-use link to sign in to Tallied: ${url}`;
           const html = contactInvitation
-            ? `<p><strong>${escapeHtml(contactInvitation.inviterName)}</strong> invited you to connect on Tally.</p><p><a href="${escapeHtml(url)}">Join Tally</a></p><p>This single-use link verifies your email and signs you in. It expires in 10 minutes.</p>`
+            ? `<p><strong>${escapeHtml(contactInvitation.inviterName)}</strong> invited you to connect on Tallied.</p><p><a href="${escapeHtml(url)}">Join Tallied</a></p><p>This single-use link verifies your email and signs you in. It expires in 10 minutes.</p>`
             : invitation
-            ? `<p><strong>${escapeHtml(invitation.inviterName)}</strong> invited you to join <strong>${escapeHtml(invitation.groupName)}</strong> on Tally.</p><p><a href="${escapeHtml(url)}">Join ${escapeHtml(invitation.groupName)}</a></p><p>This single-use link verifies your email and signs you in. It expires in 10 minutes.</p>`
-            : `<p>Use this single-use link to sign in to Tally:</p><p><a href="${escapeHtml(url)}">Open Tally</a></p><p>This link expires in 10 minutes.</p>`;
+            ? `<p><strong>${escapeHtml(invitation.inviterName)}</strong> invited you to join <strong>${escapeHtml(invitation.groupName)}</strong> on Tallied.</p><p><a href="${escapeHtml(url)}">Join ${escapeHtml(invitation.groupName)}</a></p><p>This single-use link verifies your email and signs you in. It expires in 10 minutes.</p>`
+            : `<p>Use this single-use link to sign in to Tallied:</p><p><a href="${escapeHtml(url)}">Open Tallied</a></p><p>This link expires in 10 minutes.</p>`;
           enqueueEmail(db, {
             idempotencyKey: emailKey("magic-link", email, token),
             recipient: email,

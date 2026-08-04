@@ -502,7 +502,7 @@ async function rollbackWeb(context: ReleaseContext, previousVersion: string, pre
     "rollback", previousVersion,
     "--config", context.wranglerConfig,
     "--name", context.workerName,
-    "--message", "Automatic rollback after failed Tally release verification",
+    "--message", "Automatic rollback after failed Tallied release verification",
     "--yes",
   ]);
   const startedAt = Date.now();

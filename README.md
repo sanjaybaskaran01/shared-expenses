@@ -1,6 +1,6 @@
-# Tally
+# Tallied
 
-Tally is an installable, offline-first shared-expense ledger. It is designed to keep recording fast when the network is unavailable and reconcile signed changes when connectivity returns.
+Tallied is an installable, offline-first shared-expense ledger. It is designed to keep recording fast when the network is unavailable and reconcile signed changes when connectivity returns.
 
 This is an original implementation in the shared-expense product category. It does not use another product's branding, source code, or proprietary assets.
 
@@ -72,4 +72,4 @@ The public repository contains product code, generic deployment examples, and no
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Tally is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Tallied is licensed under the [GNU Affero General Public License v3.0](LICENSE).
