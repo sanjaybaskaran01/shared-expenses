@@ -312,6 +312,10 @@ export async function pollWebDeployment(
       if (metadata.commit !== options.expectedCommit) {
         throw new Error(`release metadata reports ${metadata.commit ?? "no commit"}`);
       }
+      const metadataCacheControl = metadataResponse.headers.get("cache-control")?.toLowerCase() ?? "";
+      if (!/(?:no-cache|no-store|max-age=0)/.test(metadataCacheControl)) {
+        throw new Error(`release metadata cache policy is unsafe: ${metadataCacheControl || "missing"}`);
+      }
       const html = await indexResponse.text();
       for (const asset of options.expectedAssets) {
         if (!html.includes(asset)) throw new Error(`index does not reference ${asset}`);

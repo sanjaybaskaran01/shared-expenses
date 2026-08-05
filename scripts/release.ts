@@ -104,6 +104,8 @@ interface ObtainedArtifact {
   cleanup?: () => Promise<void>;
 }
 
+const WEB_DEPLOYMENT_TIMEOUT_MS = 180_000;
+
 function contextFromEnvironment(): ReleaseContext {
   const repositoryRoot = resolve(import.meta.dir, "..");
   const supportRoot = resolve(process.env.TALLY_SUPPORT_ROOT ?? join(homedir(), "Library/Application Support/Tally"));
@@ -489,7 +491,7 @@ async function rollbackWeb(context: ReleaseContext, previousVersion: string, pre
           baseUrl: context.webUrl,
           expectedCommit: previousCommit,
           expectedAssets: expectedWebAssets(indexHtml),
-          timeoutMs: 30_000,
+          timeoutMs: WEB_DEPLOYMENT_TIMEOUT_MS,
         });
         return;
       }
@@ -544,7 +546,7 @@ async function deployWeb(
       baseUrl: context.webUrl,
       expectedCommit: manifest.commit,
       expectedAssets,
-      timeoutMs: 30_000,
+      timeoutMs: WEB_DEPLOYMENT_TIMEOUT_MS,
     });
     await markSuccessfulWebArtifact(context, manifest);
     return { previousVersion, ...(previousCommit ? { previousCommit } : {}), version };
@@ -646,7 +648,7 @@ async function run(): Promise<void> {
         history.web = webState;
       } catch (error) {
         if (apiState) {
-          return rollbackAndRethrow(
+          return await rollbackAndRethrow(
             error,
             () => rollbackApi(context, apiState),
             "Web deployment failed and API rollback also failed",
