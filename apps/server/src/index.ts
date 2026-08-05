@@ -4,19 +4,27 @@ import { resolve } from "node:path";
 import type {
   ConfidentialOperationEnvelope,
   GroupKeyEnvelope,
+  ImportBatchCommitRequest,
+  ImportIdentityResolutionRequest,
+  ImportStageChunkRequest,
+  ImportStageStartRequest,
+  ImportUndoStageChunkRequest,
+  ImportUndoStageStartRequest,
+  ImportUndoRequest,
   JsonValue,
   OperationEnvelope,
   SyncPushRequest,
 } from "@expenses/protocol";
 import { getMigrations } from "better-auth/db/migration";
 import { createAuth, deriveDisplayNameFromEmail } from "./auth";
-import { loadConfig } from "./config";
+import { loadConfig, resolvePublicRateKey } from "./config";
 import { ContactInviteError, ContactInviteStore } from "./contact-invites";
 import { ConfidentialLedgerStore } from "./confidential-ledger";
 import { openDatabase, runDomainMigrations } from "./database";
 import { enqueueEmail, startEmailWorker } from "./email";
 import { LedgerStore } from "./ledger";
 import { loadReleaseMetadata } from "./release";
+import { SplitwiseImportConnector } from "./splitwise-import";
 
 const config = loadConfig();
 const releaseMetadata = loadReleaseMetadata(resolve(import.meta.dir, "../release.json"));
@@ -27,9 +35,20 @@ const contactInvites = new ContactInviteStore(db, { emailHashSecret: config.auth
 const auth = createAuth(db, config, contactInvites);
 const authMigrations = await getMigrations(auth.options);
 await authMigrations.runMigrations();
-const ledger = new LedgerStore(db);
+const ledger = new LedgerStore(db, { emailHashSecret: config.authSecret });
 const confidentialLedger = new ConfidentialLedgerStore(db);
+const splitwiseConnector = config.splitwiseOAuth
+  ? new SplitwiseImportConnector(db, config.splitwiseOAuth, config.authSecret)
+  : undefined;
 const stopEmailWorker = startEmailWorker(db, config);
+ledger.recoverInterruptedImportActivations();
+ledger.pruneExpiredImportUploads();
+splitwiseConnector?.pruneExpired();
+const importCleanupTimer = setInterval(() => {
+  ledger.pruneExpiredImportUploads();
+  splitwiseConnector?.pruneExpired();
+}, 15 * 60_000);
+importCleanupTimer.unref();
 
 const subscribers = new Map<string, Set<ReadableStreamDefaultController<Uint8Array>>>();
 const encoder = new TextEncoder();
@@ -84,6 +103,37 @@ function validContactInviteToken(value: string): boolean {
   return /^[A-Za-z0-9_-]{43}$/.test(value);
 }
 
+const importMutationWindows = new Map<string, number[]>();
+
+function consumeImportMutation(actorId: string, limit = 30, windowMs = 60 * 60_000): boolean {
+  const cutoff = Date.now() - windowMs;
+  if (importMutationWindows.size >= 5_000) {
+    for (const [key, timestamps] of importMutationWindows) {
+      const active = timestamps.filter((timestamp) => timestamp > cutoff);
+      if (active.length === 0) importMutationWindows.delete(key);
+      else importMutationWindows.set(key, active);
+    }
+    if (importMutationWindows.size >= 5_000 && !importMutationWindows.has(actorId)) return false;
+  }
+  const recent = (importMutationWindows.get(actorId) ?? []).filter((timestamp) => timestamp > cutoff);
+  if (recent.length >= limit) {
+    importMutationWindows.set(actorId, recent);
+    return false;
+  }
+  recent.push(Date.now());
+  importMutationWindows.set(actorId, recent);
+  return true;
+}
+
+function publicRateKey(request: Request): string {
+  const cloudflareIp = request.headers.get("cf-connecting-ip");
+  return resolvePublicRateKey({
+    ...(cloudflareIp ? { cloudflareIp } : {}),
+    trustCloudflareProxy: config.trustCloudflareProxy,
+    production: config.nodeEnv === "production",
+  });
+}
+
 async function currentActor(request: Request): Promise<string | null> {
   if (config.devAuthBypass) {
     const candidate = request.headers.get("x-dev-user") ?? new URL(request.url).searchParams.get("devUser") ?? "dev-user";
@@ -98,11 +148,11 @@ async function requireActor(request: Request): Promise<string | Response> {
   return actor ?? errorResponse(request, 401, "UNAUTHENTICATED", "Sign in is required");
 }
 
-async function bodyJson<T>(request: Request): Promise<T> {
+async function bodyJson<T>(request: Request, maxBytes = 1_000_000): Promise<T> {
   const contentLength = Number(request.headers.get("content-length") ?? 0);
-  if (contentLength > 1_000_000) throw new RangeError("Request body is too large");
+  if (contentLength > maxBytes) throw new RangeError("Request body is too large");
   const body = await request.text();
-  if (new TextEncoder().encode(body).byteLength > 1_000_000) throw new RangeError("Request body is too large");
+  if (new TextEncoder().encode(body).byteLength > maxBytes) throw new RangeError("Request body is too large");
   try {
     return JSON.parse(body) as T;
   } catch {
@@ -149,6 +199,80 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     });
   }
 
+  if (url.pathname === "/api/v1/imports/capabilities" && request.method === "GET") {
+    return json(request, {
+      localFiles: true,
+      balanceOnly: true,
+      splitwiseOAuth: {
+        available: Boolean(config.splitwiseOAuth),
+        reason: config.splitwiseOAuth
+          ? null
+          : "Direct connection requires written Splitwise API approval. CSV, JSON, and balance-only migration remain available.",
+      },
+      limits: { files: 20, fileBytes: 10_485_760, totalBytes: 52_428_800, rows: 100_000 },
+    });
+  }
+
+  if (url.pathname === "/api/v1/import-claims/preview" && request.method === "POST") {
+    if (!consumeImportMutation(`claim-preview:${publicRateKey(request)}`, 30, 60 * 60_000)) {
+      return errorResponse(request, 429, "CLAIM_RATE_LIMITED", "Too many claim checks. Try again later.");
+    }
+    const body = await bodyJson<{ token?: string }>(request, 2_000);
+    const token = body.token?.trim() ?? "";
+    if (!validContactInviteToken(token)) {
+      return errorResponse(request, 400, "INVALID_CLAIM", "This migration claim link is invalid or expired");
+    }
+    try {
+      return json(request, ledger.previewImportClaim(token));
+    } catch {
+      return errorResponse(request, 404, "INVALID_CLAIM", "This migration claim link is invalid or expired");
+    }
+  }
+
+  if (
+    (url.pathname === "/api/v1/import-claims/reserve" || url.pathname === "/api/v1/import-claims/email") &&
+    request.method === "POST"
+  ) {
+    const rateKey = publicRateKey(request);
+    if (!consumeImportMutation(`claim-auth:${rateKey}`, 15, 60 * 60_000)) {
+      return errorResponse(request, 429, "CLAIM_RATE_LIMITED", "Too many claim attempts. Try again later.");
+    }
+    const body = await bodyJson<{ token?: string; email?: string }>(request, 4_000);
+    const token = body.token?.trim() ?? "";
+    const email = body.email?.trim().toLowerCase() ?? "";
+    if (!validContactInviteToken(token) || !validEmail(email)) {
+      return errorResponse(request, 400, "INVALID_CLAIM", "Enter a valid email and claim link");
+    }
+    if (url.pathname.endsWith("/email") && !config.smtp.enabled) {
+      return errorResponse(request, 503, "EMAIL_NOT_CONFIGURED", "Email verification is unavailable");
+    }
+    try {
+      const reservation = ledger.reserveImportClaimEmail(token, email);
+      if (url.pathname.endsWith("/email")) {
+        const callback = new URL(config.webOrigin);
+        callback.hash = new URLSearchParams({ migrationClaim: token }).toString();
+        const failure = new URL(config.webOrigin);
+        failure.searchParams.set("auth", "failed");
+        failure.hash = callback.hash;
+        await auth.api.signInMagicLink({
+          headers: request.headers,
+          body: {
+            email,
+            name: deriveDisplayNameFromEmail(email),
+            callbackURL: callback.toString(),
+            newUserCallbackURL: callback.toString(),
+            errorCallbackURL: failure.toString(),
+            metadata: { migrationClaim: true },
+          },
+        });
+        return json(request, { status: "verification-sent", expiresAt: reservation.expiresAt }, 202);
+      }
+      return json(request, reservation, 201);
+    } catch (error) {
+      return errorResponse(request, 400, "CLAIM_RESERVATION_REJECTED", error instanceof Error ? error.message : "Claim unavailable");
+    }
+  }
+
   if (url.pathname === "/api/v1/contact-invitations/claim" && request.method === "POST") {
     if (!config.smtp.enabled) {
       return errorResponse(request, 503, "EMAIL_NOT_CONFIGURED", "Email verification is unavailable");
@@ -186,9 +310,325 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     return new Response(response.body, { status: response.status, headers });
   }
 
+  if (url.pathname === "/api/v1/imports/splitwise/callback" && request.method === "GET") {
+    if (!splitwiseConnector) return errorResponse(request, 404, "NOT_FOUND", "Not found");
+    const state = url.searchParams.get("state") ?? "";
+    const code = url.searchParams.get("code") ?? "";
+    const destination = new URL(config.webOrigin);
+    if (!consumeImportMutation(`splitwise-callback:${publicRateKey(request)}`, 60, 60 * 60_000)) {
+      destination.hash = new URLSearchParams({ migration: "splitwise-auth-rate-limited" }).toString();
+      return new Response(null, { status: 303, headers: { ...securityHeaders(), Location: destination.toString(), "Cache-Control": "no-store" } });
+    }
+    try {
+      if (url.searchParams.has("error")) {
+        splitwiseConnector.deny(state);
+        destination.hash = new URLSearchParams({ migration: "splitwise-auth-cancelled" }).toString();
+      } else {
+        const completed = await splitwiseConnector.complete(state, code);
+        destination.hash = new URLSearchParams({ splitwiseSession: completed.sessionId }).toString();
+      }
+    } catch {
+      destination.hash = new URLSearchParams({ migration: "splitwise-auth-failed" }).toString();
+    }
+    return new Response(null, {
+      status: 303,
+      headers: {
+        ...securityHeaders(),
+        Location: destination.toString(),
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
   const actorOrResponse = await requireActor(request);
   if (actorOrResponse instanceof Response) return actorOrResponse;
   const actorId = actorOrResponse;
+
+  if (url.pathname === "/api/v1/imports" && request.method === "GET") {
+    return json(request, { imports: ledger.listImports(actorId) });
+  }
+
+  if (url.pathname === "/api/v1/imports/resolve-identities" && request.method === "POST") {
+    if (!consumeImportMutation(`import-identity:${actorId}`, 30, 60 * 60_000)) {
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many identity checks. Try again later.");
+    }
+    const body = await bodyJson<ImportIdentityResolutionRequest>(request, 200_000);
+    try {
+      return json(request, ledger.resolveImportIdentityTargets(actorId, body));
+    } catch (error) {
+      return errorResponse(request, 400, "IMPORT_IDENTITIES_INVALID", error instanceof Error ? error.message : "Identity check failed");
+    }
+  }
+
+  if (url.pathname === "/api/v1/imports/splitwise/start" && request.method === "POST") {
+    if (!splitwiseConnector) {
+      return errorResponse(
+        request,
+        403,
+        "SPLITWISE_APPROVAL_REQUIRED",
+        "Direct connection is unavailable until Splitwise grants written API approval.",
+      );
+    }
+    if (!consumeImportMutation(actorId, 10)) {
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many migration attempts. Try again later.");
+    }
+    return json(request, splitwiseConnector.start(actorId), 201);
+  }
+
+  if (url.pathname === "/api/v1/imports/splitwise/snapshot" && request.method === "POST") {
+    if (!splitwiseConnector) return errorResponse(request, 404, "NOT_FOUND", "Not found");
+    const body = await bodyJson<{ sessionId?: string }>(request, 2_000);
+    const sessionId = body.sessionId?.trim() ?? "";
+    if (!/^[0-9a-f-]{36}$/.test(sessionId)) {
+      return errorResponse(request, 400, "INVALID_SESSION", "Splitwise migration session is invalid");
+    }
+    try {
+      return json(request, { snapshot: await splitwiseConnector.snapshot(actorId, sessionId) });
+    } catch (error) {
+      return errorResponse(
+        request,
+        400,
+        "SPLITWISE_READ_FAILED",
+        error instanceof Error ? error.message : "Splitwise data could not be read",
+      );
+    }
+  }
+
+  if (url.pathname === "/api/v1/imports/splitwise/cancel" && request.method === "POST") {
+    if (!splitwiseConnector) return errorResponse(request, 404, "NOT_FOUND", "Not found");
+    const body = await bodyJson<{ sessionId?: string }>(request, 2_000);
+    const sessionId = body.sessionId?.trim() ?? "";
+    if (/^[0-9a-f-]{36}$/.test(sessionId)) splitwiseConnector.cancel(actorId, sessionId);
+    return json(request, { status: "cancelled" });
+  }
+
+  if (url.pathname === "/api/v1/imports/activate" && request.method === "POST") {
+    if (!consumeImportMutation(actorId, 10)) {
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many migration attempts. Try again later.");
+    }
+    const body = await bodyJson<ImportBatchCommitRequest>(request, 12_000_000);
+    try {
+      const result = await ledger.activateImport(actorId, body);
+      if (!result.duplicate) {
+        for (const memberId of ledger.activeMemberIdsForGroups(body.operations.map(({ groupId }) => groupId))) {
+          publish(memberId, ledger.latestSequenceFor(memberId));
+        }
+      }
+      return json(request, result, result.duplicate ? 200 : 201);
+    } catch (error) {
+      return errorResponse(
+        request,
+        400,
+        "IMPORT_REJECTED",
+        error instanceof Error ? error.message : "The migration could not be verified",
+      );
+    }
+  }
+
+  if (url.pathname === "/api/v1/imports/stage" && request.method === "POST") {
+    if (!consumeImportMutation(actorId, 30)) {
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many migration attempts. Try again later.");
+    }
+    const body = await bodyJson<ImportStageStartRequest>(request, 12_000_000);
+    try {
+      return json(request, ledger.startImportStage(actorId, body), 201);
+    } catch (error) {
+      return errorResponse(request, 400, "IMPORT_STAGE_REJECTED", error instanceof Error ? error.message : "Upload unavailable");
+    }
+  }
+
+  const importChunkMatch = /^\/api\/v1\/imports\/([^/]+)\/chunks$/.exec(url.pathname);
+  if (importChunkMatch && request.method === "POST") {
+    if (!consumeImportMutation(`import-chunk:${actorId}`, 1_000, 60 * 60_000)) {
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many migration chunks. Try again later.");
+    }
+    const body = await bodyJson<ImportStageChunkRequest>(request, 4_000_000);
+    try {
+      return json(request, await ledger.stageImportOperations(actorId, decodeURIComponent(importChunkMatch[1]!), body));
+    } catch (error) {
+      return errorResponse(request, 400, "IMPORT_CHUNK_REJECTED", error instanceof Error ? error.message : "Upload unavailable");
+    }
+  }
+
+  const importStageActivateMatch = /^\/api\/v1\/imports\/([^/]+)\/activate$/.exec(url.pathname);
+  if (importStageActivateMatch && request.method === "POST") {
+    const batchId = decodeURIComponent(importStageActivateMatch[1]!);
+    try {
+      const result = await ledger.activateImportStage(actorId, batchId);
+      if (!result.duplicate) {
+        for (const memberId of ledger.activeMemberIdsForGroups(ledger.groupIdsForImportBatch(actorId, batchId))) {
+          publish(memberId, ledger.latestSequenceFor(memberId));
+        }
+      }
+      return json(request, result, result.duplicate ? 200 : 201);
+    } catch (error) {
+      return errorResponse(request, 400, "IMPORT_REJECTED", error instanceof Error ? error.message : "Migration unavailable");
+    }
+  }
+
+  const importStageCancelMatch = /^\/api\/v1\/imports\/([^/]+)\/cancel$/.exec(url.pathname);
+  if (importStageCancelMatch && request.method === "POST") {
+    const cancelled = ledger.cancelImportStage(actorId, decodeURIComponent(importStageCancelMatch[1]!));
+    if (!cancelled) {
+      return errorResponse(request, 409, "IMPORT_CANCEL_TOO_LATE", "This upload is unavailable or already activating");
+    }
+    return json(request, { status: "cancelled" });
+  }
+
+  const importUndoStageStartMatch = /^\/api\/v1\/imports\/([^/]+)\/undo-stage$/.exec(url.pathname);
+  if (importUndoStageStartMatch && request.method === "POST") {
+    if (!consumeImportMutation(actorId, 10)) {
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many migration attempts. Try again later.");
+    }
+    const batchId = decodeURIComponent(importUndoStageStartMatch[1]!);
+    const body = await bodyJson<ImportUndoStageStartRequest>(request, 10_000);
+    try {
+      return json(request, ledger.startImportUndoStage(actorId, batchId, body), 201);
+    } catch (error) {
+      return errorResponse(request, 400, "IMPORT_UNDO_STAGE_REJECTED", error instanceof Error ? error.message : "Undo upload unavailable");
+    }
+  }
+
+  const importUndoChunkMatch = /^\/api\/v1\/imports\/([^/]+)\/undo-chunks$/.exec(url.pathname);
+  if (importUndoChunkMatch && request.method === "POST") {
+    if (!consumeImportMutation(`import-undo-chunk:${actorId}`, 1_000, 60 * 60_000)) {
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many undo chunks. Try again later.");
+    }
+    const batchId = decodeURIComponent(importUndoChunkMatch[1]!);
+    const body = await bodyJson<ImportUndoStageChunkRequest>(request, 4_000_000);
+    try {
+      return json(request, ledger.stageImportUndoOperations(actorId, batchId, body));
+    } catch (error) {
+      return errorResponse(request, 400, "IMPORT_UNDO_CHUNK_REJECTED", error instanceof Error ? error.message : "Undo upload unavailable");
+    }
+  }
+
+  const importUndoActivateMatch = /^\/api\/v1\/imports\/([^/]+)\/undo-activate$/.exec(url.pathname);
+  if (importUndoActivateMatch && request.method === "POST") {
+    const batchId = decodeURIComponent(importUndoActivateMatch[1]!);
+    try {
+      const result = await ledger.activateImportUndoStage(actorId, batchId);
+      if (!result.duplicate) {
+        for (const memberId of ledger.activeMemberIdsForGroups(ledger.groupIdsForImportBatch(actorId, batchId))) {
+          publish(memberId, ledger.latestSequenceFor(memberId));
+        }
+      }
+      return json(request, result);
+    } catch (error) {
+      return errorResponse(request, 400, "IMPORT_UNDO_REJECTED", error instanceof Error ? error.message : "Undo unavailable");
+    }
+  }
+
+  const importUndoCancelMatch = /^\/api\/v1\/imports\/([^/]+)\/undo-cancel$/.exec(url.pathname);
+  if (importUndoCancelMatch && request.method === "POST") {
+    const cancelled = ledger.cancelImportUndoStage(actorId, decodeURIComponent(importUndoCancelMatch[1]!));
+    if (!cancelled) return errorResponse(request, 409, "IMPORT_CANCEL_TOO_LATE", "This undo is unavailable or already activating");
+    return json(request, { status: "cancelled" });
+  }
+
+  const importUndoMatch = /^\/api\/v1\/imports\/([^/]+)\/undo$/.exec(url.pathname);
+  if (importUndoMatch && request.method === "POST") {
+    if (!consumeImportMutation(actorId, 10)) {
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many migration attempts. Try again later.");
+    }
+    const batchId = decodeURIComponent(importUndoMatch[1]!);
+    const body = await bodyJson<ImportUndoRequest>(request, 12_000_000);
+    try {
+      const result = await ledger.undoImport(actorId, batchId, body);
+      if (!result.duplicate) {
+        for (const memberId of ledger.activeMemberIdsForGroups(body.operations.map(({ groupId }) => groupId))) {
+          publish(memberId, ledger.latestSequenceFor(memberId));
+        }
+      }
+      return json(request, result);
+    } catch (error) {
+      return errorResponse(
+        request,
+        400,
+        "IMPORT_UNDO_REJECTED",
+        error instanceof Error ? error.message : "The migration could not be undone",
+      );
+    }
+  }
+
+  const importIdentitiesMatch = /^\/api\/v1\/imports\/([^/]+)\/identities$/.exec(url.pathname);
+  if (importIdentitiesMatch && request.method === "GET") {
+    const batchId = decodeURIComponent(importIdentitiesMatch[1]!);
+    return json(request, { identities: ledger.listImportIdentities(actorId, batchId) });
+  }
+
+  const importClaimLinkMatch = /^\/api\/v1\/imports\/([^/]+)\/identities\/([^/]+)\/claim-link$/.exec(url.pathname);
+  if (importClaimLinkMatch && request.method === "POST") {
+    if (!consumeImportMutation(actorId)) {
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many migration actions. Try again later.");
+    }
+    try {
+      const batchId = decodeURIComponent(importClaimLinkMatch[1]!);
+      const identityId = decodeURIComponent(importClaimLinkMatch[2]!);
+      const claim = ledger.createImportClaimLink(actorId, batchId, identityId);
+      const shareUrl = new URL(config.webOrigin);
+      shareUrl.hash = new URLSearchParams({ migrationClaim: claim.token }).toString();
+      return json(request, { identityId: claim.identityId, url: shareUrl.toString(), expiresAt: claim.expiresAt }, 201);
+    } catch (error) {
+      return errorResponse(request, 403, "CLAIM_LINK_REJECTED", error instanceof Error ? error.message : "Claim link unavailable");
+    }
+  }
+
+  if (url.pathname === "/api/v1/import-claims/claim" && request.method === "POST") {
+    if (!consumeImportMutation(actorId)) {
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many migration actions. Try again later.");
+    }
+    const body = await bodyJson<{ token?: string }>(request, 2_000);
+    const token = body.token?.trim() ?? "";
+    if (!validContactInviteToken(token)) {
+      return errorResponse(request, 400, "INVALID_CLAIM", "This migration claim link is invalid or expired");
+    }
+    try {
+      return json(request, ledger.claimImportedIdentity(actorId, token));
+    } catch (error) {
+      return errorResponse(request, 400, "CLAIM_REJECTED", error instanceof Error ? error.message : "Claim unavailable");
+    }
+  }
+
+  if (url.pathname === "/api/v1/import-claims/status" && request.method === "POST") {
+    const body = await bodyJson<{ requestId?: string }>(request, 2_000);
+    const requestId = body.requestId?.trim() ?? "";
+    if (!validContactInviteToken(requestId)) {
+      return errorResponse(request, 400, "INVALID_CLAIM_REQUEST", "Claim request is unavailable");
+    }
+    try {
+      return json(request, ledger.importClaimStatus(actorId, requestId));
+    } catch (error) {
+      return errorResponse(request, 404, "CLAIM_REQUEST_UNAVAILABLE", error instanceof Error ? error.message : "Claim request is unavailable");
+    }
+  }
+
+  const approveImportClaimMatch = /^\/api\/v1\/import-identities\/([^/]+)\/approve$/.exec(url.pathname);
+  if (approveImportClaimMatch && request.method === "POST") {
+    try {
+      return json(request, ledger.approveImportIdentityClaim(actorId, decodeURIComponent(approveImportClaimMatch[1]!)));
+    } catch (error) {
+      return errorResponse(request, 403, "CLAIM_APPROVAL_REJECTED", error instanceof Error ? error.message : "Claim unavailable");
+    }
+  }
+
+  const rejectImportClaimMatch = /^\/api\/v1\/import-identities\/([^/]+)\/reject$/.exec(url.pathname);
+  if (rejectImportClaimMatch && request.method === "POST") {
+    try {
+      return json(request, ledger.rejectImportIdentityClaim(actorId, decodeURIComponent(rejectImportClaimMatch[1]!)));
+    } catch (error) {
+      return errorResponse(request, 403, "CLAIM_REJECTION_REJECTED", error instanceof Error ? error.message : "Claim unavailable");
+    }
+  }
+
+  const sourceDataDeleteMatch = /^\/api\/v1\/imports\/([^/]+)\/source-data\/delete$/.exec(url.pathname);
+  if (sourceDataDeleteMatch && request.method === "POST") {
+    try {
+      return json(request, ledger.deleteImportSourceData(actorId, decodeURIComponent(sourceDataDeleteMatch[1]!)));
+    } catch (error) {
+      return errorResponse(request, 403, "SOURCE_DELETE_REJECTED", error instanceof Error ? error.message : "Source data unavailable");
+    }
+  }
 
   if (url.pathname === "/api/v1/contact-invitations" && request.method === "POST") {
     const invitation = contactInvites.create(actorId);
@@ -504,7 +944,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
 const server = Bun.serve({
   hostname: config.host,
   port: config.port,
-  maxRequestBodySize: 1_000_000,
+  maxRequestBodySize: 16_000_000,
   idleTimeout: 60,
   async fetch(request) {
     try {
@@ -536,6 +976,7 @@ const server = Bun.serve({
 console.info(`Tallied API listening on ${server.url}`);
 
 function shutdown(): void {
+  clearInterval(importCleanupTimer);
   stopEmailWorker();
   server.stop(true);
   db.close();

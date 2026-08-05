@@ -5,6 +5,7 @@ import { magicLink } from "better-auth/plugins/magic-link";
 import type { AppConfig } from "./config";
 import type { ContactInviteStore } from "./contact-invites";
 import { enqueueEmail } from "./email";
+import { keyedDigest } from "./security-keys";
 
 function emailKey(kind: string, recipient: string, token: string): string {
   return createHash("sha256").update(`${kind}:${recipient}:${token}`).digest("hex");
@@ -25,6 +26,32 @@ export function deriveDisplayNameFromEmail(email: string): string {
   const words = localPart.replace(/[._+-]+/g, " ").trim().split(/\s+/).filter(Boolean);
   const displayName = words.map((word) => word.slice(0, 1).toUpperCase() + word.slice(1)).join(" ");
   return (displayName || "Friend").slice(0, 100);
+}
+
+export function canCreateTalliedAccount(
+  db: Database,
+  config: AppConfig,
+  contactInvites: ContactInviteStore,
+  email: string,
+): boolean {
+  const normalized = email.trim().toLowerCase();
+  if (normalized === config.ownerEmail) return true;
+  const existingUser = db.query<{ one: number }, [string]>(
+    `SELECT 1 AS one FROM "user" WHERE lower(email) = ? LIMIT 1`,
+  ).get(normalized);
+  if (existingUser) return true;
+  const now = new Date().toISOString();
+  const reservedImportClaim = db.query<{ one: number }, [string, string, string]>(
+    `SELECT 1 AS one FROM imported_identities
+     WHERE status = 'reserved' AND reserved_email_hash = ?
+       AND reservation_expires_at > ? AND claim_expires_at > ?
+     LIMIT 1`,
+  ).get(keyedDigest(config.authSecret, "identity-email", normalized), now, now);
+  return Boolean(
+    db.query<{ one: number }, [string]>(
+      "SELECT 1 AS one FROM group_members WHERE lower(email) = ? AND status = 'placeholder' LIMIT 1",
+    ).get(normalized) || contactInvites.canCreateAccount(normalized) || reservedImportClaim,
+  );
 }
 
 function claimPendingInvitations(
@@ -56,19 +83,7 @@ function claimPendingInvitations(
 
 export function createAuth(db: Database, config: AppConfig, contactInvites: ContactInviteStore) {
   const ownerEmail = config.ownerEmail;
-  const canCreateAccount = (email: string): boolean => {
-    const normalized = email.trim().toLowerCase();
-    if (normalized === ownerEmail) return true;
-    const existingUser = db.query<{ one: number }, [string]>(
-      `SELECT 1 AS one FROM "user" WHERE lower(email) = ? LIMIT 1`,
-    ).get(normalized);
-    if (existingUser) return true;
-    return Boolean(
-      db.query<{ one: number }, [string]>(
-        "SELECT 1 AS one FROM group_members WHERE lower(email) = ? AND status = 'placeholder' LIMIT 1",
-      ).get(normalized) || contactInvites.canCreateAccount(normalized),
-    );
-  };
+  const canCreateAccount = (email: string): boolean => canCreateTalliedAccount(db, config, contactInvites, email);
   return betterAuth({
     appName: "Tallied",
     database: db,
@@ -103,6 +118,7 @@ export function createAuth(db: Database, config: AppConfig, contactInvites: Cont
           const contactInvitationId = typeof metadata?.contactInvitationId === "string"
             ? metadata.contactInvitationId
             : "";
+          const migrationClaim = metadata?.migrationClaim === true;
           const invitation = invitationId
             ? db.query<{ groupName: string; inviterName: string }, [string, string]>(
                 `SELECT g.name AS groupName, COALESCE(u.name, 'A friend') AS inviterName
@@ -115,17 +131,23 @@ export function createAuth(db: Database, config: AppConfig, contactInvites: Cont
           const contactInvitation = contactInvitationId
             ? contactInvites.invitationContext(contactInvitationId, email)
             : null;
-          const subject = contactInvitation
+          const subject = migrationClaim
+            ? "Claim your imported Splitwise history on Tallied"
+            : contactInvitation
             ? `${contactInvitation.inviterName} invited you to Tallied`
             : invitation
             ? `${invitation.inviterName} invited you to ${invitation.groupName}`
             : "Your secure Tallied sign-in link";
-          const text = contactInvitation
+          const text = migrationClaim
+            ? `Open this single-use link to verify your email, sign in, and review your imported-history claim: ${url}`
+            : contactInvitation
             ? `${contactInvitation.inviterName} invited you to connect on Tallied. Open this single-use link to verify your email, join, and sign in: ${url}`
             : invitation
             ? `${invitation.inviterName} invited you to join ${invitation.groupName} on Tallied. Open this single-use link to join and sign in: ${url}`
             : `Open this single-use link to sign in to Tallied: ${url}`;
-          const html = contactInvitation
+          const html = migrationClaim
+            ? `<p>Verify your email to review an imported-history claim on Tallied.</p><p><a href="${escapeHtml(url)}">Continue to Tallied</a></p><p>This single-use link expires in 10 minutes. No balances are revealed until the claim is securely connected.</p>`
+            : contactInvitation
             ? `<p><strong>${escapeHtml(contactInvitation.inviterName)}</strong> invited you to connect on Tallied.</p><p><a href="${escapeHtml(url)}">Join Tallied</a></p><p>This single-use link verifies your email and signs you in. It expires in 10 minutes.</p>`
             : invitation
             ? `<p><strong>${escapeHtml(invitation.inviterName)}</strong> invited you to join <strong>${escapeHtml(invitation.groupName)}</strong> on Tallied.</p><p><a href="${escapeHtml(url)}">Join ${escapeHtml(invitation.groupName)}</a></p><p>This single-use link verifies your email and signs you in. It expires in 10 minutes.</p>`

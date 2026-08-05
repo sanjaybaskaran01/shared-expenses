@@ -22,6 +22,7 @@ describe("server-blind confidential ledger storage", () => {
     db = new Database(":memory:", { strict: true });
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/001_domain.sql"), "utf8"));
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/004_confidential_sync.sql"), "utf8"));
+    db.exec(readFileSync(resolve(import.meta.dir, "../migrations/005_imports.sql"), "utf8"));
     db.exec(`
       INSERT INTO groups(id, name, settlement_currency, created_by, created_at)
       VALUES ('group-1', 'Private group', 'USD', 'alice', '2026-07-28T12:00:00.000Z');

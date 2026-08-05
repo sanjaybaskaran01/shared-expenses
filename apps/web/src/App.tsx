@@ -7,6 +7,7 @@ import ChevronRight from "lucide-solid/icons/chevron-right";
 import CircleUserRound from "lucide-solid/icons/circle-user-round";
 import Cloud from "lucide-solid/icons/cloud";
 import CloudOff from "lucide-solid/icons/cloud-off";
+import DatabaseBackup from "lucide-solid/icons/database-backup";
 import Coffee from "lucide-solid/icons/coffee";
 import House from "lucide-solid/icons/house";
 import LockKeyhole from "lucide-solid/icons/lock-keyhole";
@@ -25,6 +26,7 @@ import Ticket from "lucide-solid/icons/ticket";
 import Utensils from "lucide-solid/icons/utensils";
 import UsersRound from "lucide-solid/icons/users-round";
 import UserPlus from "lucide-solid/icons/user-plus";
+import X from "lucide-solid/icons/x";
 import {
   For,
   Match,
@@ -36,6 +38,7 @@ import {
   createResource,
   createSignal,
   lazy,
+  onCleanup,
   onMount,
 } from "solid-js";
 import { BrandMark } from "./components/BrandMark";
@@ -57,9 +60,14 @@ import {
 } from "./components/ui";
 import {
   acceptCurrentContactInvitation,
+  claimImportedIdentity,
   claimContactInvitation,
   getAuthCapabilities,
   getContacts,
+  getImportClaimStatus,
+  previewImportClaim,
+  requestImportClaimMagicLink,
+  reserveImportClaim,
 } from "./lib/api";
 import {
   authClient,
@@ -69,7 +77,7 @@ import {
 import { clearInviteToken, inviteTokenFromHash } from "./lib/contact-invites";
 import { paymentActivityDetails } from "./lib/activity-view";
 import { developmentIdentity } from "./lib/development-actor";
-import type { LocalExpense, LocalOperation } from "./lib/db";
+import { localDb, type LocalExpense, type LocalOperation } from "./lib/db";
 import {
   decideExpenseLaunch,
   decideGroupCreationDestination,
@@ -88,7 +96,21 @@ import {
 } from "./lib/ledger-view";
 import { appStore, changeGroupCurrency, initializeStore, restoreExpense } from "./lib/store";
 
+const MigrationDialog = lazy(() =>
+  import("./components/MigrationDialog").then((module) => ({ default: module.MigrationDialog })),
+);
+
 type Tab = "overview" | "groups" | "activity" | "account";
+
+function migrationClaimFromHash(hash = window.location.hash): string | undefined {
+  if (!hash.startsWith("#")) return undefined;
+  const token = new URLSearchParams(hash.slice(1)).get("migrationClaim")?.trim();
+  return token && /^[A-Za-z0-9_-]{43}$/.test(token) ? token : undefined;
+}
+
+function clearLocationHash(): void {
+  history.replaceState(history.state, "", `${location.pathname}${location.search}`);
+}
 type Theme = "system" | "light" | "dark";
 const SpendingChart = lazy(() =>
   import("./components/SpendingChart").then((module) => ({
@@ -882,6 +904,10 @@ const activityCopy: Partial<Record<LocalOperation["type"], string>> = {
   CommentAdded: "commented",
   PaymentRecorded: "recorded a payment",
   PaymentReversed: "reversed a payment",
+  ImportedTransactionRecorded: "imported a balance adjustment",
+  ImportedTransactionVoided: "removed an imported adjustment",
+  OpeningBalanceCreated: "added an opening balance",
+  OpeningBalanceVoided: "removed an opening balance",
   GroupCreated: "created a group",
   GroupCurrencyChanged: "changed the group currency",
   GroupMemberAdded: "added a member",
@@ -943,6 +969,13 @@ function ActivityView(props: {
               <For each={day.operations}>{(operation) => {
                 const expense = createMemo(() => appStore.expenses().find((item) => item.id === operation.targetId));
                 const payment = createMemo(() => paymentActivityDetails(operation));
+                const imported = createMemo(() => {
+                  if (operation.type !== "ImportedTransactionRecorded" && operation.type !== "OpeningBalanceCreated") return undefined;
+                  const payload = operation.payload as { description?: unknown; amountMinor?: unknown; currency?: unknown };
+                  return typeof payload.description === "string" && Number.isSafeInteger(payload.amountMinor) && typeof payload.currency === "string"
+                    ? { description: payload.description, amountMinor: Number(payload.amountMinor), currency: payload.currency }
+                    : undefined;
+                });
                 const group = createMemo(() => appStore.groups().find((item) => item.id === operation.groupId));
                 const actor = createMemo(() => operation.actorId === props.actorId ? "You" : memberName(operation.groupId, operation.actorId, props.actorId));
                 return <article class="activity-row">
@@ -950,7 +983,7 @@ function ActivityView(props: {
                   <Show when={expense()} fallback={
                     <div class="activity-row-main min-h-11">
                       <strong>{actor()} {activityCopy[operation.type] ?? "updated the group"}</strong>
-                      <span>{payment() ? `${memberName(operation.groupId, payment()!.payerId, props.actorId)} paid ${memberName(operation.groupId, payment()!.recipientId, props.actorId)} · ${group()?.name ?? "Shared group"}${payment()!.note ? ` · ${payment()!.note}` : ""}` : group()?.name ?? "Shared group"}</span>
+                      <span>{payment() ? `${memberName(operation.groupId, payment()!.payerId, props.actorId)} paid ${memberName(operation.groupId, payment()!.recipientId, props.actorId)} · ${group()?.name ?? "Shared group"}${payment()!.note ? ` · ${payment()!.note}` : ""}` : imported() ? `${imported()!.description} · ${group()?.name ?? "Shared group"}` : group()?.name ?? "Shared group"}</span>
                       <time>{new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(operation.clientTimestamp))}</time>
                     </div>
                   }>{(item) => <button type="button" class="activity-row-main min-h-11" onClick={() => props.onOpenExpense(item())}>
@@ -959,8 +992,8 @@ function ActivityView(props: {
                     <time>{new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(operation.clientTimestamp))}</time>
                   </button>}</Show>
                   <div class="activity-row-value">
-                    <Show when={expense()} fallback={<Show when={payment()}>{(item) => <><strong>{money(item().amountMinor, item().currency)}</strong><span class="activity-payment-label">payment</span></>}</Show>}>{(item) => <strong>{money(item().amountMinor, item().currency)}</strong>}</Show>
-                    <Show when={operation.type === "ExpenseVoided" && expense()?.status === "voided"}>
+                    <Show when={expense()} fallback={<Show when={payment()} fallback={<Show when={imported()}>{(item) => <><strong>{money(item().amountMinor, item().currency)}</strong><span class="activity-payment-label">imported</span></>}</Show>}>{(item) => <><strong>{money(item().amountMinor, item().currency)}</strong><span class="activity-payment-label">payment</span></>}</Show>}>{(item) => <strong>{money(item().amountMinor, item().currency)}</strong>}</Show>
+                    <Show when={operation.type === "ExpenseVoided" && expense()?.status === "voided" && !expense()?.readOnly}>
                       <button class="min-h-11 px-2" onClick={() => expense() && void restore(expense()!)}>Restore</button>
                     </Show>
                   </div>
@@ -975,7 +1008,7 @@ function ActivityView(props: {
   );
 }
 
-function AccountView(props: { displayName: string; email: string | undefined }) {
+function AccountView(props: { displayName: string; email: string | undefined; onOpenMigration(): void }) {
   const [theme, setTheme] = createSignal<Theme>(
     (localStorage.getItem("expenses-theme") as Theme | null) ?? "system",
   );
@@ -1014,6 +1047,11 @@ function AccountView(props: { displayName: string; email: string | undefined }) 
           </p>
         </Show>
       </Card>
+      <button class="migration-account-card" type="button" onClick={props.onOpenMigration}>
+        <span class="category-icon"><DatabaseBackup size={18} /></span>
+        <span class="min-w-0 flex-1 text-left"><strong class="block text-sm">Move from Splitwise</strong><small class="mt-0.5 block text-xs text-muted-foreground">Review balances before anything changes</small></span>
+        <ChevronRight size={16} class="text-muted-foreground" />
+      </button>
       <Card class="overflow-hidden">
         <SectionHeading title="Appearance" detail="Optimized for iPhone" />
         <div class="grid grid-cols-3 gap-2 p-4">
@@ -1092,6 +1130,9 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
   const [groupComposerOrigin, setGroupComposerOrigin] =
     createSignal<GroupComposerOrigin>("groups");
   const [paymentOpen, setPaymentOpen] = createSignal(false);
+  const [migrationOpen, setMigrationOpen] = createSignal(false);
+  const [migrationLaunchMessage, setMigrationLaunchMessage] = createSignal<string>();
+  const [splitwiseSession, setSplitwiseSession] = createSignal<string>();
   const [selectedGroupId, setSelectedGroupId] = createSignal<string>();
   const [selectedExpense, setSelectedExpense] = createSignal<LocalExpense>();
   const [editingExpense, setEditingExpense] = createSignal<LocalExpense>();
@@ -1106,6 +1147,12 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
     inviteTokenFromHash() ? "accepting" : "idle",
   );
   const [inviteRecoveryMessage, setInviteRecoveryMessage] = createSignal("");
+  const [migrationClaimMessage, setMigrationClaimMessage] = createSignal("");
+  const [migrationClaimPending, setMigrationClaimPending] = createSignal(Boolean(migrationClaimFromHash()));
+  const [migrationClaimBusy, setMigrationClaimBusy] = createSignal(false);
+  const claimRequestStorageKey = `tallied:migration-claim-request:${props.actorId}`;
+  const migrationOnboardingKey = `migration-onboarding-shown:${props.actorId}`;
+  let migrationOnboardingChecked = false;
   let toastTimer = 0;
   async function acceptPendingInvitation(): Promise<void> {
     const invitationToken = inviteTokenFromHash();
@@ -1125,16 +1172,92 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
       setInviteRecoveryMessage(error instanceof Error ? error.message : "Could not verify this invitation");
     }
   }
+  async function acceptPendingMigrationClaim(): Promise<void> {
+    const token = migrationClaimFromHash();
+    if (!token) return;
+    setMigrationClaimBusy(true);
+    setMigrationClaimMessage("Claiming your imported history…");
+    try {
+      const result = await claimImportedIdentity(token);
+      clearLocationHash();
+      setMigrationClaimPending(false);
+      if (result.status === "claimed") {
+        setMigrationClaimMessage(`${result.displayName}'s imported history is now connected to your account.`);
+        await appStore.sync();
+      } else {
+        if (result.requestId) localStorage.setItem(claimRequestStorageKey, result.requestId);
+        setMigrationClaimMessage(`Request sent. The migration owner must confirm that you are ${result.displayName}. No balances are visible yet.`);
+      }
+    } catch (error) {
+      setMigrationClaimMessage(error instanceof Error ? error.message : "This migration claim could not be completed");
+    } finally {
+      setMigrationClaimBusy(false);
+    }
+  }
+  async function refreshMigrationClaimRequest(): Promise<void> {
+    const requestId = localStorage.getItem(claimRequestStorageKey);
+    if (!requestId) return;
+    try {
+      const result = await getImportClaimStatus(requestId);
+      if (result.status === "awaiting_owner") {
+        setMigrationClaimMessage(`Your request to claim ${result.displayName}'s imported history is waiting for the migration owner. No balances are visible yet.`);
+      } else if (result.status === "claimed") {
+        localStorage.removeItem(claimRequestStorageKey);
+        setMigrationClaimMessage(`${result.displayName}'s imported history is now connected to your account.`);
+        await appStore.sync();
+      } else {
+        localStorage.removeItem(claimRequestStorageKey);
+        setMigrationClaimMessage(result.status === "rejected" ? "The migration owner did not approve this claim." : "This claim request expired. Ask the migration owner for a new link.");
+      }
+    } catch {
+      setMigrationClaimMessage("Your imported-history claim is saved on this device. Reconnect to check its status.");
+    }
+  }
   onMount(() => {
     applyTheme(
       (localStorage.getItem("expenses-theme") as Theme | null) ?? "system",
     );
     void initializeStore(props.actorId);
     if (inviteTokenFromHash()) void acceptPendingInvitation();
+    if (migrationClaimFromHash()) {
+      setMigrationClaimMessage(`Review this claim before continuing${props.email ? ` as ${props.email}` : ""}. It can join this account to imported groups; members will see your verified identity.`);
+    }
+    void refreshMigrationClaimRequest();
+    const migrationHash = new URLSearchParams(location.hash.startsWith("#") ? location.hash.slice(1) : "");
+    const oauthSession = migrationHash.get("splitwiseSession")?.trim();
+    if (oauthSession && /^[0-9a-f-]{36}$/.test(oauthSession)) {
+      setSplitwiseSession(oauthSession);
+      setMigrationOpen(true);
+    } else if (migrationHash.get("migration")?.startsWith("splitwise-auth-")) {
+      const outcome = migrationHash.get("migration");
+      setMigrationLaunchMessage(outcome === "splitwise-auth-rate-limited"
+        ? "Too many authorization callbacks arrived. Nothing was imported; wait a moment, then try again."
+        : outcome === "splitwise-auth-cancelled"
+          ? "Splitwise connection was cancelled. Nothing was imported; you can choose another route."
+          : "Splitwise did not authorize this migration. Nothing was imported; you can try again or upload exports instead.");
+      setMigrationOpen(true);
+      clearLocationHash();
+    }
   });
+  const claimStatusTimer = window.setInterval(() => void refreshMigrationClaimRequest(), 30_000);
+  onCleanup(() => window.clearInterval(claimStatusTimer));
   createEffect(() => {
     if (!selectedGroupId() && appStore.groups()[0])
       setSelectedGroupId(appStore.groups()[0]!.id);
+  });
+  createEffect(() => {
+    if (migrationOnboardingChecked || appStore.connection() === "connecting") return;
+    migrationOnboardingChecked = true;
+    if (import.meta.env.DEV && new URLSearchParams(location.search).has("scenarioActor")) return;
+    if (inviteTokenFromHash() || migrationClaimFromHash() || splitwiseSession()) return;
+    void Promise.all([
+      localDb.settings.get(migrationOnboardingKey),
+      localDb.operations.count(),
+    ]).then(async ([shown, operationCount]) => {
+      if (shown || operationCount > 0) return;
+      await localDb.settings.put({ key: migrationOnboardingKey, value: true });
+      setMigrationOpen(true);
+    });
   });
   createEffect(() => {
     const selected = selectedExpense();
@@ -1331,6 +1454,21 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
               <Show when={inviteRecovery() === "waiting"}><Button variant="secondary" onClick={() => void acceptPendingInvitation()}>Retry</Button></Show>
             </section>
           </Show>
+          <Show when={migrationClaimMessage()}>
+            <section class="invite-recovery-banner" role="status" aria-live="polite">
+              <div><strong>Imported history</strong><p>{migrationClaimMessage()}</p></div>
+              <Show when={migrationClaimPending()} fallback={<button class="icon-button" aria-label="Dismiss imported history message" onClick={() => setMigrationClaimMessage("")}><X size={17} /></button>}>
+                <div class="flex flex-wrap gap-2">
+                  <Button disabled={migrationClaimBusy()} onClick={() => void acceptPendingMigrationClaim()}>{migrationClaimBusy() ? "Checking…" : "Continue claim"}</Button>
+                  <Button variant="secondary" disabled={migrationClaimBusy()} onClick={() => {
+                    clearLocationHash();
+                    setMigrationClaimPending(false);
+                    setMigrationClaimMessage("");
+                  }}>Not now</Button>
+                </div>
+              </Show>
+            </section>
+          </Show>
           <Switch>
             <Match when={tab() === "overview"}>
               <OverviewView
@@ -1372,7 +1510,7 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
               />
             </Match>
             <Match when={tab() === "account"}>
-              <AccountView displayName={displayName()} email={props.email} />
+              <AccountView displayName={displayName()} email={props.email} onOpenMigration={() => setMigrationOpen(true)} />
             </Match>
           </Switch>
         </main>
@@ -1475,6 +1613,24 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
           notify("Group created");
         }}
       />
+      <Show when={migrationOpen()}>
+        <MigrationDialog
+          open={migrationOpen()}
+          onOpenChange={(open) => {
+            setMigrationOpen(open);
+            if (!open) setMigrationLaunchMessage(undefined);
+          }}
+          actorId={props.actorId}
+          displayName={displayName()}
+          {...(migrationLaunchMessage() ? { launchMessage: migrationLaunchMessage()! } : {})}
+          {...(splitwiseSession() ? { splitwiseSession: splitwiseSession()! } : {})}
+          onSplitwiseSessionConsumed={() => {
+            setSplitwiseSession(undefined);
+            history.replaceState(history.state, "", `${location.pathname}${location.search}`);
+          }}
+          onComplete={notify}
+        />
+      </Show>
     </div>
   );
 }
@@ -1493,6 +1649,7 @@ function GoogleMark() {
 function AuthScreen() {
   const search = new URLSearchParams(location.search);
   const invitationToken = inviteTokenFromHash();
+  const migrationClaimToken = migrationClaimFromHash();
   const initialAuthFailed = search.get("auth") === "failed";
   const [email, setEmail] = createSignal(
     search.get("email") ?? "",
@@ -1506,6 +1663,7 @@ function AuthScreen() {
     initialAuthFailed ? "error" : "status",
   );
   const [busy, setBusy] = createSignal<"google" | "email" | null>(null);
+  let emailInputRef: HTMLInputElement | undefined;
   const [capabilities] = createResource(async () => {
     try {
       return await getAuthCapabilities();
@@ -1513,17 +1671,33 @@ function AuthScreen() {
       return { google: false, magicLink: true };
     }
   });
+  const [migrationPreview] = createResource(
+    () => migrationClaimToken,
+    async (token) => previewImportClaim(token),
+  );
 
   async function signInWithGoogle() {
     setBusy("google");
     setMessage("");
     setMessageTone("status");
     try {
+      if (migrationClaimToken) {
+        if (!emailInputRef?.checkValidity()) {
+          setMessageTone("error");
+          setMessage("Enter the email address you will use with Google first.");
+          emailInputRef?.focus();
+          return;
+        }
+        await reserveImportClaim(migrationClaimToken, email().trim());
+      }
+      const claimFailureUrl = migrationClaimToken
+        ? `${location.origin}/?auth=failed#${new URLSearchParams({ migrationClaim: migrationClaimToken })}`
+        : `${location.origin}/?auth=failed`;
       const result = await authClient.signIn.social({
         provider: "google",
-        callbackURL: location.origin,
-        newUserCallbackURL: location.origin,
-        errorCallbackURL: `${location.origin}/?auth=failed`,
+        callbackURL: migrationClaimToken ? location.href : location.origin,
+        newUserCallbackURL: migrationClaimToken ? location.href : location.origin,
+        errorCallbackURL: claimFailureUrl,
       });
       if (result.error) {
         setMessageTone("error");
@@ -1539,6 +1713,12 @@ function AuthScreen() {
 
   async function requestLink(event: SubmitEvent) {
     event.preventDefault();
+    if (migrationClaimToken && !emailInputRef?.checkValidity()) {
+      setMessageTone("error");
+      setMessage("Enter a valid email address first.");
+      emailInputRef?.focus();
+      return;
+    }
     setBusy("email");
     setMessage("");
     setMessageTone("status");
@@ -1548,10 +1728,15 @@ function AuthScreen() {
         setMessage("Check your inbox — the verification link signs you in and connects you to your inviter.");
         return;
       }
+      if (migrationClaimToken) {
+        await requestImportClaimMagicLink(migrationClaimToken, email().trim());
+        setMessage("Check your inbox — the link verifies this email and returns you to the claim review.");
+        return;
+      }
       const result = await authClient.signIn.magicLink({
         email: email().trim(),
-        callbackURL: location.origin,
-        newUserCallbackURL: location.origin,
+        callbackURL: migrationClaimToken ? location.href : location.origin,
+        newUserCallbackURL: migrationClaimToken ? location.href : location.origin,
         errorCallbackURL: `${location.origin}/?auth=failed`,
       });
       setMessageTone(result.error ? "error" : "status");
@@ -1580,18 +1765,48 @@ function AuthScreen() {
           <span class="mb-5 grid size-11 place-items-center rounded-2xl bg-primary/10 text-primary">
             <LockKeyhole size={19} />
           </span>
-          <h1 class="text-2xl font-semibold tracking-tight">{invitationToken ? "You’re invited" : "Welcome back"}</h1>
+          <h1 class="text-2xl font-semibold tracking-tight">{invitationToken ? "You’re invited" : migrationClaimToken ? "Claim your history" : "Welcome back"}</h1>
           <p class="mt-2 text-sm leading-6 text-muted-foreground">
             {invitationToken
               ? "Verify the email you want to use. The invitation is bound to that identity before anyone is shown as joined."
+              : migrationClaimToken
+                ? migrationPreview()
+                  ? "Someone moved Splitwise history to Tallied. Sign in to claim it securely."
+                  : migrationPreview.error
+                    ? "This private claim link is invalid or expired. Ask the migration owner for a new one."
+                    : "Checking this private claim link…"
               : "Sign in with the Google account or email address that was invited."}
           </p>
+          <Show when={migrationPreview()}>
+            <p class="mt-3 text-xs text-muted-foreground">
+              Single-use link · expires {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(migrationPreview()!.expiresAt))}
+            </p>
+          </Show>
+          <Show when={migrationClaimToken}>
+            <label class="mt-5 grid gap-2 text-sm font-medium">
+              Email you will verify
+              <div class="relative">
+                <Mail class="absolute left-3 top-3 text-muted-foreground" size={17} />
+                <input
+                  ref={emailInputRef}
+                  class="form-control h-12 pl-9"
+                  required
+                  type="email"
+                  autocomplete="email"
+                  value={email()}
+                  onInput={(event) => setEmail(event.currentTarget.value)}
+                  placeholder="you@example.com"
+                />
+              </div>
+              <span class="text-xs font-normal leading-5 text-muted-foreground">Use the same address for Google or the email link. Claiming can join this account to imported groups; members will see your verified identity. Tallied records balances—it does not move money.</span>
+            </label>
+          </Show>
           <Show when={capabilities()?.google && !invitationToken}>
             <Button
               class="mt-6 h-12 w-full rounded-xl"
               type="button"
               variant="secondary"
-              disabled={busy() !== null}
+              disabled={busy() !== null || Boolean(migrationClaimToken && !migrationPreview())}
               onClick={() => void signInWithGoogle()}
             >
               <GoogleMark />
@@ -1605,30 +1820,30 @@ function AuthScreen() {
             </p>
           }>
           <form class="mt-6 grid gap-4" onSubmit={requestLink}>
-            <label class="grid gap-2 text-sm font-medium">
-              Email address
-              <div class="relative">
-                <Mail
-                  class="absolute left-3 top-3 text-muted-foreground"
-                  size={17}
-                />
-                <input
-                  class="form-control h-12 pl-9"
-                  required
-                  type="email"
-                  autocomplete="email"
-                  value={email()}
-                  onInput={(event) => setEmail(event.currentTarget.value)}
-                  placeholder="you@example.com"
-                />
-              </div>
-            </label>
+            <Show when={!migrationClaimToken}>
+              <label class="grid gap-2 text-sm font-medium">
+                Email address
+                <div class="relative">
+                  <Mail class="absolute left-3 top-3 text-muted-foreground" size={17} />
+                  <input
+                    ref={emailInputRef}
+                    class="form-control h-12 pl-9"
+                    required
+                    type="email"
+                    autocomplete="email"
+                    value={email()}
+                    onInput={(event) => setEmail(event.currentTarget.value)}
+                    placeholder="you@example.com"
+                  />
+                </div>
+              </label>
+            </Show>
             <Button
               class="h-12 w-full rounded-xl"
               type="submit"
-              disabled={busy() !== null}
+              disabled={busy() !== null || Boolean(migrationClaimToken && !migrationPreview())}
             >
-              {busy() === "email" ? "Sending…" : invitationToken ? "Verify email and join" : "Email me a sign-in link"}
+              {busy() === "email" ? "Sending…" : invitationToken ? "Verify email and join" : migrationClaimToken ? "Verify with email" : "Email me a sign-in link"}
             </Button>
           </form>
           </Show>
@@ -1642,7 +1857,7 @@ function AuthScreen() {
             </p>
           </Show>
           <p class="mt-5 text-center text-xs text-muted-foreground">
-            Private · Passwordless · Offline-ready
+            Access-controlled · Passwordless · Offline-ready
           </p>
         </Card>
       </div>

@@ -47,6 +47,24 @@ describe("ledger presentation", () => {
     expect(result).toEqual({ a: 3000, b: -1000, c: -2000 });
   });
 
+  test("applies balance-only imports without treating them as expenses", () => {
+    const imported = {
+      ...payment,
+      id: "imported-effect-operation",
+      type: "ImportedTransactionRecorded",
+      targetId: "imported-effect-1",
+      payload: {
+        currency: "USD",
+        effects: [
+          { participantId: "a", amountMinor: 750 },
+          { participantId: "import:mira", amountMinor: -750 },
+        ],
+        import: { readOnly: true },
+      },
+    } satisfies LocalOperation;
+    expect(computeBalances([], [imported], "group-1", "USD")).toEqual({ a: 750, "import:mira": -750 });
+  });
+
   test("reduces balances to a deterministic settlement plan", () => {
     expect(simplifyBalances({ a: 3000, b: -1000, c: -2000 })).toEqual([
       { payerId: "c", recipientId: "a", amountMinor: 2000 },

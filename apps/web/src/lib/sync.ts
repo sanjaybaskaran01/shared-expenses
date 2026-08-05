@@ -15,6 +15,9 @@ export function expenseFromOperation(
   const allocations = payload.allocations as Array<{ participantId: string; amountMinor: number }>;
   const paid = payers.find(({ participantId }) => participantId === currentActorId)?.amountMinor ?? 0;
   const owed = allocations.find(({ participantId }) => participantId === currentActorId)?.amountMinor ?? 0;
+  const importMetadata = payload.import && typeof payload.import === "object" && !Array.isArray(payload.import)
+    ? payload.import as Record<string, JsonValue>
+    : undefined;
   return {
     id: operation.targetId,
     groupId: operation.groupId,
@@ -28,11 +31,16 @@ export function expenseFromOperation(
     payers,
     allocations,
     yourNetMinor: paid - owed,
-    status: "active",
+    status: importMetadata?.sourceDeleted === true ? "voided" : "active",
     version: operation.baseVersion + 1,
     createdBy: originalCreatedBy ?? operation.actorId,
     updatedAt: operation.receivedAt ?? operation.clientTimestamp,
     syncStatus,
+    ...(importMetadata?.readOnly === true ? { readOnly: true } : {}),
+    ...(typeof importMetadata?.importBatchId === "string" ? { importBatchId: importMetadata.importBatchId } : {}),
+    ...(typeof importMetadata?.importedByDisplayName === "string" ? { importedByDisplayName: importMetadata.importedByDisplayName } : {}),
+    ...(typeof importMetadata?.importedAt === "string" ? { importedAt: importMetadata.importedAt } : {}),
+    ...(typeof importMetadata?.sourceProvider === "string" ? { sourceProvider: importMetadata.sourceProvider } : {}),
   };
 }
 
@@ -42,36 +50,50 @@ export function remoteProjectionSyncStatus(
   return currentStatus === "conflicted" || currentStatus === "rejected" ? currentStatus : "accepted";
 }
 
-async function applyRemote(operation: OperationEnvelope, currentActorId: string): Promise<void> {
-  const localOperation: LocalOperation = { ...operation, syncStatus: "accepted" };
-  await localDb.operations.put(localOperation);
-  const existingExpense = await localDb.expenses.get(operation.targetId);
-  const projectionStatus = remoteProjectionSyncStatus(existingExpense?.syncStatus);
-  const expense = expenseFromOperation(operation, projectionStatus, currentActorId, existingExpense?.createdBy);
-  if (expense) await localDb.expenses.put(expense);
-  if (operation.type === "ExpenseVoided") {
-    await localDb.expenses.update(operation.targetId, {
-      status: "voided",
-      version: operation.baseVersion + 1,
-      updatedAt: operation.receivedAt ?? operation.clientTimestamp,
-      syncStatus: projectionStatus,
+async function applyRemoteBatch(operations: readonly OperationEnvelope[], currentActorId: string): Promise<void> {
+  if (operations.length === 0) return;
+  await localDb.transaction("rw", localDb.operations, localDb.expenses, localDb.groups, async () => {
+    await localDb.operations.bulkPut(operations.map((operation): LocalOperation => ({
+      ...operation,
+      syncStatus: "accepted",
+    })));
+    const targetIds = [...new Set(operations
+      .filter(({ type }) => ["ExpenseCreated", "ExpenseAmended", "ExpenseVoided", "ExpenseRestored"].includes(type))
+      .map(({ targetId }) => targetId))];
+    const existing = await localDb.expenses.bulkGet(targetIds);
+    const expenses = new Map(targetIds.flatMap((id, index) => existing[index] ? [[id, existing[index]!] as const] : []));
+    const touched = new Set<string>();
+    for (const operation of operations) {
+      const current = expenses.get(operation.targetId);
+      const projectionStatus = remoteProjectionSyncStatus(current?.syncStatus);
+      const projected = expenseFromOperation(operation, projectionStatus, currentActorId, current?.createdBy);
+      if (projected) {
+        expenses.set(operation.targetId, projected);
+        touched.add(operation.targetId);
+      } else if ((operation.type === "ExpenseVoided" || operation.type === "ExpenseRestored") && current) {
+        expenses.set(operation.targetId, {
+          ...current,
+          status: operation.type === "ExpenseVoided" ? "voided" : "active",
+          version: operation.baseVersion + 1,
+          updatedAt: operation.receivedAt ?? operation.clientTimestamp,
+          syncStatus: projectionStatus,
+        });
+        touched.add(operation.targetId);
+      }
+      if (operation.type === "GroupCurrencyChanged") {
+        const payload = operation.payload as Record<string, JsonValue>;
+        await localDb.groups.update(operation.groupId, {
+          settlementCurrency: String(payload.settlementCurrency),
+          version: operation.baseVersion + 1,
+        });
+      }
+    }
+    const changedExpenses = [...touched].flatMap((id) => {
+      const expense = expenses.get(id);
+      return expense ? [expense] : [];
     });
-  }
-  if (operation.type === "ExpenseRestored") {
-    await localDb.expenses.update(operation.targetId, {
-      status: "active",
-      version: operation.baseVersion + 1,
-      updatedAt: operation.receivedAt ?? operation.clientTimestamp,
-      syncStatus: projectionStatus,
-    });
-  }
-  if (operation.type === "GroupCurrencyChanged") {
-    const payload = operation.payload as Record<string, JsonValue>;
-    await localDb.groups.update(operation.groupId, {
-      settlementCurrency: String(payload.settlementCurrency),
-      version: operation.baseVersion + 1,
-    });
-  }
+    if (changedExpenses.length > 0) await localDb.expenses.bulkPut(changedExpenses);
+  });
 }
 
 export type ConnectionState = "connecting" | "online" | "offline" | "error";
@@ -130,7 +152,20 @@ export class SyncEngine {
       const snapshot = await getSnapshot();
       const knownGeneration = String((await localDb.settings.get("generation"))?.value ?? "");
       const recovering = Boolean(knownGeneration && knownGeneration !== snapshot.manifest.generation);
-      await localDb.transaction("rw", localDb.groups, localDb.members, async () => {
+      await localDb.transaction("rw", localDb.groups, localDb.members, localDb.operations, async () => {
+        const remoteGroupIds = new Set(snapshot.groups.map(({ id }) => id));
+        const pendingGroupIds = new Set(
+          (await localDb.operations.where("syncStatus").equals("pending").toArray())
+            .filter(({ type }) => type === "GroupCreated")
+            .map(({ groupId }) => groupId),
+        );
+        const removedGroupIds = (await localDb.groups.toArray())
+          .map(({ id }) => id)
+          .filter((id) => !remoteGroupIds.has(id) && !pendingGroupIds.has(id));
+        if (removedGroupIds.length > 0) {
+          await localDb.groups.bulkDelete(removedGroupIds);
+          await localDb.members.where("groupId").anyOf(removedGroupIds).delete();
+        }
         await localDb.groups.bulkPut(snapshot.groups);
         await localDb.members.bulkPut(
           snapshot.members.map((member) => ({
@@ -196,7 +231,7 @@ export class SyncEngine {
       while (true) {
         const pulled = await pullOperations(cursor);
         generation = pulled.generation;
-        for (const operation of pulled.operations) await applyRemote(operation, device.actorId);
+        await applyRemoteBatch(pulled.operations, device.actorId);
         const receivedCursor = pulled.operations.reduce(
           (maximum, operation) => Math.max(maximum, operation.serverSequence ?? 0),
           cursor,

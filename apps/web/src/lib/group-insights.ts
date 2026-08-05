@@ -1,5 +1,5 @@
 import type { LocalExpense, LocalOperation } from "./db";
-import { activePayments } from "./ledger-view";
+import { activeImportedTransactions, activePayments } from "./ledger-view";
 
 export interface CategoryInsight {
   name: string;
@@ -134,12 +134,23 @@ export function buildGroupReconciliation(
     if (data.payerId === actorId) paymentsSentMinor += amountMinor;
     if (data.recipientId === actorId) paymentsReceivedMinor += amountMinor;
   }
+  let importedBalanceMinor = 0;
+  for (const operation of activeImportedTransactions(operations, groupId, currency)) {
+    const data = operation.payload as { effects?: unknown };
+    if (!Array.isArray(data.effects)) continue;
+    for (const value of data.effects) {
+      const effect = value as { participantId?: unknown; amountMinor?: unknown };
+      if (effect.participantId === actorId && Number.isSafeInteger(effect.amountMinor)) {
+        importedBalanceMinor += Number(effect.amountMinor);
+      }
+    }
+  }
   return {
     paidByYouMinor: insight.paidByYouMinor,
     yourShareMinor: insight.yourShareMinor,
     paymentsSentMinor,
     paymentsReceivedMinor,
-    balanceMinor: insight.paidByYouMinor - insight.yourShareMinor + paymentsSentMinor - paymentsReceivedMinor,
+    balanceMinor: insight.paidByYouMinor - insight.yourShareMinor + paymentsSentMinor - paymentsReceivedMinor + importedBalanceMinor,
     expenseCount: insight.expenseCount,
     paymentCount: payments.length,
   };

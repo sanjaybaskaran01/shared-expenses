@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
-import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { keyedDigest } from "./security-keys";
 
 const INVITE_LIMIT = 5;
 const INVITE_LIFETIME_MS = 7 * 24 * 60 * 60_000;
@@ -72,9 +73,7 @@ export class ContactInviteStore {
   }
 
   private emailHash(email: string): string {
-    return createHmac("sha256", this.options.emailHashSecret)
-      .update(email.trim().toLowerCase())
-      .digest("hex");
+    return keyedDigest(this.options.emailHashSecret, "contact-invite-email", email.trim().toLowerCase());
   }
 
   create(inviterUserId: string): { id: string; token: string; expiresAt: string } {

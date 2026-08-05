@@ -12,6 +12,7 @@ This is an original implementation in the shared-expense product category. It do
 - IndexedDB-first writes, background reconciliation, idempotent operations, and conflict records.
 - Invite-only Google or email-link authentication.
 - Standalone, single-use contact invitations with five credits per account and native sharing.
+- Local CSV/JSON or balance-only migration from Splitwise with reconciliation, undo, and private identity claims.
 - Signed P-256 device operations and strict server-side membership checks.
 - An experimental v2 server-blind sync boundary using AES-256-GCM group keys wrapped to member devices.
 
@@ -65,6 +66,8 @@ Open `http://localhost:8080`. Put a TLS reverse proxy in front before using it a
 - Phone contacts are not uploaded. iPhone uses the native share sheet or Messages recipient picker; supported Android browsers may expose a one-contact picker as a progressive enhancement.
 
 Read [Security](SECURITY.md), [Privacy model](docs/privacy-model.md), and [Architecture](docs/architecture.md) before operating a public instance.
+
+For supported exports, privacy boundaries, identity claims, and the approval-gated connector, see [Moving from Splitwise](docs/splitwise-migration.md).
 
 ## Repository policy
 

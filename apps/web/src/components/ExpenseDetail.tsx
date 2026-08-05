@@ -3,6 +3,7 @@ import { Dialog } from "@kobalte/core/dialog";
 import ArrowRight from "lucide-solid/icons/arrow-right";
 import CalendarDays from "lucide-solid/icons/calendar-days";
 import CheckCircle2 from "lucide-solid/icons/check-circle-2";
+import DatabaseBackup from "lucide-solid/icons/database-backup";
 import MessageCircle from "lucide-solid/icons/message-circle";
 import PencilLine from "lucide-solid/icons/pencil-line";
 import RotateCcw from "lucide-solid/icons/rotate-ccw";
@@ -121,11 +122,11 @@ export function ExpenseDetail(props: ExpenseDetailProps) {
               </section>
 
               <section class="expense-provenance" aria-label="Expense history and sync status">
-                <CheckCircle2 size={15} class="text-primary" />
-                <div><strong>{expense.version === 1 ? `Added by ${memberName(expense.createdBy)}` : `Last changed by ${memberName(latestChange()?.actorId ?? expense.createdBy)}`}</strong><span>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(latestChange()?.clientTimestamp ?? expense.updatedAt))} · {expense.syncStatus === "pending" ? "waiting to sync" : expense.syncStatus === "conflicted" ? "conflict needs review" : expense.syncStatus === "rejected" ? "not accepted by the server" : "accepted by the server"}</span></div>
+                <Show when={expense.readOnly} fallback={<CheckCircle2 size={15} class="text-primary" />}><DatabaseBackup size={15} class="text-primary" /></Show>
+                <div><strong>{expense.readOnly ? "Imported from Splitwise · read only" : expense.version === 1 ? `Added by ${memberName(expense.createdBy)}` : `Last changed by ${memberName(latestChange()?.actorId ?? expense.createdBy)}`}</strong><span>{expense.readOnly ? `${expense.importedByDisplayName ? `Imported by ${expense.importedByDisplayName}` : "Imported to Tallied"}${expense.importedAt ? ` on ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(expense.importedAt))}` : ""}. Undo its migration to remove or replace this history.` : `${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(latestChange()?.clientTimestamp ?? expense.updatedAt))} · ${expense.syncStatus === "pending" ? "waiting to sync" : expense.syncStatus === "conflicted" ? "conflict needs review" : expense.syncStatus === "rejected" ? "not accepted by the server" : "accepted by the server"}`}</span></div>
               </section>
               <Show when={error()}><p class="error-callout" role="alert">{error()}</p></Show>
-              <div class="grid grid-cols-2 gap-2"><Show when={expense.status === "active"} fallback={<Button class="col-span-2" onClick={() => void changeStatus()} disabled={busy()}><RotateCcw size={16} /> Restore expense</Button>}><Button variant="secondary" onClick={() => props.onEdit(expense)}><PencilLine size={16} /> Edit</Button><Button ref={deleteButtonRef} variant="destructive" onClick={() => setConfirmDelete(true)}><Trash2 size={16} /> Delete</Button></Show></div>
+              <Show when={!expense.readOnly}><div class="grid grid-cols-2 gap-2"><Show when={expense.status === "active"} fallback={<Button class="col-span-2" onClick={() => void changeStatus()} disabled={busy()}><RotateCcw size={16} /> Restore expense</Button>}><Button variant="secondary" onClick={() => props.onEdit(expense)}><PencilLine size={16} /> Edit</Button><Button ref={deleteButtonRef} variant="destructive" onClick={() => setConfirmDelete(true)}><Trash2 size={16} /> Delete</Button></Show></div></Show>
             </div>}</Show>
           </Dialog.Content>
         </div>

@@ -210,6 +210,7 @@ export async function updateExpense(expense: LocalExpense, input: NewExpenseInpu
   if (!current) throw new RangeError("This expense no longer exists");
   if (current.version !== expense.version) throw new RangeError("This expense changed. Reopen it and try again");
   if (current.status !== "active") throw new RangeError("A deleted expense cannot be edited");
+  if (current.readOnly) throw new RangeError("Imported expenses are read-only. Undo the migration and import again to change them.");
   if (current.groupId !== input.groupId) throw new RangeError("An expense cannot be moved to another group");
   if (!input.description.trim()) throw new RangeError("Description is required");
   if (input.participantIds.length === 0) throw new RangeError("Select at least one participant");
@@ -368,6 +369,7 @@ export async function voidExpense(expense: LocalExpense, reason = ""): Promise<v
   if (!current) throw new RangeError("This expense no longer exists");
   if (current.version !== expense.version) throw new RangeError("This expense changed. Reopen it and try again");
   if (current.status !== "active") throw new RangeError("This expense is already deleted");
+  if (current.readOnly) throw new RangeError("Imported expenses can only be removed by undoing their migration");
   const clientTimestamp = new Date().toISOString();
   const operation = await signOperation({
     id: crypto.randomUUID(), groupId: current.groupId, actorId: device.actorId, deviceId: device.deviceId,
@@ -390,6 +392,7 @@ export async function restoreExpense(expense: LocalExpense): Promise<void> {
   if (!current) throw new RangeError("This expense no longer exists");
   if (current.version !== expense.version) throw new RangeError("This expense changed. Reopen it and try again");
   if (current.status !== "voided") throw new RangeError("This expense is already active");
+  if (current.readOnly) throw new RangeError("Imported expenses cannot be restored independently");
   const clientTimestamp = new Date().toISOString();
   const operation = await signOperation({
     id: crypto.randomUUID(), groupId: current.groupId, actorId: device.actorId, deviceId: device.deviceId,

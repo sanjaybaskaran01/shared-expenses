@@ -92,4 +92,44 @@ describe("remote expense projection", () => {
     expect(expenseFromOperation(amendment, "accepted", "current-user", "original-author")?.createdBy)
       .toBe("original-author");
   });
+
+  test("projects human-readable migration attribution without provider identifiers", () => {
+    const operation: OperationEnvelope = {
+      id: "operation-imported",
+      groupId: "group-1",
+      actorId: "importer",
+      deviceId: "device-1",
+      type: "ExpenseCreated",
+      targetId: "expense-imported",
+      baseVersion: 0,
+      clientTimestamp: "2026-08-04T10:00:00.000Z",
+      payload: {
+        description: "Dinner",
+        category: "Food",
+        amountMinor: 1000,
+        currency: "USD",
+        expenseDate: "2026-08-01",
+        notes: "",
+        payers: [{ participantId: "importer", amountMinor: 1000 }],
+        allocations: [{ participantId: "current-user", amountMinor: 1000 }],
+        import: {
+          importBatchId: "batch-1",
+          sourceProvider: "splitwise",
+          sourceRecordId: "expense-imported",
+          importedAt: "2026-08-04T10:00:00.000Z",
+          importedByDisplayName: "Sam",
+          readOnly: true,
+        },
+      },
+      contentHash: "0".repeat(64),
+      signature: "test-signature",
+    };
+    expect(expenseFromOperation(operation, "accepted", "current-user")).toEqual(expect.objectContaining({
+      readOnly: true,
+      importBatchId: "batch-1",
+      importedByDisplayName: "Sam",
+      importedAt: "2026-08-04T10:00:00.000Z",
+      sourceProvider: "splitwise",
+    }));
+  });
 });
