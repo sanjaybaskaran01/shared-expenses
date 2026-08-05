@@ -14,6 +14,9 @@ const headers = `/*
 /index.html
   Cache-Control: no-cache
 
+/release.json
+  Cache-Control: no-store, no-cache, must-revalidate, max-age=0
+
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 
