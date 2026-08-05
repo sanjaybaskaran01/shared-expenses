@@ -75,7 +75,7 @@ import {
   signOutAndClearLocalLedger,
 } from "./lib/auth";
 import { clearInviteToken, inviteTokenFromHash } from "./lib/contact-invites";
-import { paymentActivityDetails } from "./lib/activity-view";
+import { groupTimelineItems, paymentActivityDetails, type GroupTimelineItem } from "./lib/activity-view";
 import { developmentIdentity } from "./lib/development-actor";
 import { localDb, type LocalExpense, type LocalOperation } from "./lib/db";
 import {
@@ -91,6 +91,7 @@ import {
   computeBalances,
   computeRelationshipBalances,
   simplifyBalances,
+  activePayments,
   type RelationshipBalance,
   type Settlement,
 } from "./lib/ledger-view";
@@ -182,6 +183,10 @@ function currenciesFor(groupId: string): string[] {
   return [...values];
 }
 
+function isVisibleGroupMember(status: string): boolean {
+  return status === "active" || status === "placeholder";
+}
+
 function ConnectionPill() {
   const pending = createMemo(
     () =>
@@ -249,34 +254,26 @@ function ExpenseList(props: {
   onOpen(expense: LocalExpense): void;
   onAdd?(): void;
 }) {
-  const expenses = createMemo(() => {
-    const items = appStore
-      .expenses()
-      .filter((expense) => expense.groupId === props.groupId);
-    return items.sort(
-      (left, right) =>
-        right.expenseDate.localeCompare(left.expenseDate) ||
-        right.updatedAt.localeCompare(left.updatedAt),
-    );
-  });
+  const timeline = createMemo(() => groupTimelineItems(appStore.expenses(), appStore.operations(), props.groupId));
   const activeCount = createMemo(
-    () => expenses().filter((item) => item.status === "active").length,
+    () => timeline().filter((item) => item.kind === "expense" && item.expense.status === "active").length,
   );
+  const paymentCount = createMemo(() => timeline().filter((item) => item.kind === "payment").length);
   const expenseMonths = createMemo(() => {
-    const months = new Map<string, { label: string; items: LocalExpense[] }>();
-    for (const expense of expenses()) {
-      const date = expenseDate(expense.expenseDate);
-      const key = expense.expenseDate.slice(0, 7);
+    const months = new Map<string, { label: string; items: GroupTimelineItem[] }>();
+    for (const item of timeline()) {
+      const date = expenseDate(item.date);
+      const key = item.date.slice(0, 7);
       const existing = months.get(key);
       if (existing) {
-        existing.items.push(expense);
+        existing.items.push(item);
       } else {
         months.set(key, {
           label: new Intl.DateTimeFormat(undefined, {
             month: "long",
             year: "numeric",
           }).format(date),
-          items: [expense],
+          items: [item],
         });
       }
     }
@@ -286,7 +283,7 @@ function ExpenseList(props: {
     <Card class="expense-ledger">
       <SectionHeading
         title="Activity"
-        detail={`${activeCount()} active ${activeCount() === 1 ? "expense" : "expenses"}`}
+        detail={`${activeCount()} ${activeCount() === 1 ? "expense" : "expenses"}${paymentCount() ? ` · ${paymentCount()} ${paymentCount() === 1 ? "payment" : "payments"}` : ""}`}
         action={
           <Show when={props.onAdd}>
             <button class="list-add-action" type="button" onClick={() => props.onAdd?.()}>
@@ -296,7 +293,7 @@ function ExpenseList(props: {
         }
       />
       <Show
-        when={expenses().length}
+        when={timeline().length}
         fallback={
           <div class="grid min-h-56 place-items-center px-6 py-10 text-center">
             <div>
@@ -317,55 +314,33 @@ function ExpenseList(props: {
               <div class="expense-month-heading">{month.label}</div>
               <div class="divide-y divide-border/60">
                 <For each={month.items}>
-                  {(expense) => {
-                    const date = expenseDate(expense.expenseDate);
-                    const payer = memberName(
-                      expense.groupId,
-                      expense.payers[0]?.participantId ?? "",
-                      props.actorId,
-                    );
-                    return <button
-                      type="button"
-                      class="expense-timeline-row group-row"
-                      classList={{ "opacity-55": expense.status === "voided" }}
-                      onClick={() => props.onOpen(expense)}
-                    >
-                      <time class="expense-date-rail" datetime={expense.expenseDate}>
-                        <span>{new Intl.DateTimeFormat(undefined, { month: "short" }).format(date)}</span>
-                        <strong>{new Intl.DateTimeFormat(undefined, { day: "2-digit" }).format(date)}</strong>
-                      </time>
-                      <CategoryMark category={expense.category} />
-                      <div class="min-w-0">
-                        <strong class="expense-row-title">{expense.description}</strong>
-                        <span class="expense-row-context">
-                          {payer} paid · split {expense.allocations.length} {expense.allocations.length === 1 ? "way" : "ways"}
-                          {expense.syncStatus === "pending" ? " · on device" : ""}
-                          {expense.status === "voided" ? " · deleted" : ""}
-                        </span>
-                      </div>
-                      <div class="expense-row-money">
-                        <strong classList={{
-                          "money-in": expense.yourNetMinor > 0,
-                          "money-out": expense.yourNetMinor < 0,
-                          "sync-attention": expense.syncStatus === "conflicted" || expense.syncStatus === "rejected",
-                        }}>
-                          {expense.syncStatus === "conflicted"
-                            ? "needs review"
-                            : expense.syncStatus === "rejected"
-                              ? "not synced"
-                              : expense.status === "voided"
-                            ? "deleted"
-                            : expense.yourNetMinor > 0
-                              ? `+${money(expense.yourNetMinor, expense.currency)}`
-                              : expense.yourNetMinor < 0
-                                ? `−${money(-expense.yourNetMinor, expense.currency)}`
-                                : money(0, expense.currency)}
-                        </strong>
-                        <span>{expense.status === "voided" ? `deleted · ${money(expense.amountMinor, expense.currency)}` : expense.yourNetMinor > 0 ? "you lent" : expense.yourNetMinor < 0 ? "you owe" : "settled"}</span>
-                      </div>
-                      <ChevronRight size={15} class="expense-row-chevron" />
-                    </button>;
-                  }}
+                  {(item) => <Switch>
+                    <Match when={item.kind === "expense" ? item.expense : undefined}>{(expense) => {
+                      const date = expenseDate(expense().expenseDate);
+                      const payer = memberName(expense().groupId, expense().payers[0]?.participantId ?? "", props.actorId);
+                      return <button type="button" class="expense-timeline-row group-row" classList={{ "opacity-55": expense().status === "voided" }} onClick={() => props.onOpen(expense())}>
+                        <time class="expense-date-rail" datetime={expense().expenseDate}><span>{new Intl.DateTimeFormat(undefined, { month: "short" }).format(date)}</span><strong>{new Intl.DateTimeFormat(undefined, { day: "2-digit" }).format(date)}</strong></time>
+                        <CategoryMark category={expense().category} />
+                        <div class="min-w-0"><strong class="expense-row-title">{expense().description}</strong><span class="expense-row-context">{payer} paid · split {expense().allocations.length} {expense().allocations.length === 1 ? "way" : "ways"}{expense().syncStatus === "pending" ? " · on device" : ""}{expense().status === "voided" ? " · deleted" : ""}</span></div>
+                        <div class="expense-row-money"><strong classList={{ "money-in": expense().yourNetMinor > 0, "money-out": expense().yourNetMinor < 0, "sync-attention": expense().syncStatus === "conflicted" || expense().syncStatus === "rejected" }}>{expense().syncStatus === "conflicted" ? "needs review" : expense().syncStatus === "rejected" ? "not synced" : expense().status === "voided" ? "deleted" : expense().yourNetMinor > 0 ? `+${money(expense().yourNetMinor, expense().currency)}` : expense().yourNetMinor < 0 ? `−${money(-expense().yourNetMinor, expense().currency)}` : money(0, expense().currency)}</strong><span>{expense().status === "voided" ? `deleted · ${money(expense().amountMinor, expense().currency)}` : expense().yourNetMinor > 0 ? "you lent" : expense().yourNetMinor < 0 ? "you owe" : "settled"}</span></div>
+                        <ChevronRight size={15} class="expense-row-chevron" />
+                      </button>;
+                    }}</Match>
+                    <Match when={item.kind === "payment" ? item : undefined}>{(entry) => {
+                      const date = expenseDate(entry().date);
+                      const details = entry().payment;
+                      const payer = memberName(props.groupId, details.payerId, props.actorId);
+                      const recipient = memberName(props.groupId, details.recipientId, props.actorId);
+                      const direction = details.payerId === props.actorId ? "Payment sent" : details.recipientId === props.actorId ? "Payment received" : "Payment";
+                      return <article class="expense-timeline-row group-payment-row" aria-label={`${payer} paid ${recipient} ${money(details.amountMinor, details.currency)}`}>
+                        <time class="expense-date-rail" datetime={entry().date}><span>{new Intl.DateTimeFormat(undefined, { month: "short" }).format(date)}</span><strong>{new Intl.DateTimeFormat(undefined, { day: "2-digit" }).format(date)}</strong></time>
+                        <CategoryMark category="Payment" />
+                        <div class="min-w-0"><strong class="expense-row-title">{payer} paid {recipient}</strong><span class="expense-row-context">{direction}{details.note ? ` · ${details.note}` : ""}</span></div>
+                        <div class="expense-row-money"><strong>{money(details.amountMinor, details.currency)}</strong><span>payment</span></div>
+                        <span aria-hidden="true" />
+                      </article>;
+                    }}</Match>
+                  </Switch>}
                 </For>
               </div>
             </section>}
@@ -382,9 +357,10 @@ function GroupsOverview(props: {
   onCreateGroup(): void;
 }) {
   const groupMemberCount = (groupId: string) =>
-    appStore.members().filter((member) => member.groupId === groupId && member.status === "active").length;
+    appStore.members().filter((member) => member.groupId === groupId && isVisibleGroupMember(member.status)).length;
   const groupExpenseCount = (groupId: string) =>
     appStore.expenses().filter((expense) => expense.groupId === groupId && expense.status === "active").length;
+  const groupPaymentCount = (groupId: string) => activePayments(appStore.operations(), groupId).length;
   const groupBalance = (groupId: string, currency: string) =>
     computeBalances(appStore.expenses(), appStore.operations(), groupId, currency)[props.actorId] ?? 0;
 
@@ -418,6 +394,7 @@ function GroupsOverview(props: {
             {(group, index) => {
               const balance = createMemo(() => groupBalance(group.id, group.settlementCurrency));
               const expenses = createMemo(() => groupExpenseCount(group.id));
+              const payments = createMemo(() => groupPaymentCount(group.id));
               const people = createMemo(() => groupMemberCount(group.id));
               return (
                 <button
@@ -429,7 +406,7 @@ function GroupsOverview(props: {
                   <span class="group-overview-icon"><UsersRound size={18} /></span>
                   <span class="group-overview-main">
                     <strong>{group.name}</strong>
-                    <small>{people()} {people() === 1 ? "person" : "people"} · {expenses()} active {expenses() === 1 ? "expense" : "expenses"}</small>
+                    <small>{people()} {people() === 1 ? "person" : "people"} · {expenses()} {expenses() === 1 ? "expense" : "expenses"}{payments() ? ` · ${payments()} ${payments() === 1 ? "payment" : "payments"}` : ""}</small>
                   </span>
                   <span class="group-overview-balance">
                     <small>{balance() > 0 ? "you’re owed" : balance() < 0 ? "you owe" : "settled"}</small>
@@ -467,6 +444,7 @@ function GroupsView(props: {
   const activeExpenses = createMemo(() =>
     expenses().filter((expense) => expense.status === "active"),
   );
+  const payments = createMemo(() => activePayments(appStore.operations(), group()?.id));
   const [currency, setCurrency] = createSignal("USD");
   const [chartMode, setChartMode] = createSignal<"category" | "month">(
     "category",
@@ -530,7 +508,7 @@ function GroupsView(props: {
         (member) =>
           member.groupId === group()?.id &&
           member.userId !== props.actorId &&
-          member.status === "active",
+          isVisibleGroupMember(member.status),
       ),
   );
   const insights = createMemo(() => buildGroupInsights(activeExpenses(), currency(), props.actorId));
@@ -561,7 +539,7 @@ function GroupsView(props: {
           <h1 class="page-title">{group()?.name ?? "Groups"}</h1>
           <Show when={group()} fallback={<p class="mt-1 text-sm text-muted-foreground">No groups yet</p>}>
             <p class="mt-1 text-sm text-muted-foreground">
-              {people().length + 1} {people().length === 0 ? "person" : "people"} · {activeExpenses().length} active {activeExpenses().length === 1 ? "expense" : "expenses"}
+              {people().length + 1} {people().length === 0 ? "person" : "people"} · {activeExpenses().length} {activeExpenses().length === 1 ? "expense" : "expenses"}{payments().length ? ` · ${payments().length} ${payments().length === 1 ? "payment" : "payments"}` : ""}
             </p>
           </Show>
         </div>
@@ -630,14 +608,14 @@ function GroupsView(props: {
                   <For each={people()} fallback={<Card class="p-6 text-sm text-muted-foreground">Invite someone to {activeGroup.name} to start splitting.</Card>}>
                     {(member) => {
                       const balance = createMemo(() => balances()[member.userId] ?? 0);
-                      const settlement = createMemo<Settlement | undefined>(() => balance() < 0 ? { payerId: member.userId, recipientId: props.actorId, amountMinor: -balance() } : balance() > 0 ? { payerId: props.actorId, recipientId: member.userId, amountMinor: balance() } : undefined);
+                      const settlement = createMemo<Settlement | undefined>(() => member.status !== "active" ? undefined : balance() < 0 ? { payerId: member.userId, recipientId: props.actorId, amountMinor: -balance() } : balance() > 0 ? { payerId: props.actorId, recipientId: member.userId, amountMinor: balance() } : undefined);
                       const related = createMemo(() => activeExpenses().filter((expense) => expense.allocations.some((allocation) => allocation.participantId === member.userId)).slice(0, 2).map((expense) => expense.description).join(", "));
                       return (
                         <article class="person-balance-block" classList={{ "tone-mint": balance() < 0, "tone-coral": balance() > 0, "tone-butter": balance() === 0 }}>
                           <Avatar name={member.displayName} class="person-avatar" />
-                          <div class="min-w-0 flex-1"><strong class="block truncate">{member.displayName}</strong><span class="micro-label block truncate">{related() || activeGroup.name}</span></div>
+                          <div class="min-w-0 flex-1"><strong class="block truncate">{member.displayName}</strong><span class="micro-label block truncate">{member.status === "placeholder" ? "Not claimed · " : ""}{related() || activeGroup.name}</span></div>
                           <div class="shrink-0 text-right"><strong class="money-type block" classList={{ "money-in": balance() < 0, "money-out": balance() > 0 }}>{balance() === 0 ? money(0, currency()) : `${balance() < 0 ? "+" : "−"}${money(Math.abs(balance()), currency())}`}</strong><span class="micro-label">{balance() < 0 ? "owes you" : balance() > 0 ? "you owe" : "settled"}</span></div>
-                          <button class="ink-action" type="button" disabled={!settlement() || settlementBlockers() > 0} onClick={() => props.onSettle(settlement(), currency())}>{balance() > 0 ? "Pay" : "Settle"}</button>
+                          <button class="ink-action" type="button" disabled={!settlement() || settlementBlockers() > 0} onClick={() => props.onSettle(settlement(), currency())}>{member.status === "placeholder" ? "Unclaimed" : balance() > 0 ? "Pay" : "Settle"}</button>
                         </article>
                       );
                     }}
@@ -754,9 +732,10 @@ function OverviewView(props: {
       .filter(Boolean)
       .join(" · ");
   const groupMemberCount = (groupId: string) =>
-    appStore.members().filter((member) => member.groupId === groupId && member.status === "active").length;
+    appStore.members().filter((member) => member.groupId === groupId && isVisibleGroupMember(member.status)).length;
   const groupExpenseCount = (groupId: string) =>
     appStore.expenses().filter((expense) => expense.groupId === groupId && expense.status === "active").length;
+  const groupPaymentCount = (groupId: string) => activePayments(appStore.operations(), groupId).length;
   const groupBalance = (groupId: string, currency: string) =>
     computeBalances(appStore.expenses(), appStore.operations(), groupId, currency)[props.actorId] ?? 0;
   const relationshipUserIds = createMemo(() => new Set(relationships().map((relationship) => relationship.userId)));
@@ -868,9 +847,10 @@ function OverviewView(props: {
           <For each={appStore.groups()} fallback={<div class="px-6 py-12 text-center text-sm text-muted-foreground">Create a group to start splitting.</div>}>
             {(group) => {
               const balance = createMemo(() => groupBalance(group.id, group.settlementCurrency));
+              const paymentCount = createMemo(() => groupPaymentCount(group.id));
               return <button type="button" class="home-group-row" onClick={() => props.onOpenGroup(group.id)}>
                 <Avatar name={group.name} class="size-10 text-xs" />
-                <span class="min-w-0 flex-1 text-left"><strong>{group.name}</strong><small>{groupMemberCount(group.id)} {groupMemberCount(group.id) === 1 ? "person" : "people"} · {groupExpenseCount(group.id)} active {groupExpenseCount(group.id) === 1 ? "expense" : "expenses"}</small></span>
+                <span class="min-w-0 flex-1 text-left"><strong>{group.name}</strong><small>{groupMemberCount(group.id)} {groupMemberCount(group.id) === 1 ? "person" : "people"} · {groupExpenseCount(group.id)} {groupExpenseCount(group.id) === 1 ? "expense" : "expenses"}{paymentCount() ? ` · ${paymentCount()} ${paymentCount() === 1 ? "payment" : "payments"}` : ""}</small></span>
                 <span class="home-group-balance"><small>{balance() > 0 ? "you’re owed" : balance() < 0 ? "you owe" : "settled"}</small><strong>{money(Math.abs(balance()), group.settlementCurrency)}</strong></span>
                 <ChevronRight size={16} />
               </button>;
