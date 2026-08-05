@@ -26,6 +26,7 @@
     "security:audit": "bun scripts/security-audit.ts",
     "scenario:lab": "bun scripts/scenario-lab/run.ts",
     "scenario:lab:headless": "bun scripts/scenario-lab/run.ts --headless",
+    "migration:scale-smoke": "bun scripts/migration-scale-smoke.ts",
     "check": "bun run security:audit && bun run validate && bun run build"
   },
   "devDependencies": {

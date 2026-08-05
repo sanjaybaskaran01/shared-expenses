@@ -5,6 +5,9 @@ import type {
   JsonValue,
   OperationEnvelope,
   ParticipantAmount,
+  ImportBatchCommitRequest,
+  ImportPreparedReview,
+  NormalizedImportDraft,
 } from "@expenses/protocol";
 
 export type SyncStatus = "pending" | "accepted" | "conflicted" | "rejected";
@@ -49,6 +52,25 @@ export interface LocalExpense {
   createdBy: string;
   updatedAt: string;
   syncStatus: SyncStatus;
+  readOnly?: boolean;
+  importBatchId?: string;
+  importedByDisplayName?: string;
+  importedAt?: string;
+  sourceProvider?: string;
+}
+
+export interface LocalImportDraft {
+  id: string;
+  ownerActorId: string;
+  updatedAt: string;
+  status: "draft" | "ready" | "submitting" | "failed";
+  draft: NormalizedImportDraft;
+  selectedGroupIds?: string[];
+  importerExternalId?: string;
+  importerExternalIds?: string[];
+  commit?: ImportBatchCommitRequest;
+  prepared?: ImportPreparedReview;
+  error?: string;
 }
 
 export interface DeviceRecord {
@@ -84,6 +106,7 @@ export class ExpensesDatabase extends Dexie {
   settings!: EntityTable<SettingRecord, "key">;
   confidentialOperations!: EntityTable<LocalConfidentialOperation, "id">;
   groupKeyEnvelopes!: EntityTable<LocalGroupKeyEnvelope, "id">;
+  importDrafts!: EntityTable<LocalImportDraft, "id">;
 
   constructor() {
     super("expenses-ledger");
@@ -112,6 +135,17 @@ export class ExpensesDatabase extends Dexie {
       settings: "key",
       confidentialOperations: "id, syncStatus, serverSequence, groupId, keyEpoch, clientTimestamp",
       groupKeyEnvelopes: "id, groupId, keyEpoch, recipientDeviceId",
+    });
+    this.version(4).stores({
+      operations: "id, syncStatus, serverSequence, groupId, targetId, clientTimestamp",
+      groups: "id, createdAt",
+      members: "id, groupId, userId, status",
+      expenses: "id, groupId, expenseDate, status, syncStatus, updatedAt",
+      devices: "id, deviceId, actorId",
+      settings: "key",
+      confidentialOperations: "id, syncStatus, serverSequence, groupId, keyEpoch, clientTimestamp",
+      groupKeyEnvelopes: "id, groupId, keyEpoch, recipientDeviceId",
+      importDrafts: "id, status, updatedAt",
     });
   }
 }

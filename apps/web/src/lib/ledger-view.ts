@@ -27,6 +27,32 @@ export function activePayments(operations: readonly LocalOperation[], groupId?: 
   });
 }
 
+export function activeImportedTransactions(
+  operations: readonly LocalOperation[],
+  groupId?: string,
+  currency?: string,
+): LocalOperation[] {
+  const voided = new Set(
+    operations
+      .filter((operation) => operation.type === "ImportedTransactionVoided" || operation.type === "OpeningBalanceVoided")
+      .map((operation) => operation.targetId),
+  );
+  return operations.filter((operation) => {
+    if (
+      (operation.type !== "ImportedTransactionRecorded" && operation.type !== "OpeningBalanceCreated") ||
+      voided.has(operation.targetId) ||
+      operation.syncStatus === "rejected" ||
+      operation.syncStatus === "conflicted"
+    ) return false;
+    const data = payload(operation);
+    const metadata = data.import;
+    const sourceDeleted = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? (metadata as Record<string, JsonValue>).sourceDeleted === true
+      : false;
+    return !sourceDeleted && (!groupId || operation.groupId === groupId) && (!currency || String(data.currency) === currency);
+  });
+}
+
 export function computeBalances(
   expenses: readonly LocalExpense[],
   operations: readonly LocalOperation[],
@@ -45,6 +71,17 @@ export function computeBalances(
     const amountMinor = Number(data.amountMinor);
     add(String(data.payerId), amountMinor);
     add(String(data.recipientId), -amountMinor);
+  }
+  for (const operation of activeImportedTransactions(operations, groupId, currency)) {
+    const effects = payload(operation).effects;
+    if (!Array.isArray(effects)) continue;
+    for (const value of effects) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const effect = value as Record<string, JsonValue>;
+      if (typeof effect.participantId === "string" && Number.isSafeInteger(effect.amountMinor)) {
+        add(effect.participantId, Number(effect.amountMinor));
+      }
+    }
   }
   return balances;
 }
@@ -85,7 +122,7 @@ export function computeRelationshipBalances(
   for (const group of groups) {
     const groupUserIds = new Set(
       members
-        .filter((member) => member.groupId === group.id && member.status === "active")
+        .filter((member) => member.groupId === group.id && (member.status === "active" || member.status === "placeholder"))
         .map((member) => member.userId),
     );
     if (!groupUserIds.has(actorId)) continue;
@@ -95,6 +132,9 @@ export function computeRelationshipBalances(
       if (expense.groupId === group.id && expense.status === "active") currencies.add(expense.currency);
     }
     for (const operation of activePayments(operations, group.id)) {
+      currencies.add(String(payload(operation).currency));
+    }
+    for (const operation of activeImportedTransactions(operations, group.id)) {
       currencies.add(String(payload(operation).currency));
     }
 

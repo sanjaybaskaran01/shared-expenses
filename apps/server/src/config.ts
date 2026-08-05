@@ -18,9 +18,63 @@ export function validateProductionAuthSecret(value: string): void {
   }
 }
 
+export function resolvePublicRateKey(input: {
+  cloudflareIp?: string;
+  trustCloudflareProxy: boolean;
+  production: boolean;
+}): string {
+  const cloudflareIp = input.cloudflareIp?.trim() ?? "";
+  if (input.trustCloudflareProxy && /^[0-9a-f:.]{2,64}$/i.test(cloudflareIp)) return cloudflareIp;
+  return input.production ? "unidentified" : "local-development";
+}
+
 export interface GoogleAuthConfig {
   clientId: string;
   clientSecret: string;
+}
+
+export interface SplitwiseOAuthConfig {
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
+}
+
+function validatedBaseUrl(name: string, value: string, production: boolean): string {
+  const parsed = new URL(value);
+  if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error(`${name} cannot contain credentials, a query, or a fragment`);
+  }
+  if (production && parsed.protocol !== "https:") throw new Error(`${name} must use HTTPS in production`);
+  if (!production && !["http:", "https:"].includes(parsed.protocol)) throw new Error(`${name} must be HTTP or HTTPS`);
+  return parsed.origin + (parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/$/, ""));
+}
+
+export function resolveSplitwiseOAuthConfig(input: {
+  approved: boolean;
+  clientId?: string;
+  clientSecret?: string;
+  redirectUri?: string;
+}): SplitwiseOAuthConfig | undefined {
+  if (!input.approved) return undefined;
+  const clientId = input.clientId?.trim();
+  const clientSecret = input.clientSecret?.trim();
+  const redirectUri = input.redirectUri?.trim();
+  if (!clientId || !clientSecret || !redirectUri) {
+    throw new Error(
+      "SPLITWISE_CLIENT_ID, SPLITWISE_CLIENT_SECRET, and SPLITWISE_REDIRECT_URI are required after approval",
+    );
+  }
+  const parsed = new URL(redirectUri);
+  if (parsed.protocol !== "https:" && parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
+    throw new Error("SPLITWISE_REDIRECT_URI must use HTTPS outside local development");
+  }
+  if (
+    parsed.username || parsed.password || parsed.search || parsed.hash ||
+    parsed.pathname !== "/api/v1/imports/splitwise/callback"
+  ) {
+    throw new Error("SPLITWISE_REDIRECT_URI must be the exact Tallied callback URL without credentials, query, or fragment");
+  }
+  return { clientId, clientSecret, redirectUri: parsed.toString() };
 }
 
 export function resolveGoogleAuthConfig(
@@ -46,9 +100,11 @@ export interface AppConfig {
   publicApiUrl: string;
   authSecret: string;
   devAuthBypass: boolean;
+  trustCloudflareProxy: boolean;
   ownerEmail?: string;
   cookieDomain?: string;
   googleAuth?: GoogleAuthConfig;
+  splitwiseOAuth?: SplitwiseOAuthConfig;
   bootstrapGroupName: string;
   smtp: {
     enabled: boolean;
@@ -79,6 +135,12 @@ export function loadConfig(): AppConfig {
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
   );
+  const splitwiseOAuth = resolveSplitwiseOAuthConfig({
+    approved: booleanEnv("SPLITWISE_API_APPROVED", false),
+    ...(process.env.SPLITWISE_CLIENT_ID ? { clientId: process.env.SPLITWISE_CLIENT_ID } : {}),
+    ...(process.env.SPLITWISE_CLIENT_SECRET ? { clientSecret: process.env.SPLITWISE_CLIENT_SECRET } : {}),
+    ...(process.env.SPLITWISE_REDIRECT_URI ? { redirectUri: process.env.SPLITWISE_REDIRECT_URI } : {}),
+  });
   if (Boolean(smtpUser) !== Boolean(smtpPassword)) {
     throw new Error("SMTP_USER and SMTP_APP_PASSWORD must be configured together");
   }
@@ -88,19 +150,30 @@ export function loadConfig(): AppConfig {
   if (nodeEnv === "production" && !smtpFrom) {
     throw new Error("SMTP_FROM is required in production");
   }
+  const webOrigin = validatedBaseUrl("WEB_ORIGIN", process.env.WEB_ORIGIN ?? "http://localhost:5173", nodeEnv === "production");
+  const publicApiUrl = validatedBaseUrl(
+    "PUBLIC_API_URL",
+    process.env.PUBLIC_API_URL ?? "http://localhost:3000",
+    nodeEnv === "production",
+  );
+  if (nodeEnv === "production" && new URL(webOrigin).origin !== new URL(publicApiUrl).origin) {
+    throw new Error("WEB_ORIGIN and PUBLIC_API_URL must use the same public origin in production");
+  }
   return {
     nodeEnv,
     host: process.env.HOST ?? "127.0.0.1",
     port: integerEnv("PORT", 3000),
     databasePath: resolve(process.env.DATABASE_PATH ?? "./data/expenses.sqlite"),
     attachmentsPath: resolve(process.env.ATTACHMENTS_PATH ?? "./data/attachments"),
-    webOrigin: process.env.WEB_ORIGIN ?? "http://localhost:5173",
-    publicApiUrl: process.env.PUBLIC_API_URL ?? "http://localhost:3000",
+    webOrigin,
+    publicApiUrl,
     authSecret,
     devAuthBypass,
+    trustCloudflareProxy: booleanEnv("TRUST_CLOUDFLARE_PROXY", false),
     ...(ownerEmail ? { ownerEmail } : {}),
     ...(cookieDomain ? { cookieDomain } : {}),
     ...(googleAuth ? { googleAuth } : {}),
+    ...(splitwiseOAuth ? { splitwiseOAuth } : {}),
     bootstrapGroupName: process.env.BOOTSTRAP_GROUP_NAME ?? "Shared expenses",
     smtp: {
       enabled: Boolean(smtpUser && smtpPassword),

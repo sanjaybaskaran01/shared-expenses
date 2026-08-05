@@ -167,6 +167,33 @@ describe("group reconciliation", () => {
     expect(result.paymentCount).toBe(1);
     expect(result.paymentsReceivedMinor).toBe(1000);
   });
+
+  test("includes opening balances without inflating spending insights", () => {
+    const opening: LocalOperation = {
+      id: "opening-operation",
+      groupId: "group-1",
+      actorId: "a",
+      deviceId: "device-a",
+      type: "OpeningBalanceCreated",
+      targetId: "opening-1",
+      baseVersion: 0,
+      clientTimestamp: "2026-07-26T12:00:00Z",
+      payload: {
+        currency: "USD",
+        effects: [
+          { participantId: "a", amountMinor: 800 },
+          { participantId: "b", amountMinor: -800 },
+        ],
+        import: { readOnly: true },
+      },
+      contentHash: "0".repeat(64),
+      signature: "signature",
+      syncStatus: "accepted",
+    };
+    const result = buildGroupReconciliation([], [opening], "group-1", "USD", "a");
+    expect(result.balanceMinor).toBe(800);
+    expect(result.expenseCount).toBe(0);
+  });
 });
 
 describe("settlement safety", () => {
