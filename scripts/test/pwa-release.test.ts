@@ -29,7 +29,7 @@ describe("PWA release upgrades", () => {
     };
     const caches = {
       async open() { return cache; },
-      async keys() { return ["tally-shell-v1"]; },
+      async keys() { return ["tally-shell-v2"]; },
       async delete() { return true; },
       async match(request: string | { url?: string }) { return cacheEntries.get(normalize(request))?.clone(); },
     };

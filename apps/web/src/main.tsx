@@ -10,7 +10,11 @@ if ("serviceWorker" in navigator) {
     );
     if ("caches" in window) {
       void caches.keys().then((names) =>
-        Promise.all(names.filter((name) => name.startsWith("tally-shell-")).map((name) => caches.delete(name))),
+        Promise.all(
+          names
+            .filter((name) => name.startsWith("tally-shell-") || name.startsWith("tallied-shell-"))
+            .map((name) => caches.delete(name)),
+        ),
       );
     }
   } else {

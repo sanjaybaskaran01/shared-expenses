@@ -1,4 +1,6 @@
-const CACHE_NAME = "tally-shell-v2";
+// Bump this name whenever a release must invalidate an installed app shell.
+// Cache cleanup intentionally leaves IndexedDB (the offline ledger) untouched.
+const CACHE_NAME = "tallied-shell-v3";
 const APP_SHELL = [
   "/",
   "/manifest.webmanifest",
