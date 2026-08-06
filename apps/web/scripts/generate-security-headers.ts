@@ -22,6 +22,9 @@ const headers = `/*
 
 /tally-sw.js
   Cache-Control: no-cache
+
+/sw.js
+  Cache-Control: no-cache
 `;
 
 writeFileSync(resolve(import.meta.dir, "../dist/_headers"), headers, { mode: 0o644 });
