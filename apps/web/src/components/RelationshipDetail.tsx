@@ -64,8 +64,8 @@ export function RelationshipDetail(props: {
           </header>
           <div class="grid gap-5 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
             <section class="relationship-detail-summary">
-              <span>{props.relationship?.amountMinor && props.relationship.amountMinor > 0 ? `${personName()} owes you` : "You owe"}</span>
-              <strong>{money(Math.abs(props.relationship?.amountMinor ?? 0), props.relationship?.currency ?? "USD")}</strong>
+              <span classList={{ "money-in": (props.relationship?.amountMinor ?? 0) > 0, "money-out": (props.relationship?.amountMinor ?? 0) < 0 }}>{props.relationship?.amountMinor && props.relationship.amountMinor > 0 ? `${personName()} owes you` : "You owe"}</span>
+              <strong classList={{ "money-in": (props.relationship?.amountMinor ?? 0) > 0, "money-out": (props.relationship?.amountMinor ?? 0) < 0 }}>{money(Math.abs(props.relationship?.amountMinor ?? 0), props.relationship?.currency ?? "USD")}</strong>
               <p>{contributions().length} contributing {contributions().length === 1 ? "group" : "groups"}</p>
             </section>
             <section aria-labelledby="relationship-groups-heading">
@@ -73,7 +73,7 @@ export function RelationshipDetail(props: {
               <div class="relationship-contribution-list">
                 <For each={contributions()}>{(item) => <button type="button" onClick={() => { props.onOpenChange(false); props.onOpenGroup(item.group.id); }}>
                   <span class="min-w-0 flex-1"><strong>{item.group.name}</strong><small>{item.sharedExpenseCount} shared {item.sharedExpenseCount === 1 ? "expense" : "expenses"}</small></span>
-                  <span class="text-right"><small>{item.amountMinor > 0 ? "owes you" : item.amountMinor < 0 ? "you owe" : "settled"}</small><strong>{money(Math.abs(item.amountMinor), props.relationship?.currency ?? item.group.settlementCurrency)}</strong></span>
+                  <span class="text-right"><small classList={{ "money-in": item.amountMinor > 0, "money-out": item.amountMinor < 0 }}>{item.amountMinor > 0 ? "owes you" : item.amountMinor < 0 ? "you owe" : "settled"}</small><strong classList={{ "money-in": item.amountMinor > 0, "money-out": item.amountMinor < 0 }}>{money(Math.abs(item.amountMinor), props.relationship?.currency ?? item.group.settlementCurrency)}</strong></span>
                   <ChevronRight size={16} />
                 </button>}</For>
               </div>

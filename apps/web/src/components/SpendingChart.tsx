@@ -46,14 +46,16 @@ export function SpendingChart(props: SpendingChartProps) {
     const bar = styles.getPropertyValue("--chart-muted").trim() || "#93a0a5";
     const muted = styles.getPropertyValue("--muted-foreground").trim() || "#63635e";
     const gridLine = styles.getPropertyValue("--chart-grid").trim() || "rgba(32,41,76,.1)";
+    const fontFamily = styles.fontFamily;
     const animationDuration = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 260;
-    const tooltip = { backgroundColor: styles.getPropertyValue("--card").trim(), borderColor: gridLine, textStyle: { color: styles.getPropertyValue("--foreground").trim(), fontSize: 12 }, extraCssText: "border-radius:10px;box-shadow:0 8px 24px rgba(18,22,20,.12);" };
+    const tooltip = { backgroundColor: styles.getPropertyValue("--card").trim(), borderColor: gridLine, textStyle: { color: styles.getPropertyValue("--foreground").trim(), fontFamily, fontSize: 12 }, extraCssText: "border-radius:10px;box-shadow:0 8px 24px rgba(18,22,20,.12);" };
     if (props.mode === "category") {
       const totals = new Map<string, number>();
       for (const expense of expenses) totals.set(expense.category, (totals.get(expense.category) ?? 0) + expense.amountMinor);
       const entries = [...totals].sort((left, right) => left[1] - right[1]).slice(-6);
       chart.setOption({
         animationDuration,
+        textStyle: { fontFamily },
         grid: { top: 4, right: 58, bottom: 4, left: 4, containLabel: true },
         tooltip: { ...tooltip, trigger: "item", formatter: (item: { name: string; value: number }) => `${item.name}<br/><strong>${money(item.value, props.currency)}</strong>` },
         xAxis: { type: "value", show: false },
@@ -70,6 +72,7 @@ export function SpendingChart(props: SpendingChartProps) {
     const entries = [...totals].sort(([left], [right]) => left.localeCompare(right)).slice(-6);
     chart.setOption({
       animationDuration,
+      textStyle: { fontFamily },
       grid: { top: 18, right: 12, bottom: 26, left: 8, containLabel: true },
       tooltip: { ...tooltip, trigger: "axis", axisPointer: { type: "line", lineStyle: { color: accent, width: 1 } }, formatter: (items: Array<{ axisValue: string; value: number }>) => `${items[0]?.axisValue ?? ""}<br/><strong>${money(items[0]?.value ?? 0, props.currency)}</strong>` },
       xAxis: { type: "category", boundaryGap: false, data: entries.map(([key]) => new Intl.DateTimeFormat(undefined, { month: "short" }).format(new Date(`${key}-15T12:00:00`))), axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: muted, fontSize: 12 } },
