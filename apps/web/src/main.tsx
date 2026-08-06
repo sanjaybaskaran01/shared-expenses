@@ -1,6 +1,7 @@
 import { render } from "solid-js/web";
 import App from "./App";
 import { developmentIdentity } from "./lib/development-actor";
+import { initReleaseWatch } from "./lib/release-watch";
 import "./styles/app.css";
 
 if ("serviceWorker" in navigator) {
@@ -19,7 +20,9 @@ if ("serviceWorker" in navigator) {
     }
   } else {
     window.addEventListener("load", () => {
-      void navigator.serviceWorker.register("/tally-sw.js", { updateViaCache: "none" });
+      void navigator.serviceWorker.register("/tally-sw.js", { updateViaCache: "none" }).then((registration) => {
+        void initReleaseWatch(registration);
+      });
     });
   }
 }

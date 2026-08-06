@@ -51,6 +51,7 @@ import { FeedbackButton } from "./components/FeedbackDialog";
 import { GroupComposer } from "./components/GroupComposer";
 import { PaymentComposer } from "./components/PaymentComposer";
 import { RelationshipDetail } from "./components/RelationshipDetail";
+import { VersionBadge } from "./components/VersionBadge";
 import {
   AccessibleTabs,
   Avatar,
@@ -87,6 +88,7 @@ import {
   type GroupComposerOrigin,
 } from "./lib/expense-launch";
 import { mostRecentExpenseGroupId, type ExpenseTarget } from "./lib/expense-targets";
+import { releaseWatch, reloadForUpdate } from "./lib/release-watch";
 import { buildGroupInsights, buildGroupReconciliation, settlementBlockerCount, summarizeOperationHealth } from "./lib/group-insights";
 import {
   computeBalances,
@@ -1114,6 +1116,9 @@ function AccountView(props: { displayName: string; email: string | undefined; sm
           </div>
         </Show>
       </Card>
+      <Card class="p-4 text-xs text-muted-foreground">
+        <VersionBadge />
+      </Card>
     </div>
   );
 }
@@ -1881,19 +1886,27 @@ export default function App() {
       : (session().data?.user.id ?? offlineActorId()),
   );
   return (
-    <Show
-      when={
-        (!session().isPending && !offlineActorId.loading) || import.meta.env.DEV
-      }
-      fallback={
-        <main class="grid min-h-dvh place-items-center bg-background">
-          <BrandMark size={44} />
-        </main>
-      }
-    >
-      <Show when={actorId()} keyed fallback={<AuthScreen />}>
-        {(id) => <AuthenticatedApp actorId={id} email={session().data?.user.email} />}
+    <>
+      <Show when={releaseWatch.updateAvailable()}>
+        <div class="update-banner" role="status" aria-live="polite">
+          <span>A new version of Tallied is available</span>
+          <Button size="sm" variant="secondary" onClick={reloadForUpdate}>Reload</Button>
+        </div>
       </Show>
-    </Show>
+      <Show
+        when={
+          (!session().isPending && !offlineActorId.loading) || import.meta.env.DEV
+        }
+        fallback={
+          <main class="grid min-h-dvh place-items-center bg-background">
+            <BrandMark size={44} />
+          </main>
+        }
+      >
+        <Show when={actorId()} keyed fallback={<AuthScreen />}>
+          {(id) => <AuthenticatedApp actorId={id} email={session().data?.user.email} />}
+        </Show>
+      </Show>
+    </>
   );
 }

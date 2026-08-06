@@ -390,6 +390,7 @@ textarea.form-control { height: auto; } select.form-control { appearance: auto; 
 .nav-item.active::after { display: none; }
 .nav-item.active svg { transform: translateY(-1px) scale(1.08); }
 .toast-pill { position: fixed; z-index: 60; bottom: calc(6.3rem + env(safe-area-inset-bottom)); left: 50%; display: flex; max-width: calc(100vw - 2rem); transform: translateX(-50%); align-items: center; gap: .45rem; border-radius: 999px; background: var(--foreground); padding: .72rem 1rem; color: var(--background); box-shadow: 0 12px 32px rgb(0 0 0 / .22); font-size: .78rem; font-weight: 650; white-space: nowrap; }
+.update-banner { position: sticky; z-index: 70; top: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .6rem; padding: .6rem 1rem calc(.6rem + env(safe-area-inset-top)); background: var(--foreground); color: var(--background); box-shadow: 0 8px 24px rgb(0 0 0 / .18); font-size: .82rem; font-weight: 620; text-align: center; }
 
 .desktop-sidebar { border-right: 1px solid var(--border); background: #fff; }
 :root.dark .desktop-sidebar { background: var(--card); }
