@@ -25,6 +25,36 @@ export interface ReleaseOperations {
   mutateApi: boolean;
 }
 
+export interface PublicReleaseUrls {
+  webUrl: string;
+  publicApiUrl: string;
+}
+
+const DEFAULT_PUBLIC_RELEASE_URLS: PublicReleaseUrls = {
+  webUrl: "https://expenses.example.com",
+  publicApiUrl: "https://api.example.com",
+};
+
+export function resolvePublicReleaseUrls(
+  environment: Record<string, string | undefined>,
+): PublicReleaseUrls {
+  const normalize = (value: string | undefined, fallback: string): string =>
+    (value?.trim() || fallback).replace(/\/+$/, "");
+
+  return {
+    webUrl: normalize(environment.TALLY_WEB_URL, DEFAULT_PUBLIC_RELEASE_URLS.webUrl),
+    publicApiUrl: normalize(environment.TALLY_API_URL, DEFAULT_PUBLIC_RELEASE_URLS.publicApiUrl),
+  };
+}
+
+export function formatReleaseError(error: unknown): string {
+  if (error instanceof AggregateError) {
+    const details = error.errors.map(formatReleaseError).join("; ");
+    return details ? `${error.message}: ${details}` : error.message;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 export interface RepositoryState {
   branch: string;
   trackedDirty: boolean;
@@ -281,7 +311,7 @@ export interface WebDeploymentResult {
 export function parseWranglerVersionId(output: string): string | undefined {
   const plainOutput = output.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "");
   const matches = [...plainOutput.matchAll(/(?:Current|Worker)\s+Version ID:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)];
-  return matches.at(-1)?.[1]?.toLocaleLowerCase();
+  return matches.at(-1)?.[1]?.toLowerCase();
 }
 
 export async function pollWebDeployment(

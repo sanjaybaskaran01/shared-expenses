@@ -7,12 +7,14 @@ import {
   assertRepositoryReady,
   atomicSwitchSymlink,
   buildChecksums,
+  formatReleaseError,
   parseReleaseArgs,
   parseWranglerVersionId,
   planReleaseOperations,
   pollHealth,
   pollWebDeployment,
   rollbackAndRethrow,
+  resolvePublicReleaseUrls,
   selectSuccessfulCiRun,
   upsertEnvAssignment,
   verifyChecksums,
@@ -54,6 +56,25 @@ describe("release arguments", () => {
     });
     expect(planReleaseOperations({ mode: "all", dryRun: true })).toEqual({
       includeWeb: true, includeApi: true, mutateWeb: false, mutateApi: false,
+    });
+  });
+});
+
+describe("release public URLs", () => {
+  test("uses Tallied production endpoints when no override is configured", () => {
+    expect(resolvePublicReleaseUrls({})).toEqual({
+      webUrl: "https://expenses.example.com",
+      publicApiUrl: "https://api.example.com",
+    });
+  });
+
+  test("normalizes explicit self-hosted endpoint overrides", () => {
+    expect(resolvePublicReleaseUrls({
+      TALLY_WEB_URL: " https://tallied.example.org/ ",
+      TALLY_API_URL: "https://api.example.org///",
+    })).toEqual({
+      webUrl: "https://tallied.example.org",
+      publicApiUrl: "https://api.example.org",
     });
   });
 });
@@ -171,6 +192,7 @@ describe("rollback reporting", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(AggregateError);
       expect((error as AggregateError).errors).toEqual([deploymentError, rollbackError]);
+      expect(formatReleaseError(error)).toBe("both failed: deployment failed; rollback failed");
     }
   });
 });

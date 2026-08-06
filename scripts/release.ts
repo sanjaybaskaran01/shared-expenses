@@ -16,6 +16,7 @@ import { dirname, join, resolve } from "node:path";
 import {
   assertRepositoryReady,
   atomicSwitchSymlink,
+  formatReleaseError,
   listFiles,
   parseReleaseArgs,
   parseWranglerVersionId,
@@ -23,6 +24,7 @@ import {
   pollHealth,
   pollWebDeployment,
   rollbackAndRethrow,
+  resolvePublicReleaseUrls,
   selectSuccessfulCiRun,
   verifyChecksums,
   type CiRun,
@@ -110,6 +112,7 @@ const WEB_DEPLOYMENT_TIMEOUT_MS = 180_000;
 function contextFromEnvironment(): ReleaseContext {
   const repositoryRoot = resolve(import.meta.dir, "..");
   const supportRoot = resolve(process.env.TALLY_SUPPORT_ROOT ?? join(homedir(), "Library/Application Support/Tally"));
+  const publicUrls = resolvePublicReleaseUrls(process.env);
   return {
     repositoryRoot,
     supportRoot,
@@ -118,8 +121,8 @@ function contextFromEnvironment(): ReleaseContext {
     artifactCacheRoot: resolve(process.env.TALLY_RELEASE_CACHE ?? join(supportRoot, "release-cache")),
     historyRoot: resolve(process.env.TALLY_RELEASE_HISTORY ?? join(supportRoot, "release-history")),
     snapshotRoot: resolve(process.env.TALLY_RELEASE_BACKUPS ?? join(supportRoot, "release-backups")),
-    webUrl: process.env.TALLY_WEB_URL ?? "https://tally.example.com",
-    publicApiUrl: process.env.TALLY_API_URL ?? "https://tally-api.example.com",
+    webUrl: publicUrls.webUrl,
+    publicApiUrl: publicUrls.publicApiUrl,
     localApiUrl: process.env.TALLY_LOCAL_API_URL ?? "http://127.0.0.1:3000",
     launchdLabel: process.env.TALLY_LAUNCHD_LABEL ?? "com.tally.api",
     wranglerPath: resolve(repositoryRoot, "node_modules/.bin/wrangler"),
@@ -666,7 +669,7 @@ async function run(): Promise<void> {
     if (!releaseArguments.dryRun) {
       history.status = "failed";
       history.finishedAt = new Date().toISOString();
-      history.error = error instanceof Error ? error.message : String(error);
+      history.error = formatReleaseError(error);
       await writeHistory(context, history).catch(() => undefined);
     }
     throw error;
@@ -677,7 +680,7 @@ async function run(): Promise<void> {
 
 if (import.meta.main) {
   run().catch((error) => {
-    console.error(`[tally-release] ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`[tally-release] ${formatReleaseError(error)}`);
     process.exitCode = 1;
   });
 }
