@@ -8,11 +8,15 @@ import GraduationCap from "lucide-solid/icons/graduation-cap";
 import HeartPulse from "lucide-solid/icons/heart-pulse";
 import House from "lucide-solid/icons/house";
 import Lightbulb from "lucide-solid/icons/lightbulb";
+import Landmark from "lucide-solid/icons/landmark";
 import Package from "lucide-solid/icons/package";
 import PawPrint from "lucide-solid/icons/paw-print";
 import Plane from "lucide-solid/icons/plane";
 import ReceiptText from "lucide-solid/icons/receipt-text";
 import ShoppingBasket from "lucide-solid/icons/shopping-basket";
+import ShoppingBag from "lucide-solid/icons/shopping-bag";
+import Shirt from "lucide-solid/icons/shirt";
+import Repeat2 from "lucide-solid/icons/repeat-2";
 import Ticket from "lucide-solid/icons/ticket";
 import Utensils from "lucide-solid/icons/utensils";
 import Wine from "lucide-solid/icons/wine";
@@ -38,6 +42,10 @@ export function CategoryMark(props: { category: string; compact?: boolean; class
       case "Gifts": return Gift;
       case "Education": return GraduationCap;
       case "Pets": return PawPrint;
+      case "Shopping": return ShoppingBag;
+      case "Clothing": return Shirt;
+      case "Subscriptions": return Repeat2;
+      case "Fees": return Landmark;
       case "Payment": return ArrowRightLeft;
       default: return ReceiptText;
     }

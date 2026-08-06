@@ -12,9 +12,10 @@ import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { LocalExpense } from "../lib/db";
 import { isLocalToday, localDateValue } from "../lib/dates";
 import { validateExpenseForm, type ExpenseFormIssue } from "../lib/expense-form";
-import { EXPENSE_CATEGORIES } from "../lib/expense-categories";
+import { EXPENSE_CATEGORIES, suggestExpenseCategory } from "../lib/expense-categories";
 import { describeExpenseOutcome } from "../lib/group-insights";
 import { appStore, calculateExpenseAllocations, calculateExpensePayers, createExpense, updateExpense, type SplitMethod } from "../lib/store";
+import { CategoryMark } from "./CategoryMark";
 import { Avatar, Button } from "./ui";
 
 interface ExpenseComposerProps {
@@ -24,6 +25,7 @@ interface ExpenseComposerProps {
   initialParticipantIds?: string[] | undefined;
   targetLabel?: string | undefined;
   expense?: LocalExpense | undefined;
+  smartCategoriesEnabled?: boolean | undefined;
   onOpenChange(open: boolean): void;
   onChangeTarget?(): void;
   onSaved(mode: "created" | "updated"): void;
@@ -52,6 +54,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   const [description, setDescription] = createSignal("");
   const [amount, setAmount] = createSignal("");
   const [category, setCategory] = createSignal("General");
+  const [categoryEdited, setCategoryEdited] = createSignal(false);
   const [date, setDate] = createSignal(localDateValue());
   const [payerIds, setPayerIds] = createSignal<string[]>([props.actorId]);
   const [payerValues, setPayerValues] = createSignal<Record<string, string>>({});
@@ -73,9 +76,15 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   let descriptionInputRef: HTMLInputElement | undefined;
   let payerControlRef: HTMLButtonElement | undefined;
   let splitControlRef: HTMLButtonElement | undefined;
+  let categorySelectRef: HTMLSelectElement | undefined;
 
   const currentGroup = createMemo(() => appStore.groups().find((group) => group.id === groupId()));
   const groupMembers = createMemo(() => appStore.members().filter((member) => member.groupId === groupId() && member.status === "active"));
+  const categorySuggestion = createMemo(() => props.smartCategoriesEnabled && !props.expense
+    ? suggestExpenseCategory(description(), appStore.expenses().filter((expense) => expense.status === "active"))
+    : undefined);
+  const pendingCategorySuggestion = createMemo(() => categorySuggestion()?.action === "suggest" && category() === "General" && !categoryEdited());
+  const visibleCategory = createMemo(() => pendingCategorySuggestion() ? categorySuggestion()?.category ?? "General" : category());
   const payerSummary = createMemo(() => {
     if (payerIds().length > 1) return `${payerIds().length} people`;
     const payerId = payerIds()[0];
@@ -94,6 +103,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       setDescription(editingExpense?.description ?? "");
       setAmount(editingExpense ? minorInput(editingExpense.amountMinor) : "");
       setCategory(editingExpense?.category ?? "General");
+      setCategoryEdited(Boolean(editingExpense));
       setDate(editingExpense?.expenseDate ?? localDateValue());
       setNotes(editingExpense?.notes ?? "");
       setCurrency(editingExpense?.currency ?? appStore.groups().find((group) => group.id === nextGroupId)?.settlementCurrency ?? "USD");
@@ -133,6 +143,23 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
     if (!open) initializedGroup = "";
     wasOpen = open;
   });
+
+  createEffect(() => {
+    if (!props.open || props.expense || categoryEdited()) return;
+    const suggestion = categorySuggestion();
+    setCategory(suggestion?.action === "apply" ? suggestion.category : "General");
+  });
+
+  function useOrEditCategory(): void {
+    const suggestion = categorySuggestion();
+    if (pendingCategorySuggestion() && suggestion) {
+      setCategory(suggestion.category);
+      setCategoryEdited(true);
+      return;
+    }
+    setActivePanel("details");
+    queueMicrotask(() => categorySelectRef?.focus());
+  }
 
   createEffect(() => {
     if (!props.open) return;
@@ -416,6 +443,21 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
 
               <label class="description-field"><span class="sr-only">What was it for?</span><input ref={descriptionInputRef} value={description()} onInput={(event) => { setDescription(event.currentTarget.value); if (formIssue()?.field === "description") { setFormIssue(undefined); setError(""); } }} placeholder="What was it for?" maxlength={200} autocomplete="off" aria-invalid={formIssue()?.field === "description"} aria-describedby={formIssue()?.field === "description" ? "expense-form-error" : undefined} /></label>
 
+              <Show when={props.smartCategoriesEnabled && description().trim()}>
+                <button type="button" class="expense-category-control" onClick={useOrEditCategory} aria-label={`${pendingCategorySuggestion() ? "Suggested" : "Category"} ${visibleCategory()}. ${pendingCategorySuggestion() ? "Use suggestion" : "Change category"}`}>
+                  <CategoryMark category={visibleCategory()} compact />
+                  <span><small>{pendingCategorySuggestion() ? "Suggested category" : "Category"}</small><strong>{visibleCategory()}</strong></span>
+                  <span class="expense-category-source">
+                    {pendingCategorySuggestion()
+                      ? "Use"
+                      : categorySuggestion()?.category === category()
+                        ? categorySuggestion()?.source.startsWith("personal") ? "Remembered" : "Suggested"
+                        : "Change"}
+                    <ChevronRight size={15} />
+                  </span>
+                </button>
+              </Show>
+
               <div class="expense-quick-controls" aria-label="Expense details">
                 <button ref={payerControlRef} type="button" class="quick-control tone-payer" aria-expanded={activePanel() === "payer"} aria-controls="payer-panel" aria-invalid={formIssue()?.field === "payer"} aria-describedby={formIssue()?.field === "payer" ? "expense-form-error" : undefined} onClick={() => { if (formIssue()?.field === "payer") { setFormIssue(undefined); setError(""); } togglePanel("payer"); }}>
                   <span class="quick-control-icon"><UsersRound size={16} /></span><span class="quick-control-label">Paid by</span><strong>{payerSummary()}</strong><ChevronDown size={15} />
@@ -496,7 +538,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
               <Show when={activePanel() === "details"}>
                 <section class="disclosure-panel grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2" aria-label="More expense details">
                   <div class="disclosure-heading sm:col-span-2"><div><p>More details</p><small>Optional fields for bookkeeping.</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
-                  <label class="grid gap-2 text-sm font-medium">Category<select class="form-control" value={category()} onInput={(event) => setCategory(event.currentTarget.value)}><For each={EXPENSE_CATEGORIES}>{(item) => <option>{item}</option>}</For></select></label>
+                  <label class="grid gap-2 text-sm font-medium">Category<select ref={categorySelectRef} class="form-control" value={category()} onInput={(event) => { setCategory(event.currentTarget.value); setCategoryEdited(true); }}><For each={EXPENSE_CATEGORIES}>{(item) => <option>{item}</option>}</For></select></label>
                   <label class="grid gap-2 text-sm font-medium">Currency<select class="form-control" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)}><For each={currencies}>{(item) => <option value={item}>{item}</option>}</For></select></label>
                   <label class="grid gap-2 text-sm font-medium sm:col-span-2">Note <span class="sr-only">optional</span><textarea class="form-control min-h-20 resize-y py-2" value={notes()} onInput={(event) => setNotes(event.currentTarget.value)} placeholder="Optional note" maxlength={5000} /></label>
                 </section>

@@ -114,6 +114,7 @@ function clearLocationHash(): void {
   history.replaceState(history.state, "", `${location.pathname}${location.search}`);
 }
 type Theme = "system" | "light" | "dark";
+const smartCategoriesStorageKey = "tallied:smart-categories-preview";
 const SpendingChart = lazy(() =>
   import("./components/SpendingChart").then((module) => ({
     default: module.SpendingChart,
@@ -997,7 +998,7 @@ function ActivityView(props: {
   );
 }
 
-function AccountView(props: { displayName: string; email: string | undefined; onOpenMigration(): void }) {
+function AccountView(props: { displayName: string; email: string | undefined; smartCategoriesEnabled: boolean; onSmartCategoriesChange(enabled: boolean): void; onOpenMigration(): void }) {
   const [theme, setTheme] = createSignal<Theme>(
     (localStorage.getItem("expenses-theme") as Theme | null) ?? "system",
   );
@@ -1041,6 +1042,14 @@ function AccountView(props: { displayName: string; email: string | undefined; on
         <span class="min-w-0 flex-1 text-left"><strong class="block text-sm">Move from Splitwise</strong><small class="mt-0.5 block text-xs text-muted-foreground">Review balances before anything changes</small></span>
         <ChevronRight size={16} class="text-muted-foreground" />
       </button>
+      <Card class="overflow-hidden">
+        <SectionHeading title="Expense entry" detail="On-device preview" />
+        <div class="smart-category-setting">
+          <span class="category-icon category-tone-leisure"><Sparkles size={17} /></span>
+          <span class="min-w-0 flex-1"><strong>Smart category suggestions</strong><small>Uses built-in English rules and your past choices. No description is sent to a model.</small></span>
+          <button type="button" class="preference-switch" role="switch" aria-checked={props.smartCategoriesEnabled} aria-label="Smart category suggestions" onClick={() => props.onSmartCategoriesChange(!props.smartCategoriesEnabled)}><span /></button>
+        </div>
+      </Card>
       <Card class="overflow-hidden">
         <SectionHeading title="Appearance" detail="Optimized for iPhone" />
         <div class="grid grid-cols-3 gap-2 p-4">
@@ -1132,6 +1141,9 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
     createSignal<Settlement>();
   const [paymentCurrency, setPaymentCurrency] = createSignal("USD");
   const [toast, setToast] = createSignal("");
+  const [smartCategoriesEnabled, setSmartCategoriesEnabled] = createSignal(
+    localStorage.getItem(smartCategoriesStorageKey) === "enabled",
+  );
   const [inviteRecovery, setInviteRecovery] = createSignal<"idle" | "accepting" | "waiting">(
     inviteTokenFromHash() ? "accepting" : "idle",
   );
@@ -1143,6 +1155,11 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
   const migrationOnboardingKey = `migration-onboarding-shown:${props.actorId}`;
   let migrationOnboardingChecked = false;
   let toastTimer = 0;
+  function updateSmartCategories(enabled: boolean): void {
+    setSmartCategoriesEnabled(enabled);
+    localStorage.setItem(smartCategoriesStorageKey, enabled ? "enabled" : "disabled");
+    notify(enabled ? "Smart category suggestions enabled" : "Smart category suggestions disabled");
+  }
   async function acceptPendingInvitation(): Promise<void> {
     const invitationToken = inviteTokenFromHash();
     if (!invitationToken) {
@@ -1499,7 +1516,7 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
               />
             </Match>
             <Match when={tab() === "account"}>
-              <AccountView displayName={displayName()} email={props.email} onOpenMigration={() => setMigrationOpen(true)} />
+              <AccountView displayName={displayName()} email={props.email} smartCategoriesEnabled={smartCategoriesEnabled()} onSmartCategoriesChange={updateSmartCategories} onOpenMigration={() => setMigrationOpen(true)} />
             </Match>
           </Switch>
         </main>
@@ -1549,6 +1566,7 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
         }
         targetLabel={editingExpense() ? undefined : expenseTarget()?.label}
         expense={editingExpense()}
+        smartCategoriesEnabled={smartCategoriesEnabled()}
         onOpenChange={(open) => {
           setExpenseOpen(open);
           if (!open) {
