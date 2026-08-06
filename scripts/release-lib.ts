@@ -279,7 +279,7 @@ export interface WebDeploymentResult {
 }
 
 export function parseWranglerVersionId(output: string): string | undefined {
-  const matches = [...output.matchAll(/(?:Current|Worker)\s+Version ID:\s*([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/gi)];
+  const matches = [...output.matchAll(/(?:Current|Worker)\s+Version ID:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi)];
   return matches.at(-1)?.[1]?.toLocaleLowerCase();
 }
 

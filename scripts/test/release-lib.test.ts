@@ -96,6 +96,11 @@ describe("Wrangler deployment output", () => {
       .toBe("22222222-2222-4222-8222-222222222222");
     expect(parseWranglerVersionId("Deployment complete")).toBeUndefined();
   });
+
+  test("accepts Cloudflare version ids that are UUID-shaped but not RFC variants", () => {
+    expect(parseWranglerVersionId("Current Version ID: fe123456-789a-9bcd-7ef0-123456789abc"))
+      .toBe("fe123456-789a-9bcd-7ef0-123456789abc");
+  });
 });
 
 describe("artifact integrity", () => {
