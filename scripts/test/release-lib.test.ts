@@ -101,6 +101,11 @@ describe("Wrangler deployment output", () => {
     expect(parseWranglerVersionId("Current Version ID: fe123456-789a-9bcd-7ef0-123456789abc"))
       .toBe("fe123456-789a-9bcd-7ef0-123456789abc");
   });
+
+  test("ignores Wrangler color control sequences around the version id", () => {
+    expect(parseWranglerVersionId("\u001b[32mCurrent Version ID:\u001b[0m \u001b[1m1a515947-9c96-404c-b23f-c94ef3f9c753\u001b[0m"))
+      .toBe("1a515947-9c96-404c-b23f-c94ef3f9c753");
+  });
 });
 
 describe("artifact integrity", () => {

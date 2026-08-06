@@ -8,6 +8,7 @@ describe("PWA release upgrades", () => {
     const source = await readFile(resolve(import.meta.dir, "../../apps/web/public/tally-sw.js"), "utf8");
     const listeners = new Map<string, (event: Record<string, unknown>) => void>();
     const cacheEntries = new Map<string, Response>();
+    const deletedCaches: string[] = [];
     const deviceLedger = new Map([["pending-operation", { amountMinor: 5500 }]]);
     let onlineShell = "<script src='/assets/v1.js'></script>";
 
@@ -29,8 +30,8 @@ describe("PWA release upgrades", () => {
     };
     const caches = {
       async open() { return cache; },
-      async keys() { return ["tally-shell-v2"]; },
-      async delete() { return true; },
+      async keys() { return ["tallied-shell-v3"]; },
+      async delete(name: string) { deletedCaches.push(name); return true; },
       async match(request: string | { url?: string }) { return cacheEntries.get(normalize(request))?.clone(); },
     };
     const self = {
@@ -47,6 +48,11 @@ describe("PWA release upgrades", () => {
     listeners.get("install")?.({ waitUntil(value: Promise<unknown>) { installPromise = value; } });
     await installPromise;
     expect(await cacheEntries.get("/")?.text()).toContain("v1.js");
+
+    let activatePromise: Promise<unknown> | undefined;
+    listeners.get("activate")?.({ waitUntil(value: Promise<unknown>) { activatePromise = value; } });
+    await activatePromise;
+    expect(deletedCaches).toEqual(["tallied-shell-v3"]);
 
     onlineShell = "<script src='/assets/v2.js'></script>";
     let navigationPromise: Promise<Response> | undefined;
