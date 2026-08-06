@@ -4,6 +4,43 @@ import vm from "node:vm";
 import { resolve } from "node:path";
 
 describe("PWA release upgrades", () => {
+  test("releases installs controlled by the legacy worker without clearing device data", async () => {
+    const source = await readFile(resolve(import.meta.dir, "../../apps/web/public/sw.js"), "utf8");
+    const listeners = new Map<string, (event: Record<string, unknown>) => void>();
+    const deletedCaches: string[] = [];
+    const deviceLedger = new Map([["pending-operation", { amountMinor: 5500 }]]);
+    const caches = {
+      async keys() { return ["tally-shell-v1", "tallied-shell-v2", "unrelated-cache"]; },
+      async delete(name: string) { deletedCaches.push(name); return true; },
+    };
+    const networkFetch = async () => new Response("<title>Tallied</title>", { status: 200 });
+    const self = {
+      clients: { async claim() {} },
+      async skipWaiting() {},
+      addEventListener(type: string, listener: (event: Record<string, unknown>) => void) {
+        listeners.set(type, listener);
+      },
+    };
+    vm.runInNewContext(source, { self, caches, fetch: networkFetch, Promise });
+
+    let installPromise: Promise<unknown> | undefined;
+    listeners.get("install")?.({ waitUntil(value: Promise<unknown>) { installPromise = value; } });
+    await installPromise;
+
+    let activatePromise: Promise<unknown> | undefined;
+    listeners.get("activate")?.({ waitUntil(value: Promise<unknown>) { activatePromise = value; } });
+    await activatePromise;
+    expect(deletedCaches).toEqual(["tally-shell-v1", "tallied-shell-v2"]);
+
+    let fetchPromise: Promise<Response> | undefined;
+    listeners.get("fetch")?.({
+      request: { method: "GET", url: "https://tally.test/" },
+      respondWith(value: Promise<Response>) { fetchPromise = value; },
+    });
+    expect(await (await fetchPromise)?.text()).toContain("Tallied");
+    expect(deviceLedger.get("pending-operation")).toEqual({ amountMinor: 5500 });
+  });
+
   test("serves the new online shell, refreshes the offline shell, and leaves device data untouched", async () => {
     const source = await readFile(resolve(import.meta.dir, "../../apps/web/public/tally-sw.js"), "utf8");
     const listeners = new Map<string, (event: Record<string, unknown>) => void>();
