@@ -12,6 +12,7 @@ import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { LocalExpense } from "../lib/db";
 import { isLocalToday, localDateValue } from "../lib/dates";
 import { validateExpenseForm, type ExpenseFormIssue } from "../lib/expense-form";
+import { EXPENSE_CATEGORIES } from "../lib/expense-categories";
 import { describeExpenseOutcome } from "../lib/group-insights";
 import { appStore, calculateExpenseAllocations, calculateExpensePayers, createExpense, updateExpense, type SplitMethod } from "../lib/store";
 import { Avatar, Button } from "./ui";
@@ -35,7 +36,6 @@ const splitMethods: Array<{ id: SplitMethod; label: string }> = [
   { id: "percentage", label: "Percent" },
 ];
 
-const categories = ["General", "Dining out", "Groceries", "Liquor", "Rent", "Household supplies", "Utilities", "Transportation", "Gas/fuel", "Taxi", "Plane", "Hotel", "Entertainment", "Games", "Medical expenses", "Gifts", "Education", "Pets"];
 const currencies = ["USD", "CAD", "EUR", "GBP", "INR", "AUD", "JPY", "SGD", "CHF", "CNY"];
 type ComposerPanel = "none" | "payer" | "split" | "date" | "details";
 
@@ -496,7 +496,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
               <Show when={activePanel() === "details"}>
                 <section class="disclosure-panel grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2" aria-label="More expense details">
                   <div class="disclosure-heading sm:col-span-2"><div><p>More details</p><small>Optional fields for bookkeeping.</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
-                  <label class="grid gap-2 text-sm font-medium">Category<select class="form-control" value={category()} onInput={(event) => setCategory(event.currentTarget.value)}><For each={categories}>{(item) => <option>{item}</option>}</For></select></label>
+                  <label class="grid gap-2 text-sm font-medium">Category<select class="form-control" value={category()} onInput={(event) => setCategory(event.currentTarget.value)}><For each={EXPENSE_CATEGORIES}>{(item) => <option>{item}</option>}</For></select></label>
                   <label class="grid gap-2 text-sm font-medium">Currency<select class="form-control" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)}><For each={currencies}>{(item) => <option value={item}>{item}</option>}</For></select></label>
                   <label class="grid gap-2 text-sm font-medium sm:col-span-2">Note <span class="sr-only">optional</span><textarea class="form-control min-h-20 resize-y py-2" value={notes()} onInput={(event) => setNotes(event.currentTarget.value)} placeholder="Optional note" maxlength={5000} /></label>
                 </section>

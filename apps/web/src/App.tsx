@@ -1,6 +1,5 @@
 import Activity from "lucide-solid/icons/activity";
-import BedSingle from "lucide-solid/icons/bed-single";
-import CarFront from "lucide-solid/icons/car-front";
+import ArrowRightLeft from "lucide-solid/icons/arrow-right-left";
 import CheckCircle2 from "lucide-solid/icons/check-circle-2";
 import ChevronLeft from "lucide-solid/icons/chevron-left";
 import ChevronRight from "lucide-solid/icons/chevron-right";
@@ -8,22 +7,23 @@ import CircleUserRound from "lucide-solid/icons/circle-user-round";
 import Cloud from "lucide-solid/icons/cloud";
 import CloudOff from "lucide-solid/icons/cloud-off";
 import DatabaseBackup from "lucide-solid/icons/database-backup";
-import Coffee from "lucide-solid/icons/coffee";
 import House from "lucide-solid/icons/house";
 import LockKeyhole from "lucide-solid/icons/lock-keyhole";
 import LogOut from "lucide-solid/icons/log-out";
 import Mail from "lucide-solid/icons/mail";
 import Moon from "lucide-solid/icons/moon";
+import MessageCircle from "lucide-solid/icons/message-circle";
+import PencilLine from "lucide-solid/icons/pencil-line";
 import Plus from "lucide-solid/icons/plus";
 import ReceiptText from "lucide-solid/icons/receipt-text";
 import RefreshCw from "lucide-solid/icons/refresh-cw";
+import RotateCcw from "lucide-solid/icons/rotate-ccw";
 import Scale from "lucide-solid/icons/scale";
 import ShieldCheck from "lucide-solid/icons/shield-check";
-import ShoppingBasket from "lucide-solid/icons/shopping-basket";
 import Sparkles from "lucide-solid/icons/sparkles";
 import Sun from "lucide-solid/icons/sun";
-import Ticket from "lucide-solid/icons/ticket";
-import Utensils from "lucide-solid/icons/utensils";
+import Trash2 from "lucide-solid/icons/trash-2";
+import UserMinus from "lucide-solid/icons/user-minus";
 import UsersRound from "lucide-solid/icons/users-round";
 import UserPlus from "lucide-solid/icons/user-plus";
 import X from "lucide-solid/icons/x";
@@ -42,6 +42,7 @@ import {
   onMount,
 } from "solid-js";
 import { BrandMark } from "./components/BrandMark";
+import { CategoryMark } from "./components/CategoryMark";
 import { ContactInviteDialog } from "./components/ContactInviteDialog";
 import { ExpenseComposer } from "./components/ExpenseComposer";
 import { ExpenseDetail } from "./components/ExpenseDetail";
@@ -140,25 +141,6 @@ function expenseDate(value: string): Date {
 
 function monthLabel(value: string): string {
   return new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(`${value}-15T12:00:00`));
-}
-
-function CategoryMark(props: { category: string }) {
-  const value = props.category.toLocaleLowerCase();
-  const Icon = value.includes("food") || value.includes("dinner") || value.includes("restaurant")
-    ? Utensils
-    : value.includes("coffee") || value.includes("drink")
-      ? Coffee
-      : value.includes("car") || value.includes("taxi") || value.includes("transport")
-        ? CarFront
-        : value.includes("grocery") || value.includes("shop")
-          ? ShoppingBasket
-          : value.includes("hotel") || value.includes("stay")
-            ? BedSingle
-            : value.includes("ticket") || value.includes("event")
-              ? Ticket
-              : ReceiptText;
-  const tone = [...value].reduce((total, character) => total + character.charCodeAt(0), 0) % 4;
-  return <span class={`category-icon category-tone-${tone}`}><Icon size={17} /></span>;
 }
 
 function memberName(groupId: string, userId: string, actorId: string): string {
@@ -281,17 +263,14 @@ function ExpenseList(props: {
   });
   return (
     <Card class="expense-ledger">
-      <SectionHeading
-        title="Activity"
-        detail={`${activeCount()} ${activeCount() === 1 ? "expense" : "expenses"}${paymentCount() ? ` · ${paymentCount()} ${paymentCount() === 1 ? "payment" : "payments"}` : ""}`}
-        action={
-          <Show when={props.onAdd}>
-            <button class="list-add-action" type="button" onClick={() => props.onAdd?.()}>
-              <Plus size={14} /> Add expense
-            </button>
-          </Show>
-        }
-      />
+      <div class="expense-list-toolbar">
+        <span>{activeCount()} {activeCount() === 1 ? "expense" : "expenses"}{paymentCount() ? ` · ${paymentCount()} ${paymentCount() === 1 ? "payment" : "payments"}` : ""}</span>
+        <Show when={props.onAdd}>
+          <button class="list-add-action" type="button" onClick={() => props.onAdd?.()}>
+            <Plus size={14} /> Add expense
+          </button>
+        </Show>
+      </div>
       <Show
         when={timeline().length}
         fallback={
@@ -312,7 +291,7 @@ function ExpenseList(props: {
           <For each={expenseMonths()}>
             {(month) => <section class="expense-month" aria-label={month.label}>
               <div class="expense-month-heading">{month.label}</div>
-              <div class="divide-y divide-border/60">
+              <div class="expense-month-list">
                 <For each={month.items}>
                   {(item) => <Switch>
                     <Match when={item.kind === "expense" ? item.expense : undefined}>{(expense) => {
@@ -322,7 +301,7 @@ function ExpenseList(props: {
                         <time class="expense-date-rail" datetime={expense().expenseDate}><span>{new Intl.DateTimeFormat(undefined, { month: "short" }).format(date)}</span><strong>{new Intl.DateTimeFormat(undefined, { day: "2-digit" }).format(date)}</strong></time>
                         <CategoryMark category={expense().category} />
                         <div class="min-w-0"><strong class="expense-row-title">{expense().description}</strong><span class="expense-row-context">{payer} paid · split {expense().allocations.length} {expense().allocations.length === 1 ? "way" : "ways"}{expense().syncStatus === "pending" ? " · on device" : ""}{expense().status === "voided" ? " · deleted" : ""}</span></div>
-                        <div class="expense-row-money"><strong classList={{ "money-in": expense().yourNetMinor > 0, "money-out": expense().yourNetMinor < 0, "sync-attention": expense().syncStatus === "conflicted" || expense().syncStatus === "rejected" }}>{expense().syncStatus === "conflicted" ? "needs review" : expense().syncStatus === "rejected" ? "not synced" : expense().status === "voided" ? "deleted" : expense().yourNetMinor > 0 ? `+${money(expense().yourNetMinor, expense().currency)}` : expense().yourNetMinor < 0 ? `−${money(-expense().yourNetMinor, expense().currency)}` : money(0, expense().currency)}</strong><span>{expense().status === "voided" ? `deleted · ${money(expense().amountMinor, expense().currency)}` : expense().yourNetMinor > 0 ? "you lent" : expense().yourNetMinor < 0 ? "you owe" : "settled"}</span></div>
+                        <div class="expense-row-money"><strong classList={{ "money-in": expense().yourNetMinor > 0, "money-out": expense().yourNetMinor < 0, "sync-attention": expense().syncStatus === "conflicted" || expense().syncStatus === "rejected" }}>{expense().syncStatus === "conflicted" ? "needs review" : expense().syncStatus === "rejected" ? "not synced" : expense().status === "voided" ? "deleted" : expense().yourNetMinor > 0 ? `+${money(expense().yourNetMinor, expense().currency)}` : expense().yourNetMinor < 0 ? `−${money(-expense().yourNetMinor, expense().currency)}` : money(0, expense().currency)}</strong><span classList={{ "money-in": expense().yourNetMinor > 0, "money-out": expense().yourNetMinor < 0 }}>{expense().status === "voided" ? `deleted · ${money(expense().amountMinor, expense().currency)}` : expense().yourNetMinor > 0 ? "you lent" : expense().yourNetMinor < 0 ? "you owe" : "settled"}</span></div>
                         <ChevronRight size={15} class="expense-row-chevron" />
                       </button>;
                     }}</Match>
@@ -409,7 +388,7 @@ function GroupsOverview(props: {
                     <small>{people()} {people() === 1 ? "person" : "people"} · {expenses()} {expenses() === 1 ? "expense" : "expenses"}{payments() ? ` · ${payments()} ${payments() === 1 ? "payment" : "payments"}` : ""}</small>
                   </span>
                   <span class="group-overview-balance">
-                    <small>{balance() > 0 ? "you’re owed" : balance() < 0 ? "you owe" : "settled"}</small>
+                    <small classList={{ "money-in": balance() > 0, "money-out": balance() < 0 }}>{balance() > 0 ? "you’re owed" : balance() < 0 ? "you owe" : "settled"}</small>
                     <strong classList={{ "money-in": balance() > 0, "money-out": balance() < 0 }}>
                       {money(Math.abs(balance()), group.settlementCurrency)}
                     </strong>
@@ -532,21 +511,24 @@ function GroupsView(props: {
   return (
     <div class="page-enter space-y-5 sm:space-y-6">
       <header class="group-page-heading">
-        <div>
+        <div class="group-heading-copy">
           <button class="group-back-action" type="button" onClick={props.onShowOverview}>
             <ChevronLeft size={15} /> All groups
           </button>
-          <h1 class="page-title">{group()?.name ?? "Groups"}</h1>
+          <div class="group-title-line">
+            <h1 class="page-title">{group()?.name ?? "Groups"}</h1>
+            <Show when={group() && hasLedgerEntries()}>
+              <span class="group-currency-badge" aria-label={`Group currency ${group()?.settlementCurrency}, locked after the first entry`} title="Group currency is locked after the first entry">{group()?.settlementCurrency}</span>
+            </Show>
+          </div>
           <Show when={group()} fallback={<p class="mt-1 text-sm text-muted-foreground">No groups yet</p>}>
             <p class="mt-1 text-sm text-muted-foreground">
               {people().length + 1} {people().length === 0 ? "person" : "people"} · {activeExpenses().length} {activeExpenses().length === 1 ? "expense" : "expenses"}{payments().length ? ` · ${payments().length} ${payments().length === 1 ? "payment" : "payments"}` : ""}
             </p>
           </Show>
         </div>
-        <Show when={group()}>
-          <Show when={hasLedgerEntries()} fallback={<label class="group-currency-setting"><span>Group currency</span><select value={group()?.settlementCurrency} disabled={changingCurrency()} onChange={(event) => void updateCurrency(event.currentTarget.value)} aria-describedby="group-currency-note"><option value="USD">USD</option><option value="CAD">CAD</option><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="INR">INR</option></select><small id="group-currency-note">Editable until the first entry</small></label>}>
-            <span class="group-currency-badge" aria-label={`Group currency ${group()?.settlementCurrency}, locked after the first entry`} title="Group currency is locked after the first entry">{group()?.settlementCurrency}</span>
-          </Show>
+        <Show when={group() && !hasLedgerEntries()}>
+          <label class="group-currency-setting"><span>Group currency</span><select value={group()?.settlementCurrency} disabled={changingCurrency()} onChange={(event) => void updateCurrency(event.currentTarget.value)} aria-describedby="group-currency-note"><option value="USD">USD</option><option value="CAD">CAD</option><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="INR">INR</option></select><small id="group-currency-note">Editable until the first entry</small></label>
         </Show>
       </header>
       <Show
@@ -599,9 +581,9 @@ function GroupsView(props: {
                   <section class="settlement-warning" role="status"><div><strong>Settlement paused</strong><span>{settlementBlockers()} provisional {settlementBlockers() === 1 ? "expense needs" : "expenses need"} review before anyone records a payment.</span></div><button type="button" onClick={() => setGroupSection("expenses")}>View activity</button></section>
                 </Show>
                 <section class="balance-strip" aria-label={`${activeGroup.name} balance summary`}>
-                  <div class="balance-cell balance-cell-in"><span class="micro-label">Coming in</span><strong class="money-type">{money(incoming(), currency())}</strong></div>
-                  <div class="balance-cell balance-cell-out"><span class="micro-label">Going out</span><strong class="money-type">{money(outgoing(), currency())}</strong></div>
-                  <div class="balance-cell balance-cell-net"><span class="micro-label">Net balance</span><strong class="money-type">{yourBalance() === 0 ? money(0, currency()) : `${yourBalance() > 0 ? "+" : "−"}${money(Math.abs(yourBalance()), currency())}`}</strong></div>
+                  <div class="balance-cell balance-cell-in"><span class="micro-label">Coming in</span><strong class="money-type money-in">{money(incoming(), currency())}</strong></div>
+                  <div class="balance-cell balance-cell-out"><span class="micro-label">Going out</span><strong class="money-type money-out">{money(outgoing(), currency())}</strong></div>
+                  <div class="balance-cell balance-cell-net"><span class="micro-label">Net balance</span><strong class="money-type" classList={{ "money-in": yourBalance() > 0, "money-out": yourBalance() < 0 }}>{yourBalance() === 0 ? money(0, currency()) : `${yourBalance() > 0 ? "+" : "−"}${money(Math.abs(yourBalance()), currency())}`}</strong></div>
                   <select class="balance-currency" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)} aria-label="Balance currency"><For each={currenciesFor(activeGroup.id)}>{(item) => <option value={item}>{item}</option>}</For></select>
                 </section>
                 <section class="people-balance-list" aria-label={`Balances in ${activeGroup.name}`}>
@@ -614,7 +596,7 @@ function GroupsView(props: {
                         <article class="person-balance-block" classList={{ "tone-mint": balance() < 0, "tone-coral": balance() > 0, "tone-butter": balance() === 0 }}>
                           <Avatar name={member.displayName} class="person-avatar" />
                           <div class="min-w-0 flex-1"><strong class="block truncate">{member.displayName}</strong><span class="micro-label block truncate">{member.status === "placeholder" ? "Not claimed · " : ""}{related() || activeGroup.name}</span></div>
-                          <div class="shrink-0 text-right"><strong class="money-type block" classList={{ "money-in": balance() < 0, "money-out": balance() > 0 }}>{balance() === 0 ? money(0, currency()) : `${balance() < 0 ? "+" : "−"}${money(Math.abs(balance()), currency())}`}</strong><span class="micro-label">{balance() < 0 ? "owes you" : balance() > 0 ? "you owe" : "settled"}</span></div>
+                          <div class="shrink-0 text-right"><strong class="money-type block" classList={{ "money-in": balance() < 0, "money-out": balance() > 0 }}>{balance() === 0 ? money(0, currency()) : `${balance() < 0 ? "+" : "−"}${money(Math.abs(balance()), currency())}`}</strong><span class="micro-label" classList={{ "money-in": balance() < 0, "money-out": balance() > 0 }}>{balance() < 0 ? "owes you" : balance() > 0 ? "you owe" : "settled"}</span></div>
                           <button class="ink-action" type="button" disabled={!settlement() || settlementBlockers() > 0} onClick={() => props.onSettle(settlement(), currency())}>{member.status === "placeholder" ? "Unclaimed" : balance() > 0 ? "Pay" : "Settle"}</button>
                         </article>
                       );
@@ -757,7 +739,7 @@ function OverviewView(props: {
             <section class="overview-balance" aria-label={`${total.currency} balance across all groups`}>
               <div class="overview-balance-primary">
                 <span class="micro-label">Summary · {total.currency}</span>
-                <strong class="money-type">
+                <strong class="money-type" classList={{ "money-in": total.net > 0, "money-out": total.net < 0 }}>
                   {total.net === 0 ? money(0, total.currency) : `${total.net > 0 ? "+" : "−"}${money(Math.abs(total.net), total.currency)}`}
                 </strong>
                 <p>{total.net > 0 ? "owed to you" : total.net < 0 ? "you owe overall" : "all settled"}</p>
@@ -809,7 +791,7 @@ function OverviewView(props: {
                     <span class="block truncate text-xs text-muted-foreground">{groupNames(relationship.groupIds)}</span>
                   </button>
                   <div class="text-right">
-                    <span class="relationship-direction">{relationship.amountMinor > 0 ? "owes you" : "you owe"}</span>
+                    <span class="relationship-direction" classList={{ "money-in": relationship.amountMinor > 0, "money-out": relationship.amountMinor < 0 }}>{relationship.amountMinor > 0 ? "owes you" : "you owe"}</span>
                     <strong class="block text-sm tabular-nums" classList={{ "money-in": relationship.amountMinor > 0, "money-out": relationship.amountMinor < 0 }}>{money(Math.abs(relationship.amountMinor), relationship.currency)}</strong>
                   </div>
                   <button
@@ -851,7 +833,7 @@ function OverviewView(props: {
               return <button type="button" class="home-group-row" onClick={() => props.onOpenGroup(group.id)}>
                 <Avatar name={group.name} class="size-10 text-xs" />
                 <span class="min-w-0 flex-1 text-left"><strong>{group.name}</strong><small>{groupMemberCount(group.id)} {groupMemberCount(group.id) === 1 ? "person" : "people"} · {groupExpenseCount(group.id)} {groupExpenseCount(group.id) === 1 ? "expense" : "expenses"}{paymentCount() ? ` · ${paymentCount()} ${paymentCount() === 1 ? "payment" : "payments"}` : ""}</small></span>
-                <span class="home-group-balance"><small>{balance() > 0 ? "you’re owed" : balance() < 0 ? "you owe" : "settled"}</small><strong>{money(Math.abs(balance()), group.settlementCurrency)}</strong></span>
+                <span class="home-group-balance"><small classList={{ "money-in": balance() > 0, "money-out": balance() < 0 }}>{balance() > 0 ? "you’re owed" : balance() < 0 ? "you owe" : "settled"}</small><strong classList={{ "money-in": balance() > 0, "money-out": balance() < 0 }}>{money(Math.abs(balance()), group.settlementCurrency)}</strong></span>
                 <ChevronRight size={16} />
               </button>;
             }}
@@ -893,6 +875,33 @@ const activityCopy: Partial<Record<LocalOperation["type"], string>> = {
   GroupMemberAdded: "added a member",
   GroupMemberRemoved: "removed a member",
 };
+
+function ActivityMark(props: { operation: LocalOperation; expense: LocalExpense | undefined }) {
+  if (props.operation.type === "ExpenseCreated" && props.expense) {
+    return <CategoryMark category={props.expense.category} />;
+  }
+  const visual = () => {
+    switch (props.operation.type) {
+      case "ExpenseAmended": return { Icon: PencilLine, tone: "change" };
+      case "ExpenseVoided": return { Icon: Trash2, tone: "danger" };
+      case "ExpenseRestored": return { Icon: RotateCcw, tone: "change" };
+      case "CommentAdded": return { Icon: MessageCircle, tone: "change" };
+      case "PaymentRecorded":
+      case "PaymentReversed": return { Icon: ArrowRightLeft, tone: "payment" };
+      case "ImportedTransactionRecorded":
+      case "ImportedTransactionVoided":
+      case "OpeningBalanceCreated":
+      case "OpeningBalanceVoided": return { Icon: DatabaseBackup, tone: "import" };
+      case "GroupCreated": return { Icon: UsersRound, tone: "group" };
+      case "GroupCurrencyChanged": return { Icon: RefreshCw, tone: "change" };
+      case "GroupMemberAdded": return { Icon: UserPlus, tone: "group" };
+      case "GroupMemberRemoved": return { Icon: UserMinus, tone: "danger" };
+      default: return { Icon: Activity, tone: "general" };
+    }
+  };
+  const { Icon, tone } = visual();
+  return <span class={`category-icon activity-mark category-tone-${tone}`} aria-hidden="true"><Icon size={17} stroke-width={2} /></span>;
+}
 
 function ActivityView(props: {
   actorId: string;
@@ -959,7 +968,7 @@ function ActivityView(props: {
                 const group = createMemo(() => appStore.groups().find((item) => item.id === operation.groupId));
                 const actor = createMemo(() => operation.actorId === props.actorId ? "You" : memberName(operation.groupId, operation.actorId, props.actorId));
                 return <article class="activity-row">
-                  <Avatar name={actor()} class="size-10 text-xs" />
+                  <ActivityMark operation={operation} expense={expense()} />
                   <Show when={expense()} fallback={
                     <div class="activity-row-main min-h-11">
                       <strong>{actor()} {activityCopy[operation.type] ?? "updated the group"}</strong>
