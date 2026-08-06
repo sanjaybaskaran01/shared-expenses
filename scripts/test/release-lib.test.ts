@@ -8,6 +8,7 @@ import {
   atomicSwitchSymlink,
   buildChecksums,
   parseReleaseArgs,
+  parseWranglerVersionId,
   planReleaseOperations,
   pollHealth,
   pollWebDeployment,
@@ -81,6 +82,19 @@ describe("repository and CI gates", () => {
       ).databaseId,
     ).toBe(3);
     expect(() => selectSuccessfulCiRun([], commit)).toThrow("successful CI");
+  });
+});
+
+describe("Wrangler deployment output", () => {
+  test("extracts the deployed version without waiting on eventually consistent status", () => {
+    expect(parseWranglerVersionId(`\nUploaded shared-expenses-web\nCurrent Version ID: 9a01bc23-4567-489a-bcde-f0123456789a\n`))
+      .toBe("9a01bc23-4567-489a-bcde-f0123456789a");
+  });
+
+  test("uses the last version id and rejects unrelated output", () => {
+    expect(parseWranglerVersionId("Worker Version ID: 11111111-1111-4111-8111-111111111111\nCurrent Version ID: 22222222-2222-4222-8222-222222222222"))
+      .toBe("22222222-2222-4222-8222-222222222222");
+    expect(parseWranglerVersionId("Deployment complete")).toBeUndefined();
   });
 });
 
