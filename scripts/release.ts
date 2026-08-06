@@ -18,6 +18,7 @@ import {
   atomicSwitchSymlink,
   listFiles,
   parseReleaseArgs,
+  parseWranglerVersionId,
   planReleaseOperations,
   pollHealth,
   pollWebDeployment,
@@ -534,14 +535,14 @@ async function deployWeb(
   const indexHtml = await readFile(join(artifactPath, manifest.targets.web.entrypoint), "utf8");
   const expectedAssets = expectedWebAssets(indexHtml);
   try {
-    await wrangler(context, [
+    const deployment = await wrangler(context, [
       "deploy",
       "--config", context.wranglerConfig,
       "--name", context.workerName,
       "--assets", join(artifactPath, "web"),
     ]);
-    const version = await currentWorkerVersion(context);
-    if (version === previousVersion) throw new Error("Cloudflare Worker version did not change");
+    const version = parseWranglerVersionId(`${deployment.stdout}\n${deployment.stderr}`)
+      ?? await currentWorkerVersion(context);
     await pollWebDeployment(fetchWithTimeout, {
       baseUrl: context.webUrl,
       expectedCommit: manifest.commit,
