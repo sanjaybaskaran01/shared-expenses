@@ -6,6 +6,7 @@ import ChevronRight from "lucide-solid/icons/chevron-right";
 import ChevronUp from "lucide-solid/icons/chevron-up";
 import LoaderCircle from "lucide-solid/icons/loader-circle";
 import Scale from "lucide-solid/icons/scale";
+import Sparkles from "lucide-solid/icons/sparkles";
 import SlidersHorizontal from "lucide-solid/icons/sliders-horizontal";
 import UsersRound from "lucide-solid/icons/users-round";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
@@ -13,6 +14,7 @@ import type { LocalExpense } from "../lib/db";
 import { isLocalToday, localDateValue } from "../lib/dates";
 import { validateExpenseForm, type ExpenseFormIssue } from "../lib/expense-form";
 import { EXPENSE_CATEGORIES, suggestExpenseCategory } from "../lib/expense-categories";
+import { parseExpenseLanguage, type ExpenseLanguageChip } from "../lib/expense-language";
 import { describeExpenseOutcome } from "../lib/group-insights";
 import { appStore, calculateExpenseAllocations, calculateExpensePayers, createExpense, updateExpense, type SplitMethod } from "../lib/store";
 import { CategoryMark } from "./CategoryMark";
@@ -36,10 +38,12 @@ const splitMethods: Array<{ id: SplitMethod; label: string }> = [
   { id: "shares", label: "Shares" },
   { id: "exact", label: "Amounts" },
   { id: "percentage", label: "Percent" },
+  { id: "adjustment", label: "Adjust" },
 ];
 
 const currencies = ["USD", "CAD", "EUR", "GBP", "INR", "AUD", "JPY", "SGD", "CHF", "CNY"];
 type ComposerPanel = "none" | "payer" | "split" | "date" | "details";
+type Recurrence = "none" | "weekly" | "fortnightly" | "monthly" | "yearly";
 
 function formatMinor(amountMinor: number, currency = "USD"): string {
   return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(amountMinor / 100);
@@ -50,6 +54,8 @@ function minorInput(amountMinor: number): string {
 }
 
 export function ExpenseComposer(props: ExpenseComposerProps) {
+  const [entryMode, setEntryMode] = createSignal<"natural" | "form">("natural");
+  const [languageText, setLanguageText] = createSignal("");
   const [groupId, setGroupId] = createSignal("");
   const [description, setDescription] = createSignal("");
   const [amount, setAmount] = createSignal("");
@@ -63,7 +69,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   const [splitValues, setSplitValues] = createSignal<Record<string, string>>({});
   const [notes, setNotes] = createSignal("");
   const [currency, setCurrency] = createSignal("USD");
-  const [recurrence, setRecurrence] = createSignal<"none" | "weekly" | "fortnightly" | "monthly" | "yearly">("none");
+  const [recurrence, setRecurrence] = createSignal<Recurrence>("none");
   const [activePanel, setActivePanel] = createSignal<ComposerPanel>("none");
   const [activeSplitParticipantId, setActiveSplitParticipantId] = createSignal<string>();
   const [saving, setSaving] = createSignal(false);
@@ -72,6 +78,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   let wasOpen = false;
   let initializedGroup = "";
   let dialogRef: HTMLDivElement | undefined;
+  let languageInputRef: HTMLTextAreaElement | undefined;
   let amountInputRef: HTMLInputElement | undefined;
   let descriptionInputRef: HTMLInputElement | undefined;
   let payerControlRef: HTMLButtonElement | undefined;
@@ -80,6 +87,15 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
 
   const currentGroup = createMemo(() => appStore.groups().find((group) => group.id === groupId()));
   const groupMembers = createMemo(() => appStore.members().filter((member) => member.groupId === groupId() && member.status === "active"));
+  const languageDraft = createMemo(() => {
+    const text = languageText().trim();
+    if (!text) return undefined;
+    return parseExpenseLanguage(text, {
+      members: groupMembers().map((member) => ({ userId: member.userId, displayName: member.displayName, isActor: member.userId === props.actorId })),
+      defaultCurrency: currency(),
+      defaultParticipantIds: participants(),
+    });
+  });
   const categorySuggestion = createMemo(() => props.smartCategoriesEnabled && !props.expense
     ? suggestExpenseCategory(description(), appStore.expenses().filter((expense) => expense.status === "active"))
     : undefined);
@@ -108,6 +124,8 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       setNotes(editingExpense?.notes ?? "");
       setCurrency(editingExpense?.currency ?? appStore.groups().find((group) => group.id === nextGroupId)?.settlementCurrency ?? "USD");
       setRecurrence(editingExpense?.recurrence ?? "none");
+      setEntryMode(editingExpense ? "form" : "natural");
+      setLanguageText("");
       setActivePanel("none");
       setActiveSplitParticipantId(undefined);
       setError("");
@@ -159,6 +177,74 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
     }
     setActivePanel("details");
     queueMicrotask(() => categorySelectRef?.focus());
+  }
+
+  function applyLanguageDraft(): boolean {
+    const draft = languageDraft();
+    if (!draft || !draft.amount || !draft.description) return false;
+    setAmount(draft.amount);
+    setDescription(draft.description);
+    setCurrency(draft.currency);
+    setDate(draft.expenseDate);
+    setPayerIds(draft.payerIds);
+    setPayerValues(draft.payerValues);
+    setParticipants(draft.participantIds);
+    setSplitMethod(draft.splitMethod);
+    setSplitValues(draft.splitValues);
+    setRecurrence(draft.recurrence);
+    setFormIssue(undefined);
+    setError("");
+    return true;
+  }
+
+  function editLanguageField(field?: ExpenseLanguageChip["field"]): void {
+    if (!applyLanguageDraft()) return;
+    setEntryMode("form");
+    queueMicrotask(() => {
+      if (field === "amount") amountInputRef?.focus();
+      else if (field === "description") descriptionInputRef?.focus();
+      else if (field === "payer") {
+        setActivePanel("payer");
+        payerControlRef?.focus();
+      } else if (field === "split" || field === "participants") {
+        setActivePanel("split");
+        splitControlRef?.focus();
+      } else if (field === "date") setActivePanel("date");
+      else if (field === "recurrence") setActivePanel("details");
+    });
+  }
+
+  async function submitLanguageDraft(): Promise<void> {
+    const draft = languageDraft();
+    if (!draft || draft.status !== "ready" || !draft.amount || !draft.description) return;
+    setSaving(true);
+    setError("");
+    try {
+      const suggestion = props.smartCategoriesEnabled
+        ? suggestExpenseCategory(draft.description, appStore.expenses().filter((expense) => expense.status === "active"))
+        : undefined;
+      await createExpense({
+        groupId: groupId(),
+        description: draft.description,
+        amount: draft.amount,
+        currency: draft.currency,
+        category: suggestion?.action === "apply" ? suggestion.category : "General",
+        expenseDate: draft.expenseDate,
+        payerIds: draft.payerIds,
+        payerValues: draft.payerValues,
+        participantIds: draft.participantIds,
+        splitMethod: draft.splitMethod,
+        splitValues: draft.splitValues,
+        notes: "",
+        recurrence: draft.recurrence,
+      });
+      props.onOpenChange(false);
+      props.onSaved("created");
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Could not save this expense");
+    } finally {
+      setSaving(false);
+    }
   }
 
   createEffect(() => {
@@ -387,7 +473,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
             class="composer-dialog max-h-[100dvh] w-full overflow-y-auto border border-border bg-card outline-none sm:max-h-[94dvh] sm:max-w-xl"
             onOpenAutoFocus={(event) => {
               event.preventDefault();
-              queueMicrotask(() => props.expense ? dialogRef?.focus() : amountInputRef?.focus());
+              queueMicrotask(() => props.expense ? dialogRef?.focus() : languageInputRef?.focus());
             }}
           >
             <header class="composer-header sticky top-0 z-20 grid min-h-14 grid-cols-[1fr_auto_1fr] items-center border-b border-border bg-card px-4">
@@ -418,6 +504,70 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                 </button>
               </Show>
 
+              <Show when={!props.expense && entryMode() === "natural"}>
+                <section class="language-entry" aria-labelledby="language-entry-title">
+                  <div class="language-entry-heading">
+                    <span class="language-entry-mark" aria-hidden="true"><Sparkles size={17} stroke-width={2} /></span>
+                    <div class="min-w-0 flex-1">
+                      <strong id="language-entry-title">Describe the expense</strong>
+                      <small>Names, total, payer, and split—in one sentence.</small>
+                    </div>
+                    <button type="button" onClick={() => { setEntryMode("form"); queueMicrotask(() => amountInputRef?.focus()); }}>Use form</button>
+                  </div>
+                  <label class="language-entry-input">
+                    <span class="sr-only">Describe the expense in plain English</span>
+                    <textarea
+                      ref={languageInputRef}
+                      value={languageText()}
+                      onInput={(event) => { setLanguageText(event.currentTarget.value); setError(""); }}
+                      placeholder="Lunch with Ananya and Rishi for $35, split equally"
+                      autocomplete="off"
+                      autocapitalize="sentences"
+                      enterkeyhint="done"
+                      maxlength={500}
+                    />
+                  </label>
+                  <Show when={languageDraft()}>{(draft) => (
+                    <div class="language-understanding">
+                      <div class="language-understanding-meta" role="status" aria-live="polite" aria-atomic="true">
+                        <span classList={{ ready: draft().status === "ready" }}><i aria-hidden="true" />{draft().status === "ready" ? "Understood on this device" : draft().status === "needs-review" ? "Check one detail" : "Keep typing"}</span>
+                        <small>{draft().elapsedMs < 1 ? "<1 ms" : `${Math.round(draft().elapsedMs)} ms`}</small>
+                      </div>
+                      <div class="language-chip-list" aria-label="Understood expense details">
+                        <For each={draft().chips}>{(chip) => (
+                          <button type="button" onClick={() => editLanguageField(chip.field)}>
+                            <span>{chip.label}</span><strong>{chip.value}</strong>
+                          </button>
+                        )}</For>
+                      </div>
+                      <Show when={draft().issues.length}>
+                        <ul class="language-issues" aria-live="polite">
+                          <For each={draft().issues}>{(issue) => <li>{issue.message}</li>}</For>
+                        </ul>
+                      </Show>
+                    </div>
+                  )}</Show>
+                  <p class="language-privacy"><span aria-hidden="true">●</span> Private and offline. Nothing you type is sent to an AI service.</p>
+                </section>
+
+                <Show when={error()}><p id="expense-language-error" class="error-callout" role="alert">{error()}</p></Show>
+                <footer class="language-entry-footer sticky bottom-0 z-10 -mx-4 mt-1 grid gap-2 border-t border-border bg-card/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur sm:-mx-6 sm:px-6">
+                  <Button
+                    class="h-11 w-full"
+                    type="button"
+                    disabled={!languageDraft() || languageDraft()?.status === "incomplete" || saving()}
+                    onClick={() => languageDraft()?.status === "ready" ? void submitLanguageDraft() : editLanguageField()}
+                  >
+                    <Show when={saving()} fallback={<><Check size={16} /> {languageDraft()?.status === "ready" && languageDraft()?.amount ? `Looks right — add ${formatMinor(Math.round(Number(languageDraft()!.amount) * 100), languageDraft()!.currency)}` : "Review details"}</>}><LoaderCircle class="animate-spin" size={16} /> Saving…</Show>
+                  </Button>
+                  <p class="micro-label text-center">Tap any chip to change it before adding</p>
+                </footer>
+              </Show>
+
+              <Show when={props.expense || entryMode() === "form"}>
+              <Show when={!props.expense}>
+                <button type="button" class="language-mode-return" onClick={() => { setEntryMode("natural"); queueMicrotask(() => languageInputRef?.focus()); }}><Sparkles size={15} /> Describe it in one sentence</button>
+              </Show>
               <label class="amount-stage">
                 <span class="micro-label">Total · {currency()}</span>
                 <span class="amount-native-row">
@@ -491,10 +641,10 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
 
               <Show when={activePanel() === "split"}>
                 <section id="split-panel" class="disclosure-panel split-panel grid gap-4 border border-border p-4" aria-label="Choose how to split">
-                  <div class="disclosure-heading"><div><p>Who owes what?</p><small>{splitMethod() === "equal" ? "The total is divided equally among everyone selected." : splitMethod() === "shares" ? "Give someone more shares when they should cover more of the total." : splitMethod() === "exact" ? "Enter the exact amount each person should cover." : "Enter the percentage each person should cover."}</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
+                  <div class="disclosure-heading"><div><p>Who owes what?</p><small>{splitMethod() === "equal" ? "The total is divided equally among everyone selected." : splitMethod() === "shares" ? "Give someone more shares when they should cover more of the total." : splitMethod() === "exact" ? "Enter the exact amount each person should cover." : splitMethod() === "adjustment" ? "Add or subtract from an equal split. Adjustments must balance to zero." : "Enter the percentage each person should cover."}</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
                   <div>
                     <p class="mb-2 text-sm font-medium">Split method</p>
-                    <div class="split-mode-tabs grid grid-cols-4">
+                    <div class="split-mode-tabs grid grid-cols-5">
                       <For each={splitMethods}>{(method) => <button type="button" class="h-11 rounded-md text-xs font-medium text-muted-foreground transition-[color,background-color,border-color,box-shadow,transform]" classList={{ "bg-card text-foreground shadow-sm": splitMethod() === method.id }} aria-pressed={splitMethod() === method.id} onClick={() => chooseSplitMethod(method.id)}>{method.label}</button>}</For>
                     </div>
                   </div>
@@ -540,6 +690,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                   <div class="disclosure-heading sm:col-span-2"><div><p>More details</p><small>Optional fields for bookkeeping.</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
                   <label class="grid gap-2 text-sm font-medium">Category<select ref={categorySelectRef} class="form-control" value={category()} onInput={(event) => { setCategory(event.currentTarget.value); setCategoryEdited(true); }}><For each={EXPENSE_CATEGORIES}>{(item) => <option>{item}</option>}</For></select></label>
                   <label class="grid gap-2 text-sm font-medium">Currency<select class="form-control" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)}><For each={currencies}>{(item) => <option value={item}>{item}</option>}</For></select></label>
+                  <label class="grid gap-2 text-sm font-medium">Repeats<select class="form-control" value={recurrence()} onInput={(event) => setRecurrence(event.currentTarget.value as Recurrence)}><option value="none">Does not repeat</option><option value="weekly">Weekly</option><option value="fortnightly">Every two weeks</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label>
                   <label class="grid gap-2 text-sm font-medium sm:col-span-2">Note <span class="sr-only">optional</span><textarea class="form-control min-h-20 resize-y py-2" value={notes()} onInput={(event) => setNotes(event.currentTarget.value)} placeholder="Optional note" maxlength={5000} /></label>
                 </section>
               </Show>
@@ -551,6 +702,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                 </Button>
                 <p class="micro-label text-center">Saved on this device first · syncs automatically</p>
               </footer>
+              </Show>
             </form>
           </Dialog.Content>
         </div>
