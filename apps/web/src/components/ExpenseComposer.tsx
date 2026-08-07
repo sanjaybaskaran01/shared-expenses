@@ -9,12 +9,12 @@ import Scale from "lucide-solid/icons/scale";
 import Sparkles from "lucide-solid/icons/sparkles";
 import SlidersHorizontal from "lucide-solid/icons/sliders-horizontal";
 import UsersRound from "lucide-solid/icons/users-round";
-import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import type { LocalExpense } from "../lib/db";
 import { isLocalToday, localDateValue } from "../lib/dates";
 import { validateExpenseForm, type ExpenseFormIssue } from "../lib/expense-form";
 import { EXPENSE_CATEGORIES, suggestExpenseCategory } from "../lib/expense-categories";
-import { parseExpenseLanguage, type ExpenseLanguageChip } from "../lib/expense-language";
+import { parseExpenseLanguage, type ExpenseLanguageChip, type ExpenseLanguageIssue, type ParsedExpenseLanguage } from "../lib/expense-language";
 import { describeExpenseOutcome } from "../lib/group-insights";
 import { appStore, calculateExpenseAllocations, calculateExpensePayers, createExpense, updateExpense, type SplitMethod } from "../lib/store";
 import { CategoryMark } from "./CategoryMark";
@@ -53,6 +53,22 @@ function minorInput(amountMinor: number): string {
   return (amountMinor / 100).toFixed(2);
 }
 
+const languageSafetyIssueCodes = new Set<ExpenseLanguageIssue["code"]>([
+  "ambiguous-fact",
+  "hedged-split",
+  "refund-or-transfer",
+  "untrusted-instruction",
+]);
+
+function languageFormIssue(draft: ParsedExpenseLanguage): ExpenseFormIssue | undefined {
+  if (!draft.amount) return { field: "amount", message: "Enter the expense amount." };
+  if (!draft.description) return { field: "description", message: "Add what this expense was for." };
+  const payerIssue = draft.issues.find((issue) => issue.code === "payer-unspecified" || issue.code === "invalid-payers");
+  if (payerIssue) return { field: "payer", message: payerIssue.message };
+  const splitIssue = draft.issues.find((issue) => issue.code === "invalid-split" || issue.code === "hedged-split" || issue.code === "unknown-member" || issue.code === "ambiguous-member");
+  return splitIssue ? { field: "split", message: splitIssue.message } : undefined;
+}
+
 export function ExpenseComposer(props: ExpenseComposerProps) {
   const [entryMode, setEntryMode] = createSignal<"natural" | "form">("natural");
   const [languageText, setLanguageText] = createSignal("");
@@ -75,6 +91,9 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal("");
   const [formIssue, setFormIssue] = createSignal<ExpenseFormIssue>();
+  const [announcedLanguageStatus, setAnnouncedLanguageStatus] = createSignal("");
+  const [languageSafetyIssues, setLanguageSafetyIssues] = createSignal<ExpenseLanguageIssue[]>([]);
+  const [languageSafetyConfirmed, setLanguageSafetyConfirmed] = createSignal(false);
   let wasOpen = false;
   let initializedGroup = "";
   let dialogRef: HTMLDivElement | undefined;
@@ -83,6 +102,9 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   let descriptionInputRef: HTMLInputElement | undefined;
   let payerControlRef: HTMLButtonElement | undefined;
   let splitControlRef: HTMLButtonElement | undefined;
+  let dateControlRef: HTMLButtonElement | undefined;
+  let detailsControlRef: HTMLButtonElement | undefined;
+  let languageSafetyConfirmationRef: HTMLInputElement | undefined;
   let categorySelectRef: HTMLSelectElement | undefined;
 
   const currentGroup = createMemo(() => appStore.groups().find((group) => group.id === groupId()));
@@ -96,6 +118,15 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       defaultParticipantIds: participants(),
     });
   });
+  const languageStatusText = createMemo(() => {
+    const draft = languageDraft();
+    if (!draft) return "";
+    if (draft.status === "ready") return "Expense details are ready to add.";
+    const details = `${draft.issues.length} ${draft.issues.length === 1 ? "detail" : "details"}`;
+    return draft.status === "incomplete"
+      ? `Complete ${details} in the form before adding this expense.`
+      : `Review ${details} before adding this expense.`;
+  });
   const categorySuggestion = createMemo(() => props.smartCategoriesEnabled && !props.expense
     ? suggestExpenseCategory(description(), appStore.expenses().filter((expense) => expense.status === "active"))
     : undefined);
@@ -104,7 +135,17 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   const payerSummary = createMemo(() => {
     if (payerIds().length > 1) return `${payerIds().length} people`;
     const payerId = payerIds()[0];
-    return payerId === props.actorId ? "You" : groupMembers().find((member) => member.userId === payerId)?.displayName ?? "Someone";
+    return payerId === props.actorId ? "You" : groupMembers().find((member) => member.userId === payerId)?.displayName ?? "Choose payer";
+  });
+
+  createEffect(() => {
+    const message = languageStatusText();
+    if (!message) {
+      setAnnouncedLanguageStatus("");
+      return;
+    }
+    const timeout = setTimeout(() => setAnnouncedLanguageStatus(message), 350);
+    onCleanup(() => clearTimeout(timeout));
   });
 
   createEffect(() => {
@@ -130,6 +171,8 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       setActiveSplitParticipantId(undefined);
       setError("");
       setFormIssue(undefined);
+      setLanguageSafetyIssues([]);
+      setLanguageSafetyConfirmed(false);
       if (editingExpense) {
         const participantIds = editingExpense.allocations.map(({ participantId }) => participantId);
         const equalAllocations = calculateExpenseAllocations({
@@ -181,9 +224,9 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
 
   function applyLanguageDraft(): boolean {
     const draft = languageDraft();
-    if (!draft || !draft.amount || !draft.description) return false;
-    setAmount(draft.amount);
-    setDescription(draft.description);
+    if (!draft) return false;
+    setAmount(draft.amount ?? "");
+    setDescription(draft.description ?? "");
     setCurrency(draft.currency);
     setDate(draft.expenseDate);
     setPayerIds(draft.payerIds);
@@ -192,25 +235,41 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
     setSplitMethod(draft.splitMethod);
     setSplitValues(draft.splitValues);
     setRecurrence(draft.recurrence);
+    setLanguageSafetyIssues(draft.issues.filter((issue) => languageSafetyIssueCodes.has(issue.code)));
+    setLanguageSafetyConfirmed(false);
     setFormIssue(undefined);
     setError("");
     return true;
   }
 
   function editLanguageField(field?: ExpenseLanguageChip["field"]): void {
+    const draft = languageDraft();
     if (!applyLanguageDraft()) return;
+    const reviewIssue = !field && draft ? languageFormIssue(draft) : undefined;
+    if (reviewIssue) {
+      setFormIssue(reviewIssue);
+      setError(reviewIssue.message);
+    } else if (!field && draft?.status !== "ready") {
+      setError(draft?.issues[0]?.message ?? "Review the expense details before adding.");
+    }
     setEntryMode("form");
     queueMicrotask(() => {
-      if (field === "amount") amountInputRef?.focus();
-      else if (field === "description") descriptionInputRef?.focus();
-      else if (field === "payer") {
+      const focusField = field ?? reviewIssue?.field;
+      if (focusField === "amount") amountInputRef?.focus();
+      else if (focusField === "description") descriptionInputRef?.focus();
+      else if (focusField === "payer") {
         setActivePanel("payer");
         payerControlRef?.focus();
-      } else if (field === "split" || field === "participants") {
+      } else if (focusField === "split" || focusField === "participants") {
         setActivePanel("split");
         splitControlRef?.focus();
-      } else if (field === "date") setActivePanel("date");
-      else if (field === "recurrence") setActivePanel("details");
+      } else if (focusField === "date") {
+        setActivePanel("date");
+        dateControlRef?.focus();
+      } else if (focusField === "recurrence") {
+        setActivePanel("details");
+        detailsControlRef?.focus();
+      } else descriptionInputRef?.focus();
     });
   }
 
@@ -377,9 +436,25 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
     if (splitMethod() !== "equal") initializeValues(splitMethod());
   }
 
+  function panelTrigger(panel: Exclude<ComposerPanel, "none">): HTMLButtonElement | undefined {
+    if (panel === "payer") return payerControlRef;
+    if (panel === "split") return splitControlRef;
+    if (panel === "date") return dateControlRef;
+    return detailsControlRef;
+  }
+
+  function closePanel(): void {
+    const panel = activePanel();
+    setActivePanel("none");
+    if (panel !== "none") queueMicrotask(() => panelTrigger(panel)?.focus());
+  }
+
   function togglePanel(panel: Exclude<ComposerPanel, "none">): void {
-    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    setActivePanel((current) => current === panel ? "none" : panel);
+    if (activePanel() !== panel) {
+      setActivePanel(panel);
+      return;
+    }
+    closePanel();
   }
 
   function changeShares(userId: string, delta: number): void {
@@ -434,6 +509,11 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       }
       return;
     }
+    if (languageSafetyIssues().length > 0 && !languageSafetyConfirmed()) {
+      setError("Review the language warning and confirm this is a new expense before adding it.");
+      queueMicrotask(() => languageSafetyConfirmationRef?.focus());
+      return;
+    }
     setSaving(true);
     try {
       const input = {
@@ -470,7 +550,8 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
           <Dialog.Content
             ref={dialogRef}
             role="dialog"
-            class="composer-dialog max-h-[100dvh] w-full overflow-y-auto border border-border bg-card outline-none sm:max-h-[94dvh] sm:max-w-xl"
+            tabindex={-1}
+            class="composer-dialog max-h-[100dvh] w-full overflow-y-auto border border-border bg-card outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:max-h-[94dvh] sm:max-w-xl"
             onOpenAutoFocus={(event) => {
               event.preventDefault();
               queueMicrotask(() => props.expense ? dialogRef?.focus() : languageInputRef?.focus());
@@ -505,12 +586,22 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
               </Show>
 
               <Show when={!props.expense && entryMode() === "natural"}>
-                <section class="language-entry" aria-labelledby="language-entry-title">
+                <section
+                  class="language-entry"
+                  classList={{
+                    "has-draft": Boolean(languageDraft()),
+                    "is-ready": languageDraft()?.status === "ready",
+                    "is-review": languageDraft()?.status === "needs-review",
+                    "is-incomplete": languageDraft()?.status === "incomplete",
+                  }}
+                  aria-labelledby="language-entry-title"
+                >
+                  <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcedLanguageStatus()}</p>
                   <div class="language-entry-heading">
                     <span class="language-entry-mark" aria-hidden="true"><Sparkles size={17} stroke-width={2} /></span>
                     <div class="min-w-0 flex-1">
                       <strong id="language-entry-title">Describe the expense</strong>
-                      <small>Names, total, payer, and split—in one sentence.</small>
+                      <small>Names, total, payer & split—in one sentence.</small>
                     </div>
                     <button type="button" onClick={() => { setEntryMode("form"); queueMicrotask(() => amountInputRef?.focus()); }}>Use form</button>
                   </div>
@@ -520,7 +611,8 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                       ref={languageInputRef}
                       value={languageText()}
                       onInput={(event) => { setLanguageText(event.currentTarget.value); setError(""); }}
-                      placeholder="Lunch with Ananya and Rishi for $35, split equally"
+                      name="expense-language"
+                      placeholder="I paid $35 for lunch with Ananya & Rishi, split equally…"
                       autocomplete="off"
                       autocapitalize="sentences"
                       enterkeyhint="done"
@@ -528,12 +620,23 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                     />
                   </label>
                   <Show when={languageDraft()}>{(draft) => (
-                    <div class="language-understanding">
-                      <div class="language-understanding-meta" role="status" aria-live="polite" aria-atomic="true">
-                        <span classList={{ ready: draft().status === "ready" }}><i aria-hidden="true" />{draft().status === "ready" ? "Understood on this device" : draft().status === "needs-review" ? "Check one detail" : "Keep typing"}</span>
-                        <small>{draft().elapsedMs < 1 ? "<1 ms" : `${Math.round(draft().elapsedMs)} ms`}</small>
+                    <div
+                      class="language-understanding"
+                      classList={{
+                        "is-ready": draft().status === "ready",
+                        "is-review": draft().status === "needs-review",
+                        "is-incomplete": draft().status === "incomplete",
+                      }}
+                    >
+                      <div class="language-understanding-meta">
+                        <span>
+                          <i aria-hidden="true" />
+                          <strong>{draft().status === "ready" ? "Ready to add" : draft().status === "needs-review" ? "Review details" : "Complete details"}</strong>
+                          <small>{draft().status === "ready" ? "Parsed locally" : `${draft().issues.length} ${draft().issues.length === 1 ? "detail needs" : "details need"} confirmation`}</small>
+                        </span>
+                        <small class="language-understanding-local">On this device</small>
                       </div>
-                      <div class="language-chip-list" aria-label="Understood expense details">
+                      <div class="language-chip-list" aria-label="Recognized expense details. Select a detail to edit it.">
                         <For each={draft().chips}>{(chip) => (
                           <button type="button" onClick={() => editLanguageField(chip.field)}>
                             <span>{chip.label}</span><strong>{chip.value}</strong>
@@ -541,13 +644,13 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                         )}</For>
                       </div>
                       <Show when={draft().issues.length}>
-                        <ul class="language-issues" aria-live="polite">
+                        <ul class="language-issues">
                           <For each={draft().issues}>{(issue) => <li>{issue.message}</li>}</For>
                         </ul>
                       </Show>
                     </div>
                   )}</Show>
-                  <p class="language-privacy"><span aria-hidden="true">●</span> Private and offline. Nothing you type is sent to an AI service.</p>
+                  <p class="language-privacy"><span aria-hidden="true">●</span> Private & offline — nothing you type leaves this device.</p>
                 </section>
 
                 <Show when={error()}><p id="expense-language-error" class="error-callout" role="alert">{error()}</p></Show>
@@ -555,10 +658,10 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                   <Button
                     class="h-11 w-full"
                     type="button"
-                    disabled={!languageDraft() || languageDraft()?.status === "incomplete" || saving()}
+                    disabled={!languageDraft() || saving()}
                     onClick={() => languageDraft()?.status === "ready" ? void submitLanguageDraft() : editLanguageField()}
                   >
-                    <Show when={saving()} fallback={<><Check size={16} /> {languageDraft()?.status === "ready" && languageDraft()?.amount ? `Looks right — add ${formatMinor(Math.round(Number(languageDraft()!.amount) * 100), languageDraft()!.currency)}` : "Review details"}</>}><LoaderCircle class="animate-spin" size={16} /> Saving…</Show>
+                    <Show when={saving()} fallback={<><Check size={16} /> {languageDraft()?.status === "ready" && languageDraft()?.amount ? `Looks right — add ${formatMinor(Math.round(Number(languageDraft()!.amount) * 100), languageDraft()!.currency)}` : languageDraft()?.status === "incomplete" ? "Complete in form" : "Review details"}</>}><LoaderCircle class="animate-spin" size={16} /> Saving…</Show>
                   </Button>
                   <p class="micro-label text-center">Tap any chip to change it before adding</p>
                 </footer>
@@ -615,10 +718,34 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                 <button ref={splitControlRef} type="button" class="quick-control tone-split" aria-expanded={activePanel() === "split"} aria-controls="split-panel" aria-invalid={formIssue()?.field === "split"} aria-describedby={formIssue()?.field === "split" ? "expense-form-error" : undefined} onClick={() => { if (formIssue()?.field === "split") { setFormIssue(undefined); setError(""); } togglePanel("split"); }}>
                   <span class="quick-control-icon"><Scale size={16} /></span><span class="quick-control-label">Split</span><strong>{splitSummary()}</strong><ChevronDown size={15} />
                 </button>
-                <button type="button" class="quick-control tone-date" aria-expanded={activePanel() === "date"} aria-controls="date-panel" onClick={() => togglePanel("date")}>
+                <button ref={dateControlRef} type="button" class="quick-control tone-date" aria-expanded={activePanel() === "date"} aria-controls="date-panel" onClick={() => togglePanel("date")}>
                   <span class="quick-control-icon"><CalendarDays size={16} /></span><span class="quick-control-label">Date</span><strong>{isLocalToday(date()) ? "Today" : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(`${date()}T12:00:00`))}</strong><ChevronDown size={15} />
                 </button>
               </div>
+
+              <Show when={languageSafetyIssues().length > 0}>
+                <section class="language-review-callout" aria-labelledby="language-review-title">
+                  <div>
+                    <strong id="language-review-title">Confirm this is a new expense</strong>
+                    <p>The wording below may describe a payment or an instruction instead.</p>
+                  </div>
+                  <ul>
+                    <For each={languageSafetyIssues()}>{(issue) => <li>{issue.message}</li>}</For>
+                  </ul>
+                  <label class="language-review-confirmation">
+                    <input
+                      ref={languageSafetyConfirmationRef}
+                      type="checkbox"
+                      checked={languageSafetyConfirmed()}
+                      onInput={(event) => {
+                        setLanguageSafetyConfirmed(event.currentTarget.checked);
+                        if (event.currentTarget.checked) setError("");
+                      }}
+                    />
+                    <span>I reviewed this and want to record it as a new expense.</span>
+                  </label>
+                </section>
+              </Show>
 
               <Show when={Number(amount()) > 0 && payers().length > 0 && allocations().length > 0}>
                 <section class="expense-outcome" aria-label="Effect of this expense">
@@ -629,9 +756,9 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
 
               <Show when={activePanel() === "payer"}>
                 <section id="payer-panel" class="disclosure-panel split-panel grid gap-3 border border-border p-4" aria-label="Choose who paid">
-                  <div class="disclosure-heading"><div><p>Who paid?</p><small>Choose one person, or use multiple payers.</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
+                  <div class="disclosure-heading"><div><p>Who paid?</p><small>Choose one person, or use multiple payers.</small></div><button type="button" onClick={closePanel}>Done</button></div>
                   <div class="flex items-center justify-end"><Show when={groupMembers().length > 1}><button type="button" class="flex min-h-11 items-center gap-1.5 px-2 text-xs font-semibold text-primary" onClick={enableMultiplePayers}><UsersRound size={14} />{payerIds().length > 1 ? "Use one payer" : "Multiple payers"}</button></Show></div>
-                  <Show when={payerIds().length > 1} fallback={<div class="payer-avatar-rail"><For each={groupMembers()}>{(member) => <button type="button" class="payer-avatar-choice" classList={{ active: payerIds()[0] === member.userId }} aria-pressed={payerIds()[0] === member.userId} onClick={() => { setPayerIds([member.userId]); setPayerValues({}); setActivePanel("none"); }}><Avatar name={member.displayName} class="size-9 text-xs" /><span>{member.userId === props.actorId ? "You" : member.displayName}</span></button>}</For></div>}>
+                  <Show when={payerIds().length > 1} fallback={<div class="payer-avatar-rail"><For each={groupMembers()}>{(member) => <button type="button" class="payer-avatar-choice" classList={{ active: payerIds()[0] === member.userId }} aria-pressed={payerIds()[0] === member.userId} onClick={() => { setPayerIds([member.userId]); setPayerValues({}); closePanel(); }}><Avatar name={member.displayName} class="size-9 text-xs" /><span>{member.userId === props.actorId ? "You" : member.displayName}</span></button>}</For></div>}>
                     <div class="divide-y divide-border rounded-xl border border-border bg-background/55">
                       <For each={groupMembers()}>{(member) => <div class="flex min-h-14 items-center gap-2 px-2"><button type="button" role="checkbox" class="participant-toggle grid size-11 place-items-center rounded-md border border-border" classList={{ "border-primary bg-primary text-primary-foreground": payerIds().includes(member.userId) }} onClick={() => togglePayer(member.userId)} aria-label={`${member.displayName} paid`} aria-checked={payerIds().includes(member.userId)}><Show when={payerIds().includes(member.userId)}><Check size={14} /></Show></button><Avatar name={member.displayName} class="size-7 text-xs" /><span class="min-w-0 flex-1 truncate text-sm font-medium">{member.userId === props.actorId ? "You" : member.displayName}</span><div class="relative w-24"><input class="form-control h-11 text-right text-sm tabular-nums" disabled={!payerIds().includes(member.userId)} inputmode="decimal" value={payerValues()[member.userId] ?? ""} onInput={(event) => setPayerValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={`Amount paid by ${member.displayName}`} /></div></div>}</For>
                     </div>
@@ -641,7 +768,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
 
               <Show when={activePanel() === "split"}>
                 <section id="split-panel" class="disclosure-panel split-panel grid gap-4 border border-border p-4" aria-label="Choose how to split">
-                  <div class="disclosure-heading"><div><p>Who owes what?</p><small>{splitMethod() === "equal" ? "The total is divided equally among everyone selected." : splitMethod() === "shares" ? "Give someone more shares when they should cover more of the total." : splitMethod() === "exact" ? "Enter the exact amount each person should cover." : splitMethod() === "adjustment" ? "Add or subtract from an equal split. Adjustments must balance to zero." : "Enter the percentage each person should cover."}</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
+                  <div class="disclosure-heading"><div><p>Who owes what?</p><small>{splitMethod() === "equal" ? "The total is divided equally among everyone selected." : splitMethod() === "shares" ? "Give someone more shares when they should cover more of the total." : splitMethod() === "exact" ? "Enter the exact amount each person should cover." : splitMethod() === "adjustment" ? "Add or subtract from an equal split. Adjustments must balance to zero." : "Enter the percentage each person should cover."}</small></div><button type="button" onClick={closePanel}>Done</button></div>
                   <div>
                     <p class="mb-2 text-sm font-medium">Split method</p>
                     <div class="split-mode-tabs grid grid-cols-5">
@@ -676,18 +803,18 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
 
               <Show when={activePanel() === "date"}>
                 <section id="date-panel" class="disclosure-panel split-panel grid gap-3 border border-border p-4" aria-label="Choose expense date">
-                  <div class="disclosure-heading"><div><p>When was it?</p><small>Today is selected by default.</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
+                  <div class="disclosure-heading"><div><p>When was it?</p><small>Today is selected by default.</small></div><button type="button" onClick={closePanel}>Done</button></div>
                   <div class="date-choice-row">
-                    <button type="button" classList={{ active: isLocalToday(date()) }} onClick={() => { setDate(localDateValue()); setActivePanel("none"); }}>Today</button>
-                    <label><span class="sr-only">Expense date</span><input class="form-control" type="date" value={date()} onInput={(event) => setDate(event.currentTarget.value)} onChange={() => setActivePanel("none")} /></label>
+                    <button type="button" classList={{ active: isLocalToday(date()) }} onClick={() => { setDate(localDateValue()); closePanel(); }}>Today</button>
+                    <label><span class="sr-only">Expense date</span><input class="form-control" type="date" value={date()} onInput={(event) => setDate(event.currentTarget.value)} onChange={closePanel} /></label>
                   </div>
                 </section>
               </Show>
 
-              <button type="button" class="details-disclosure" aria-expanded={activePanel() === "details"} onClick={() => togglePanel("details")}><span class="flex items-center gap-2"><SlidersHorizontal size={15} /> {activePanel() === "details" ? "Hide details" : "More details"}</span>{activePanel() === "details" ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
+              <button ref={detailsControlRef} type="button" class="details-disclosure" aria-expanded={activePanel() === "details"} onClick={() => togglePanel("details")}><span class="flex items-center gap-2"><SlidersHorizontal size={15} /> {activePanel() === "details" ? "Hide details" : "More details"}</span>{activePanel() === "details" ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
               <Show when={activePanel() === "details"}>
                 <section class="disclosure-panel grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2" aria-label="More expense details">
-                  <div class="disclosure-heading sm:col-span-2"><div><p>More details</p><small>Optional fields for bookkeeping.</small></div><button type="button" onClick={() => setActivePanel("none")}>Done</button></div>
+                  <div class="disclosure-heading sm:col-span-2"><div><p>More details</p><small>Optional fields for bookkeeping.</small></div><button type="button" onClick={closePanel}>Done</button></div>
                   <label class="grid gap-2 text-sm font-medium">Category<select ref={categorySelectRef} class="form-control" value={category()} onInput={(event) => { setCategory(event.currentTarget.value); setCategoryEdited(true); }}><For each={EXPENSE_CATEGORIES}>{(item) => <option>{item}</option>}</For></select></label>
                   <label class="grid gap-2 text-sm font-medium">Currency<select class="form-control" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)}><For each={currencies}>{(item) => <option value={item}>{item}</option>}</For></select></label>
                   <label class="grid gap-2 text-sm font-medium">Repeats<select class="form-control" value={recurrence()} onInput={(event) => setRecurrence(event.currentTarget.value as Recurrence)}><option value="none">Does not repeat</option><option value="weekly">Weekly</option><option value="fortnightly">Every two weeks</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label>
