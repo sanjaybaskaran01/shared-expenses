@@ -7,12 +7,17 @@ export interface ExpenseLanguageMember {
 }
 
 export type ExpenseLanguageIssueCode =
+  | "ambiguous-fact"
+  | "hedged-split"
   | "missing-amount"
   | "missing-description"
   | "unknown-member"
   | "ambiguous-member"
   | "invalid-payers"
-  | "invalid-split";
+  | "invalid-split"
+  | "payer-unspecified"
+  | "refund-or-transfer"
+  | "untrusted-instruction";
 
 export interface ExpenseLanguageIssue {
   code: ExpenseLanguageIssueCode;
@@ -99,6 +104,14 @@ const currencyAliases: Record<string, string> = {
 const currencyToken = String.raw`(?:US\$|CA\$|C\$|AU\$|A\$|[$€£₹]|USD|CAD|EUR|GBP|INR|AUD|JPY|SGD|CHF|CNY)`;
 const currencyWord = String.raw`(?:dollars?|bucks?|rupees?|euros?|pounds?|USD|CAD|EUR|GBP|INR|AUD|JPY|SGD|CHF|CNY)`;
 const numericAmount = String.raw`(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?`;
+const hedgingWord = String.raw`(?:about|around|approximately|approx|roughly|maybe|perhaps|likely|guess|i\s+think|sort\s+of|kind\s+of)`;
+const moneyOrPercent = String.raw`(?:${currencyToken}\s*${numericAmount}|${numericAmount}\s*(?:${currencyWord}|%))`;
+const splitValue = String.raw`(?:${numericAmount}\s*(?:%|(?:x|shares?)\b)|(?:equal(?:ly)?|half|evenly))`;
+const hedgedValuePattern = new RegExp(String.raw`\b${hedgingWord}\b\s*(?:of\s+|at\s+|for\s+)?${moneyOrPercent}|${moneyOrPercent}\s*(?:-?ish|maybe|perhaps|roughly)\b`, "i");
+const hedgedSplitPattern = new RegExp(String.raw`\b(?:maybe|perhaps|likely|guess|i\s+think)\b[^.;]{0,28}?${splitValue}|${splitValue}[^.;]{0,16}?\b(?:maybe|perhaps|likely|guess|i\s+think)\b`, "i");
+const hedgedPaymentPattern = /\b(?:maybe|perhaps|likely|guess|i think)\b[^.;]{0,28}\b(?:paid|covered|fronted)\b/i;
+const instructionPattern = /\b(?:ignore\s+(?:all\s+)?(?:prior\s+)?instructions?|system\s+prompt|delete\s+(?:everything|all)|override\s+(?:the\s+)?rules?)\b/i;
+const refundOrTransferPattern = /\b(?:received|got|issued|gave|sent|made|requested|processing|processed)\s+(?:a\s+)?(?:refund|reimbursement|transfer)\b|\b(?:refund(?:ed|ing)?|reimburse(?:d|ment)?|transfer(?:red|ring)?)\s+(?:me|you|to|from|back|for|of|the|a|an|between|[$€£₹]|\d)\b|\bsettle(?:d)?\s+up\b|\bbalance\s+adjustment\b/i;
 
 function normalize(value: string): string {
   return value
@@ -129,25 +142,26 @@ function localDate(date: Date): string {
   return localTime.toISOString().slice(0, 10);
 }
 
-function parseDate(text: string, now: Date): string {
+function parseDate(text: string, now: Date): { value: string; wasExplicit: boolean } {
   if (/\byesterday\b/i.test(text)) {
     const value = new Date(now);
     value.setDate(value.getDate() - 1);
-    return localDate(value);
+    return { value: localDate(value), wasExplicit: true };
   }
   if (/\btomorrow\b/i.test(text)) {
     const value = new Date(now);
     value.setDate(value.getDate() + 1);
-    return localDate(value);
+    return { value: localDate(value), wasExplicit: true };
   }
+  if (/\btoday\b/i.test(text)) return { value: localDate(now), wasExplicit: true };
   const iso = text.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/);
-  if (iso) return `${iso[1]}-${iso[2]!.padStart(2, "0")}-${iso[3]!.padStart(2, "0")}`;
+  if (iso) return { value: `${iso[1]}-${iso[2]!.padStart(2, "0")}-${iso[3]!.padStart(2, "0")}`, wasExplicit: true };
   const monthDate = text.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(20\d{2}))?\b/i);
   if (monthDate) {
     const parsed = new Date(`${monthDate[1]} ${monthDate[2]}, ${monthDate[3] ?? now.getFullYear()} 12:00:00`);
-    if (!Number.isNaN(parsed.getTime())) return localDate(parsed);
+    if (!Number.isNaN(parsed.getTime())) return { value: localDate(parsed), wasExplicit: true };
   }
-  return localDate(now);
+  return { value: localDate(now), wasExplicit: false };
 }
 
 function parseRecurrence(text: string): ParsedExpenseLanguage["recurrence"] {
@@ -304,7 +318,6 @@ function extractPayers(
   money: MoneyMention[],
   issues: ExpenseLanguageIssue[],
 ): { payerIds: string[]; payerValues: Record<string, string>; attributedMoney: Set<number> } {
-  const actor = members.find((member) => member.isActor);
   const payerIds: string[] = [];
   const payerValues: Record<string, string> = {};
   const attributedMoney = new Set<number>();
@@ -329,8 +342,12 @@ function extractPayers(
     } else add(unique[0]!);
   }
 
-  if (payerIds.length === 0 && /\b(?:paid|covered)\s+by\s+(?:me|myself)\b/i.test(text) && actor) add(actor);
-  if (payerIds.length === 0 && actor) add(actor);
+  if (payerIds.length === 0) {
+    addIssueOnce(issues, {
+      code: "payer-unspecified",
+      message: "Confirm who paid before adding this expense.",
+    });
+  }
 
   if (payerIds.length > 1 && amount !== undefined && Object.keys(payerValues).length === payerIds.length) {
     const paid = Object.values(payerValues).reduce((sum, value) => sum + Number(value), 0);
@@ -486,6 +503,36 @@ function chooseTotalMoney(text: string, money: MoneyMention[], payerAttributed: 
   return money[0];
 }
 
+function detectSafetyIssues(
+  text: string,
+  splitMethod: SplitMethod,
+  issues: ExpenseLanguageIssue[],
+): void {
+  if (instructionPattern.test(text)) {
+    addIssueOnce(issues, {
+      code: "untrusted-instruction",
+      message: "This includes an instruction, not just expense details. Review it in the form before adding.",
+    });
+  }
+  if (refundOrTransferPattern.test(text)) {
+    addIssueOnce(issues, {
+      code: "refund-or-transfer",
+      message: "Refunds, transfers, and settlements need review before they are added as an expense.",
+    });
+  }
+  const hasHedgedFact = hedgedValuePattern.test(text)
+    || hedgedPaymentPattern.test(text)
+    || (splitMethod !== "equal" && hedgedSplitPattern.test(text));
+  if (hasHedgedFact) {
+    addIssueOnce(issues, {
+      code: splitMethod === "equal" ? "ambiguous-fact" : "hedged-split",
+      message: splitMethod === "equal"
+        ? "Confirm the uncertain detail before adding this expense."
+        : "Confirm the approximate split before adding this expense.",
+    });
+  }
+}
+
 function splitLabel(method: SplitMethod, values: Record<string, string>, members: ExpenseLanguageMember[]): string {
   if (method === "equal") return "Split equally";
   const detail = Object.entries(values)
@@ -523,8 +570,10 @@ export function parseExpenseLanguage(text: string, options: ParseExpenseLanguage
   participants.sort((left, right) => participantOrder(left) - participantOrder(right));
   const split = extractSplit(text, amount, participants, aliases, issues);
   const description = extractDescription(text, money);
-  const expenseDate = parseDate(text, now);
+  const parsedDate = parseDate(text, now);
   const recurrence = parseRecurrence(text);
+
+  detectSafetyIssues(text, split.splitMethod, issues);
 
   if (amount === undefined || amount <= 0) issues.unshift({ code: "missing-amount", message: "Add the total amount." });
   if (!description) addIssueOnce(issues, { code: "missing-description", message: "Add what the expense was for." });
@@ -538,14 +587,18 @@ export function parseExpenseLanguage(text: string, options: ParseExpenseLanguage
   if (participants.length) chips.push({ field: "participants", label: "With", value: participants.map((id) => memberLabel(id, options.members)).join(", ") });
   if (payerResult.payerIds.length) chips.push({ field: "payer", label: "Paid by", value: payerResult.payerIds.map((id) => memberLabel(id, options.members)).join(", ") });
   chips.push({ field: "split", label: "Split", value: splitLabel(split.splitMethod, split.splitValues, options.members) });
-  chips.push({ field: "date", label: "When", value: expenseDate === localDate(now) ? "Today" : expenseDate });
+  chips.push({
+    field: "date",
+    label: "When",
+    value: parsedDate.value === localDate(now) ? parsedDate.wasExplicit ? "Today" : "Today · default" : parsedDate.value,
+  });
   if (recurrence !== "none") chips.push({ field: "recurrence", label: "Repeats", value: recurrence });
 
   return {
     ...(description ? { description } : {}),
     ...(amountString ? { amount: amountString } : {}),
     currency,
-    expenseDate,
+    expenseDate: parsedDate.value,
     payerIds: payerResult.payerIds,
     payerValues: payerResult.payerValues,
     participantIds: participants,

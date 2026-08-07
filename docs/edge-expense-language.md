@@ -20,18 +20,18 @@ This is the only approach that meets all four product requirements simultaneousl
 | Option | iPhone web availability | Cold-start cost | Reliability for money | Decision |
 | --- | --- | ---: | --- | --- |
 | Typed deterministic compiler | Any current browser | No model; application code only | Auditable and testable | Primary path |
-| FunctionGemma 270M + Transformers.js | Safari 26 WebGPU is available, subject to runtime/model compatibility | The available q4f16 ONNX data file alone is about 426 MB | Requires a Tallied-specific fine-tune and schema validation | Optional future ambiguity helper |
+| Qwen3-0.6B + WebLLM/XGrammar | Safari 26 WebGPU, subject to physical-device validation | 352 MB MLC artifact plus runtime memory | Baseline semantic/safety smoke failed | Rejected candidate; do not ship |
 | Apple Foundation Models | Native Swift framework on Apple Intelligence devices | System-managed | Guided generation and tool calling are strong, but model availability is user/device dependent | Native-app enhancement, not usable by the PWA |
 | Gemini Nano browser APIs | Not available on Chrome for iOS or other mobile devices | Browser-managed model | Experimental API availability | Not viable for the iPhone PWA |
 | Cloud model | Broad | Network round trip and service dependency | Strong language coverage, but data leaves device | Rejected for the zero-infrastructure/private path |
 
 Primary references:
 
-- WebKit ships WebGPU on iOS in Safari 26 and specifically names Transformers.js and ONNX Runtime as supported frameworks: <https://webkit.org/blog/17333/webkit-features-in-safari-26-0/>
-- Transformers.js runs ONNX models in-browser using WebGPU or quantized WASM: <https://huggingface.co/docs/transformers.js/guides/webgpu>
-- ONNX Runtime Web documents the privacy, offline, latency, and cost advantages of browser inference, plus WASM fallback: <https://onnxruntime.ai/docs/tutorials/web/>
-- Google describes FunctionGemma as a 270M function-calling foundation intended to be fine-tuned for a specific task: <https://huggingface.co/google/functiongemma-270m-it>
-- The current q4f16 ONNX data artifact is 426 MB: <https://huggingface.co/onnx-community/functiongemma-270m-it-ONNX-GQA/blob/main/onnx/model_q4f16.onnx_data>
+- WebKit ships WebGPU on iOS in Safari 26: <https://webkit.org/blog/17333/webkit-features-in-safari-26-0/>
+- Qwen3-0.6B is Apache-2.0 and supports a local function-calling path: <https://huggingface.co/Qwen/Qwen3-0.6B>
+- The browser-ready Qwen MLC artifact is 352 MB: <https://huggingface.co/mlc-ai/Qwen3-0.6B-q4f16_0-MLC/tree/main>
+- WebLLM provides browser WebGPU inference and structured JSON generation: <https://github.com/mlc-ai/web-llm>
+- XGrammar provides JSON-schema/grammar-constrained output: <https://github.com/mlc-ai/xgrammar>
 - Apple Foundation Models is a native framework with guided structured output and tool calling, and requires Apple Intelligence to be enabled: <https://developer.apple.com/documentation/FoundationModels>
 - Chrome documents that Gemini Nano is unavailable on mobile, including Chrome for iOS: <https://developer.chrome.com/docs/ai/get-started>
 
@@ -91,20 +91,24 @@ The end-to-end iPhone acceptance target is:
 
 The product promise is “understood on this device,” not “AI understood it.” This remains accurate if the implementation evolves.
 
-## Optional model phase
+The 100 ms budget applies to the existing deterministic fast path. A model
+proposal is deliberately asynchronous and must never block typing; its separate
+promotion target is documented in
+[on-device-model-decision.md](./on-device-model-decision.md).
 
-FunctionGemma is the best current model candidate because its job is already natural-language-to-function-call. It should only be considered after collecting a privacy-preserving corpus of phrases the deterministic compiler could not resolve.
+## Model research phase
 
-A safe model rollout would:
+The current production path remains deterministic. **No on-device model is
+selected.** Qwen3-0.6B through WebLLM/XGrammar fit the artifact budget, but
+the actual Qwen baseline failed Tallied's semantic and safety smoke; the
+evidence and the next candidate gate are documented in
+[on-device-model-decision.md](./on-device-model-decision.md) and
+[on-device-model-benchmark-2026-08-06.md](./on-device-model-benchmark-2026-08-06.md).
 
-1. Fine-tune FunctionGemma on Tallied's exact draft schema and group-scoped name placeholders.
-2. Quantize and measure the complete download, initialization memory, first-token latency, and structured-call accuracy on an iPhone 17—not a desktop proxy.
-3. Load it in a worker only after explicit opt-in and a Wi-Fi/storage notice; cache it separately from financial data.
-4. Validate its output against known member IDs, supported currencies, allocation totals, and payer totals.
-5. Fall back to the deterministic compiler and manual form on any timeout, unsupported browser, model eviction, invalid schema, or low confidence.
-6. Keep the model read-only: it returns a proposed draft and cannot call `createExpense`.
-
-The model phase is blocked from becoming the default until its complete artifact is small enough for responsible mobile delivery and it beats the deterministic compiler on a held-out Tallied corpus without breaking the latency target.
+Any model phase is blocked from becoming the default until it beats the
+deterministic compiler on a held-out Tallied corpus, passes the explicit
+safety gate, and succeeds on physical iPhone PWA tests. It returns a
+read-only proposal and cannot call `createExpense`.
 
 ## Trust boundaries
 
