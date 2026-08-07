@@ -382,7 +382,7 @@ function GroupsOverview(props: {
                 <button
                   type="button"
                   class="group-overview-card"
-                  style={{ "--row-index": index() }}
+                  style={{ "--row-index": Math.min(index(), 7) }}
                   onClick={() => props.onOpenGroup(group.id)}
                 >
                   <span class="group-overview-icon"><UsersRound size={18} /></span>
@@ -787,7 +787,7 @@ function OverviewView(props: {
               const needsReview = createMemo(() => relationship.groupIds.length === 1 && settlementBlockerCount(appStore.expenses(), relationship.groupIds[0]!, relationship.currency) > 0);
               const canSettleHere = createMemo(() => relationship.groupIds.length === 1 && !needsReview());
               return (
-                <article class="relationship-row" style={{ "--row-index": index() }}>
+                <article class="relationship-row" style={{ "--row-index": Math.min(index(), 7) }}>
                   <Avatar name={personName()} class="size-10 text-xs" />
                   <button type="button" class="min-h-11 min-w-0 flex-1 text-left" aria-label={`View balance details with ${personName()}`} onClick={() => setSelectedRelationship(relationship)}>
                     <strong class="block truncate text-sm">{personName()}</strong>

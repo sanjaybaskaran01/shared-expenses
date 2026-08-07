@@ -380,7 +380,12 @@ export function MigrationDialog(props: {
       queueMicrotask(() => {
         const control = contentRef?.querySelector<HTMLElement>(`[data-opening-field="${row}:${field}"]`);
         control?.focus();
-        control?.scrollIntoView({ block: "center", behavior: "smooth" });
+        control?.scrollIntoView({
+          block: "center",
+          behavior: typeof globalThis.matchMedia === "function" && globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? "auto"
+            : "smooth",
+        });
       });
       return;
     }
@@ -761,7 +766,7 @@ export function MigrationDialog(props: {
                       <button class="migration-route" type="button" onClick={() => fileInputRef?.click()}>
                         <span class="migration-route-icon"><Upload size={19} /></span><span><strong>Choose CSV or JSON files</strong><small>Best for complete, self-service migration</small></span><ChevronRight size={16} />
                       </button>
-                      <input ref={fileInputRef} class="sr-only" type="file" accept=".csv,.json,text/csv,application/json" multiple onChange={(event) => void handleFiles(event.currentTarget.files)} />
+                      <input ref={fileInputRef} class="sr-only" type="file" name="splitwise-import-files" aria-label="Choose Splitwise CSV or JSON files" accept=".csv,.json,text/csv,application/json" multiple onChange={(event) => void handleFiles(event.currentTarget.files)} />
                       <button class="migration-route" type="button" onClick={() => setStep("balances")}>
                         <span class="migration-route-icon"><CircleDollarSign size={19} /></span><span><strong>Enter balances only</strong><small>Start now; keep old transactions in Splitwise</small></span><ChevronRight size={16} />
                       </button>
@@ -799,23 +804,23 @@ export function MigrationDialog(props: {
                           }}><option value="new">Different person</option><For each={previousPeople()}>{(person) => <option value={person.personKey}>Same person as {person.personName}</option>}</For></select></label>
                         </Show>
                         <div class="grid grid-cols-[1fr_auto] gap-2">
-                          <label class="grid gap-1 text-xs font-medium">Person<input data-opening-field={`${index() + 1}:personName`} class="field-input min-h-11 text-base" aria-invalid={invalid("personName")} aria-describedby={invalid("personName") ? errorId() : undefined} value={row.personName} placeholder="Mira" readOnly={reusesPreviousPerson()} onInput={(event) => updateOpeningRow(index(), { personName: event.currentTarget.value })} /></label>
+                          <label class="grid gap-1 text-xs font-medium">Person<input data-opening-field={`${index() + 1}:personName`} class="field-input min-h-11 text-base" name={`opening-balance-${row.rowId}-person`} autocomplete="off" aria-invalid={invalid("personName")} aria-describedby={invalid("personName") ? errorId() : undefined} value={row.personName} placeholder="Mira" readOnly={reusesPreviousPerson()} onInput={(event) => updateOpeningRow(index(), { personName: event.currentTarget.value })} /></label>
                           <Show when={openingRows().length > 1}><button class="icon-button self-end" aria-label={`Remove ${row.personName || "balance"}`} onClick={() => updateOpeningRows((rows) => rows.filter((_, rowIndex) => rowIndex !== index()))}><Trash2 size={16} /></button></Show>
                         </div>
                         <div class="migration-balance-grid">
-                          <label class="grid gap-1 text-xs font-medium">Direction<select data-opening-field={`${index() + 1}:direction`} class="field-input min-h-11 text-base" aria-invalid={invalid("direction")} aria-describedby={invalid("direction") ? errorId() : undefined} value={row.direction} onChange={(event) => updateOpeningRow(index(), { direction: event.currentTarget.value as OpeningRow["direction"] })}><option value="owes_me">They owe me</option><option value="i_owe">I owe them</option></select></label>
-                          <label class="grid gap-1 text-xs font-medium">Amount<input data-opening-field={`${index() + 1}:amount`} class="field-input min-h-11 text-base" aria-invalid={invalid("amount")} aria-describedby={invalid("amount") ? errorId() : undefined} inputmode="decimal" value={row.amount} placeholder="0.00" onInput={(event) => updateOpeningRow(index(), { amount: event.currentTarget.value })} /></label>
+                          <label class="grid gap-1 text-xs font-medium">Direction<select data-opening-field={`${index() + 1}:direction`} class="field-input min-h-11 text-base" name={`opening-balance-${row.rowId}-direction`} autocomplete="off" aria-invalid={invalid("direction")} aria-describedby={invalid("direction") ? errorId() : undefined} value={row.direction} onChange={(event) => updateOpeningRow(index(), { direction: event.currentTarget.value as OpeningRow["direction"] })}><option value="owes_me">They owe me</option><option value="i_owe">I owe them</option></select></label>
+                          <label class="grid gap-1 text-xs font-medium">Amount<input data-opening-field={`${index() + 1}:amount`} class="field-input min-h-11 text-base" name={`opening-balance-${row.rowId}-amount`} autocomplete="off" aria-invalid={invalid("amount")} aria-describedby={invalid("amount") ? errorId() : undefined} inputmode="decimal" value={row.amount} placeholder="0.00" onInput={(event) => updateOpeningRow(index(), { amount: event.currentTarget.value })} /></label>
                         </div>
                         <div class="migration-balance-grid">
-                          <label class="grid gap-1 text-xs font-medium">Currency (2-decimal)<input data-opening-field={`${index() + 1}:currency`} class="field-input min-h-11 text-base uppercase" aria-invalid={invalid("currency")} aria-describedby={invalid("currency") ? errorId() : undefined} maxlength={3} value={row.currency} onInput={(event) => updateOpeningRow(index(), { currency: event.currentTarget.value.toUpperCase() })} /></label>
-                          <label class="grid gap-1 text-xs font-medium">As of<input data-opening-field={`${index() + 1}:effectiveDate`} class="field-input min-h-11 text-base" aria-invalid={invalid("effectiveDate")} aria-describedby={invalid("effectiveDate") ? errorId() : undefined} type="date" value={row.effectiveDate} onInput={(event) => updateOpeningRow(index(), { effectiveDate: event.currentTarget.value })} /></label>
+                          <label class="grid gap-1 text-xs font-medium">Currency (2-decimal)<input data-opening-field={`${index() + 1}:currency`} class="field-input min-h-11 text-base uppercase" name={`opening-balance-${row.rowId}-currency`} autocomplete="off" aria-invalid={invalid("currency")} aria-describedby={invalid("currency") ? errorId() : undefined} maxlength={3} value={row.currency} onInput={(event) => updateOpeningRow(index(), { currency: event.currentTarget.value.toUpperCase() })} /></label>
+                          <label class="grid gap-1 text-xs font-medium">As of<input data-opening-field={`${index() + 1}:effectiveDate`} class="field-input min-h-11 text-base" name={`opening-balance-${row.rowId}-effective-date`} autocomplete="off" aria-invalid={invalid("effectiveDate")} aria-describedby={invalid("effectiveDate") ? errorId() : undefined} type="date" value={row.effectiveDate} onInput={(event) => updateOpeningRow(index(), { effectiveDate: event.currentTarget.value })} /></label>
                         </div>
-                        <label class="grid gap-1 text-xs font-medium">Group name (optional)<input data-opening-field={`${index() + 1}:groupName`} class="field-input min-h-11 text-base" aria-invalid={invalid("groupName")} aria-describedby={invalid("groupName") ? errorId() : undefined} value={row.groupName} placeholder="Opening balances" onInput={(event) => updateOpeningRow(index(), { groupName: event.currentTarget.value })} /></label>
+                        <label class="grid gap-1 text-xs font-medium">Group name (optional)<input data-opening-field={`${index() + 1}:groupName`} class="field-input min-h-11 text-base" name={`opening-balance-${row.rowId}-group`} autocomplete="off" aria-invalid={invalid("groupName")} aria-describedby={invalid("groupName") ? errorId() : undefined} value={row.groupName} placeholder="Opening balances" onInput={(event) => updateOpeningRow(index(), { groupName: event.currentTarget.value })} /></label>
                         <Show when={rowError()}>{(error) => <p id={errorId()} role="alert" class="text-xs leading-5 text-destructive">{error().message}</p>}</Show>
                       </Card>
                     }}</For>
                     <p class="text-xs leading-5 text-muted-foreground">Tallied currently imports currencies that use two decimal places. Other currencies are blocked instead of rounded.</p>
-                    <button class="min-h-11 text-sm font-medium text-primary" onClick={() => updateOpeningRows((rows) => [...rows, newOpeningRow({ currency: rows[0]?.currency ?? "USD", groupName: rows[0]?.groupName ?? "Opening balances", effectiveDate: rows[0]?.effectiveDate ?? today() })])}>+ Add another balance</button>
+                    <button class="migration-text-action min-h-11 text-sm font-medium text-primary" onClick={() => updateOpeningRows((rows) => [...rows, newOpeningRow({ currency: rows[0]?.currency ?? "USD", groupName: rows[0]?.groupName ?? "Opening balances", effectiveDate: rows[0]?.effectiveDate ?? today() })])}>+ Add another balance</button>
                     <Button class="w-full" onClick={useOpeningBalances}>Review these balances</Button>
                   </div>
                 </Show>
@@ -843,7 +848,7 @@ export function MigrationDialog(props: {
                       </div>
                     </section>
                     <section>
-                      <div class="mb-2 flex items-end justify-between gap-3"><div><p class="eyebrow">Current groups</p><h2 class="mt-1 font-semibold">Choose what to bring</h2></div><div class="flex flex-wrap justify-end"><button class="min-h-11 px-2 text-xs font-medium text-primary" onClick={() => updateGroupSelection(currentGroups().map(({ externalId }) => externalId))}>Current</button><button class="min-h-11 px-2 text-xs font-medium text-primary" onClick={() => updateGroupSelection(draft()!.groups.map(({ externalId }) => externalId))}>All history</button><button class="min-h-11 px-2 text-xs font-medium text-muted-foreground" onClick={() => updateGroupSelection([])}>Clear</button></div></div>
+                      <div class="mb-2 flex items-end justify-between gap-3"><div><p class="eyebrow">Current groups</p><h2 class="mt-1 font-semibold">Choose what to bring</h2></div><div class="flex flex-wrap justify-end"><button class="migration-text-action min-h-11 px-2 text-xs font-medium text-primary" onClick={() => updateGroupSelection(currentGroups().map(({ externalId }) => externalId))}>Current</button><button class="migration-text-action min-h-11 px-2 text-xs font-medium text-primary" onClick={() => updateGroupSelection(draft()!.groups.map(({ externalId }) => externalId))}>All history</button><button class="migration-text-action min-h-11 px-2 text-xs font-medium text-muted-foreground" onClick={() => updateGroupSelection([])}>Clear</button></div></div>
                       <div class="divide-y divide-border/60 overflow-hidden rounded-xl border border-border">
                         <For each={currentGroups()}>{(group) => <label class="migration-check-row"><input type="checkbox" checked={selectedGroupIds().includes(group.externalId)} onChange={() => toggleGroup(group.externalId)} /><span><strong>{group.name}</strong><small>{group.currency} · {group.memberExternalIds.length} people</small></span></label>}</For>
                         <Show when={currentGroups().length === 0}><p class="p-4 text-sm text-muted-foreground">No active groups were identified. Older groups are below.</p></Show>
@@ -852,7 +857,7 @@ export function MigrationDialog(props: {
                     <Show when={olderGroups().length}>
                       <details class="rounded-xl border border-border"><summary class="min-h-12 cursor-pointer px-4 py-3 text-sm font-medium">Older or settled groups <span class="text-muted-foreground">({olderGroups().length})</span></summary><div class="divide-y divide-border/60 border-t border-border"><For each={olderGroups()}>{(group) => <label class="migration-check-row"><input type="checkbox" checked={selectedGroupIds().includes(group.externalId)} onChange={() => toggleGroup(group.externalId)} /><span><strong>{group.name}</strong><small>{group.currency}</small></span></label>}</For></div></details>
                     </Show>
-                    <Show when={draft()!.warnings.length}><section><p class="eyebrow mb-2">Needs attention</p><div class="space-y-2"><For each={draft()!.warnings}>{(warning) => <div class={`rounded-lg border px-3 py-2 text-xs leading-5 ${warning.blocking ? "border-destructive/35 text-destructive" : "border-border text-muted-foreground"}`}><p>{warning.sourceName ? `${warning.sourceName}${warning.row ? ` · row ${warning.row}` : ""}: ` : ""}{warning.message}</p><Show when={warning.blocking && warning.sourceHash}><button type="button" class="mt-1 min-h-11 font-semibold underline underline-offset-4" onClick={() => removeSource(warning.sourceHash!)}>Remove this file</button></Show></div>}</For></div></section></Show>
+                    <Show when={draft()!.warnings.length}><section><p class="eyebrow mb-2">Needs attention</p><div class="space-y-2"><For each={draft()!.warnings}>{(warning) => <div class={`rounded-lg border px-3 py-2 text-xs leading-5 ${warning.blocking ? "border-destructive/35 text-destructive" : "border-border text-muted-foreground"}`}><p>{warning.sourceName ? `${warning.sourceName}${warning.row ? ` · row ${warning.row}` : ""}: ` : ""}{warning.message}</p><Show when={warning.blocking && warning.sourceHash}><button type="button" class="migration-text-action mt-1 min-h-11 font-semibold underline underline-offset-4" onClick={() => removeSource(warning.sourceHash!)}>Remove this file</button></Show></div>}</For></div></section></Show>
                     <div class="grid grid-cols-[1fr_auto] gap-2"><Button disabled={selectedGroupIds().length === 0 || importerExternalIds().length === 0 || busy()} onClick={() => void prepareReview()}>Review migration <ChevronRight size={16} /></Button><Button variant="ghost" onClick={() => setDestructiveAction({ kind: "discard" })}>Discard</Button></div>
                   </div>
                 </Show>
@@ -919,7 +924,7 @@ export function MigrationDialog(props: {
                     <div><p class="eyebrow">Migration history</p><h2 class="mt-1 text-xl font-semibold tracking-tight">Imported into Tallied</h2><p class="mt-1 text-sm text-muted-foreground">Undo affects only records created by that migration.</p></div>
                     <Show when={imports.error}><div role="alert" class="rounded-xl border border-destructive/35 p-4 text-sm leading-6 text-destructive"><p>Migration history could not be loaded. Your imported ledger is unchanged.</p><Button class="mt-3" size="sm" variant="secondary" onClick={() => void refetchImports()}>Try again</Button></div></Show>
                     <Show when={!imports.error}>
-                      <Show when={!imports.loading} fallback={<p class="text-sm text-muted-foreground">Loading migrations…</p>}>
+                      <Show when={!imports.loading} fallback={<p class="text-sm text-muted-foreground" role="status" aria-live="polite">Loading migrations…</p>}>
                         <Show when={imports()?.imports.length} fallback={<p class="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No completed migrations yet.</p>}>
                         <div class="space-y-3">
                           <For each={imports()?.imports}>{(batch) => (
