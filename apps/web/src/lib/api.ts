@@ -118,6 +118,42 @@ export function getAuthCapabilities(): Promise<AuthCapabilities> {
   return apiFetch("/api/v1/auth/capabilities");
 }
 
+export interface PushConfig {
+  publicKey: string;
+  subscribed: boolean;
+}
+
+export interface BrowserPushSubscriptionJson {
+  endpoint: string;
+  expirationTime: number | null;
+  keys: { p256dh: string; auth: string };
+}
+
+export function getPushConfig(deviceId: string): Promise<PushConfig> {
+  return apiFetch(`/api/v1/push/config?deviceId=${encodeURIComponent(deviceId)}`);
+}
+
+export function registerPushSubscription(
+  deviceId: string,
+  subscription: BrowserPushSubscriptionJson,
+): Promise<{ subscribed: true }> {
+  return apiFetch("/api/v1/push/subscriptions", {
+    method: "POST",
+    body: JSON.stringify({ deviceId, subscription }),
+  });
+}
+
+export function revokePushSubscription(deviceId: string): Promise<{ subscribed: false }> {
+  return apiFetch("/api/v1/push/subscriptions", {
+    method: "DELETE",
+    body: JSON.stringify({ deviceId }),
+  });
+}
+
+export function markNotificationsRead(): Promise<{ read: number }> {
+  return apiFetch("/api/v1/notifications/read", { method: "POST", body: "{}" });
+}
+
 export interface ImportCapabilities {
   localFiles: boolean;
   balanceOnly: boolean;

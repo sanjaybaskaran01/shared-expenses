@@ -1,5 +1,6 @@
 import { render } from "solid-js/web";
 import App from "./App";
+import { apiBaseUrl } from "./lib/api";
 import { developmentIdentity } from "./lib/development-actor";
 import { initReleaseWatch } from "./lib/release-watch";
 import "./styles/app.css";
@@ -20,7 +21,9 @@ if ("serviceWorker" in navigator) {
     }
   } else {
     window.addEventListener("load", () => {
-      void navigator.serviceWorker.register("/tally-sw.js", { updateViaCache: "none" }).then((registration) => {
+      const workerUrl = new URL("/tally-sw.js", location.origin);
+      workerUrl.searchParams.set("api", apiBaseUrl);
+      void navigator.serviceWorker.register(workerUrl, { updateViaCache: "none" }).then((registration) => {
         void initReleaseWatch(registration);
       });
     });

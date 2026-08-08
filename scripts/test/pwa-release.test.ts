@@ -72,7 +72,10 @@ describe("PWA release upgrades", () => {
       async match(request: string | { url?: string }) { return cacheEntries.get(normalize(request))?.clone(); },
     };
     const self = {
-      location: { origin: "https://tally.test" },
+      location: {
+        origin: "https://tally.test",
+        href: "https://tally.test/tally-sw.js?api=https%3A%2F%2Fapi.tally.test",
+      },
       clients: { async claim() {} },
       async skipWaiting() {},
       addEventListener(type: string, listener: (event: Record<string, unknown>) => void) {
@@ -102,5 +105,97 @@ describe("PWA release upgrades", () => {
     await Bun.sleep(0);
     expect(await cacheEntries.get("/")?.text()).toContain("v2.js");
     expect(deviceLedger.get("pending-operation")).toEqual({ amountMinor: 5500 });
+  });
+
+  test("shows every pushed financial update and deep-links notification clicks", async () => {
+    const source = await readFile(resolve(import.meta.dir, "../../apps/web/public/tally-sw.js"), "utf8");
+    const listeners = new Map<string, (event: Record<string, any>) => void>();
+    const shown: Array<{ title: string; options: NotificationOptions }> = [];
+    const messages: unknown[] = [];
+    let focused = false;
+    const windowClient = {
+      url: "https://tally.test/",
+      postMessage(message: unknown) { messages.push(message); },
+      async focus() { focused = true; },
+    };
+    const self = {
+      location: { origin: "https://tally.test" },
+      navigator: { async setAppBadge() {}, async clearAppBadge() {} },
+      registration: {
+        async showNotification(title: string, options: NotificationOptions) { shown.push({ title, options }); },
+      },
+      clients: {
+        async matchAll() { return [windowClient]; },
+        async openWindow() {},
+      },
+      addEventListener(type: string, listener: (event: Record<string, any>) => void) { listeners.set(type, listener); },
+    };
+    vm.runInNewContext(source, { self, caches: {}, fetch: async () => new Response(), URL, Promise, Number });
+
+    let pushPromise: Promise<unknown> | undefined;
+    listeners.get("push")?.({
+      data: { json: () => ({ title: "Maya added Dinner", body: "You owe $5.00 in Trip.", url: "/?view=activity" }) },
+      waitUntil(value: Promise<unknown>) { pushPromise = value; },
+    });
+    await pushPromise;
+    expect(shown).toEqual([expect.objectContaining({
+      title: "Maya added Dinner",
+      options: expect.objectContaining({ body: "You owe $5.00 in Trip.", data: { url: "/?view=activity" } }),
+    })]);
+
+    let clickPromise: Promise<unknown> | undefined;
+    listeners.get("notificationclick")?.({
+      notification: { data: { url: "/?view=activity" }, close() {} },
+      waitUntil(value: Promise<unknown>) { clickPromise = value; },
+    });
+    await clickPromise;
+    expect(focused).toBe(true);
+    expect(messages).toEqual([{ type: "tallied:notification-click", url: "https://tally.test/?view=activity" }]);
+  });
+
+  test("renews a rotated browser subscription without another permission prompt", async () => {
+    const source = await readFile(resolve(import.meta.dir, "../../apps/web/public/tally-sw.js"), "utf8");
+    const listeners = new Map<string, (event: Record<string, any>) => void>();
+    const requests: Array<{ url: string; init: RequestInit; body: Record<string, unknown> }> = [];
+    const replacement = {
+      endpoint: "https://web.push.apple.com/subscription/new",
+      expirationTime: null,
+      toJSON: () => ({
+        endpoint: "https://web.push.apple.com/subscription/new",
+        expirationTime: null,
+        keys: { p256dh: "new-p256dh", auth: "new-auth-key" },
+      }),
+    };
+    const self = {
+      location: {
+        origin: "https://tally.test",
+        href: "https://tally.test/tally-sw.js?api=https%3A%2F%2Fapi.tally.test",
+      },
+      registration: { pushManager: { async subscribe() { return replacement; } } },
+      addEventListener(type: string, listener: (event: Record<string, any>) => void) { listeners.set(type, listener); },
+    };
+    const networkFetch = async (url: string, init: RequestInit = {}) => {
+      requests.push({ url, init, body: JSON.parse(String(init.body)) as Record<string, unknown> });
+      return new Response("{}", { status: 200 });
+    };
+    vm.runInNewContext(source, { self, caches: {}, fetch: networkFetch, URL, Response, Promise, Number });
+
+    let renewalPromise: Promise<unknown> | undefined;
+    listeners.get("pushsubscriptionchange")?.({
+      oldSubscription: {
+        endpoint: "https://web.push.apple.com/subscription/old",
+        options: { applicationServerKey: new Uint8Array([1, 2, 3]) },
+      },
+      waitUntil(value: Promise<unknown>) { renewalPromise = value; },
+    });
+    await renewalPromise;
+    expect(requests).toEqual([expect.objectContaining({
+      url: "https://api.tally.test/api/v1/push/subscriptions/refresh",
+      init: expect.objectContaining({ method: "POST", credentials: "include" }),
+      body: expect.objectContaining({
+        oldEndpoint: "https://web.push.apple.com/subscription/old",
+        subscription: expect.objectContaining({ endpoint: "https://web.push.apple.com/subscription/new" }),
+      }),
+    })]);
   });
 });

@@ -50,6 +50,7 @@ import { ExpenseTargetPicker } from "./components/ExpenseTargetPicker";
 import { FeedbackButton } from "./components/FeedbackDialog";
 import { GroupComposer } from "./components/GroupComposer";
 import { PaymentComposer } from "./components/PaymentComposer";
+import { NotificationSettings } from "./components/NotificationSettings";
 import { RelationshipDetail } from "./components/RelationshipDetail";
 import { VersionBadge } from "./components/VersionBadge";
 import {
@@ -89,6 +90,7 @@ import {
 } from "./lib/expense-launch";
 import { mostRecentExpenseGroupId, type ExpenseTarget } from "./lib/expense-targets";
 import { releaseWatch, reloadForUpdate } from "./lib/release-watch";
+import { acknowledgeNotifications, queuedForegroundActivityMessage } from "./lib/push-notifications";
 import { buildGroupInsights, buildGroupReconciliation, settlementBlockerCount, summarizeOperationHealth } from "./lib/group-insights";
 import {
   computeBalances,
@@ -1000,7 +1002,7 @@ function ActivityView(props: {
   );
 }
 
-function AccountView(props: { displayName: string; email: string | undefined; smartCategoriesEnabled: boolean; onSmartCategoriesChange(enabled: boolean): void; onOpenMigration(): void }) {
+function AccountView(props: { displayName: string; email: string | undefined; smartCategoriesEnabled: boolean; onSmartCategoriesChange(enabled: boolean): void; onOpenMigration(): void; onNotify(message: string): void }) {
   const [theme, setTheme] = createSignal<Theme>(
     (localStorage.getItem("expenses-theme") as Theme | null) ?? "system",
   );
@@ -1052,6 +1054,7 @@ function AccountView(props: { displayName: string; email: string | undefined; sm
           <button type="button" class="preference-switch" role="switch" aria-checked={props.smartCategoriesEnabled} aria-label="Smart category suggestions" onClick={() => props.onSmartCategoriesChange(!props.smartCategoriesEnabled)}><span /></button>
         </div>
       </Card>
+      <NotificationSettings onNotify={props.onNotify} />
       <Card class="overflow-hidden">
         <SectionHeading title="Appearance" detail="Optimized for iPhone" />
         <div class="grid grid-cols-3 gap-2 p-4">
@@ -1234,6 +1237,41 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
       setMigrationClaimMessage(`Review this claim before continuing${props.email ? ` as ${props.email}` : ""}. It can join this account to imported groups; members will see your verified identity.`);
     }
     void refreshMigrationClaimRequest();
+    const openNotification = (urlValue?: string) => {
+      const url = new URL(urlValue ?? location.href, location.origin);
+      if (url.searchParams.get("view") !== "activity") return;
+      setTab("activity");
+      const groupId = url.searchParams.get("group");
+      if (groupId && appStore.groups().some(({ id }) => id === groupId)) setSelectedGroupId(groupId);
+      url.searchParams.delete("view");
+      url.searchParams.delete("group");
+      history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    };
+    openNotification();
+    let pendingRemoteActivities: string[] = [];
+    const onRemoteActivity = (event: Event) => {
+      const message = (event as CustomEvent<{ message?: string }>).detail?.message;
+      if (!message) return;
+      if (document.visibilityState === "hidden") pendingRemoteActivities.push(message);
+      else notify(message);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      const message = queuedForegroundActivityMessage(pendingRemoteActivities);
+      pendingRemoteActivities = [];
+      if (message) notify(message);
+    };
+    const onServiceWorkerMessage = (event: MessageEvent<{ type?: string; url?: string }>) => {
+      if (event.data?.type === "tallied:notification-click") openNotification(event.data.url);
+    };
+    window.addEventListener("tallied:remote-activity", onRemoteActivity);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    navigator.serviceWorker?.addEventListener("message", onServiceWorkerMessage);
+    onCleanup(() => {
+      window.removeEventListener("tallied:remote-activity", onRemoteActivity);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      navigator.serviceWorker?.removeEventListener("message", onServiceWorkerMessage);
+    });
     const migrationHash = new URLSearchParams(location.hash.startsWith("#") ? location.hash.slice(1) : "");
     const oauthSession = migrationHash.get("splitwiseSession")?.trim();
     if (oauthSession && /^[0-9a-f-]{36}$/.test(oauthSession)) {
@@ -1252,6 +1290,9 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
   });
   const claimStatusTimer = window.setInterval(() => void refreshMigrationClaimRequest(), 30_000);
   onCleanup(() => window.clearInterval(claimStatusTimer));
+  createEffect(() => {
+    if (tab() === "activity" && appStore.connection() === "online") void acknowledgeNotifications();
+  });
   createEffect(() => {
     if (!selectedGroupId() && appStore.groups()[0])
       setSelectedGroupId(appStore.groups()[0]!.id);
@@ -1521,7 +1562,7 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
               />
             </Match>
             <Match when={tab() === "account"}>
-              <AccountView displayName={displayName()} email={props.email} smartCategoriesEnabled={smartCategoriesEnabled()} onSmartCategoriesChange={updateSmartCategories} onOpenMigration={() => setMigrationOpen(true)} />
+              <AccountView displayName={displayName()} email={props.email} smartCategoriesEnabled={smartCategoriesEnabled()} onSmartCategoriesChange={updateSmartCategories} onOpenMigration={() => setMigrationOpen(true)} onNotify={notify} />
             </Match>
           </Switch>
         </main>
