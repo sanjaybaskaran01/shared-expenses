@@ -2,6 +2,7 @@ import type { JsonValue, OperationEnvelope } from "@expenses/protocol";
 import { apiBaseUrl, bootstrapDevelopment, developmentActorId, getSnapshot, pullOperations, pushOperations, registerDevice } from "./api";
 import { localDb, type LocalExpense, type LocalOperation } from "./db";
 import { ensureDevice } from "./device";
+import { foregroundActivityMessage, hasActiveLocalPushSubscription } from "./push-notifications";
 
 export function expenseFromOperation(
   operation: OperationEnvelope,
@@ -94,6 +95,28 @@ async function applyRemoteBatch(operations: readonly OperationEnvelope[], curren
     });
     if (changedExpenses.length > 0) await localDb.expenses.bulkPut(changedExpenses);
   });
+}
+
+async function capturePreviousExpenseNet(
+  operations: readonly OperationEnvelope[],
+  currentActorId: string,
+  result: Map<string, number>,
+): Promise<void> {
+  const targetIds = [...new Set(operations
+    .filter(({ type }) => type === "ExpenseAmended")
+    .map(({ targetId }) => targetId))];
+  const stored = await localDb.expenses.bulkGet(targetIds);
+  const projections = new Map(targetIds.flatMap((id, index) => stored[index] ? [[id, stored[index]!] as const] : []));
+  for (const operation of operations) {
+    const previous = projections.get(operation.targetId);
+    if (operation.type === "ExpenseAmended" && previous) {
+      result.set(operation.id, -previous.yourNetMinor);
+    }
+    if (operation.type === "ExpenseCreated" || operation.type === "ExpenseAmended") {
+      const projected = expenseFromOperation(operation, "accepted", currentActorId, previous?.createdBy);
+      if (projected) projections.set(operation.targetId, projected);
+    }
+  }
 }
 
 export type ConnectionState = "connecting" | "online" | "offline" | "error";
@@ -226,11 +249,18 @@ export class SyncEngine {
         });
       }
 
-      let cursor = recovering ? 0 : Number((await localDb.settings.get("serverSequence"))?.value ?? 0);
+      const storedCursor = recovering ? undefined : await localDb.settings.get("serverSequence");
+      let cursor = recovering ? 0 : Number(storedCursor?.value ?? 0);
       let generation = snapshot.manifest.generation;
+      const foregroundOperations: OperationEnvelope[] = [];
+      const previousExpenseNetMinor = new Map<string, number>();
       while (true) {
         const pulled = await pullOperations(cursor);
         generation = pulled.generation;
+        if (storedCursor) {
+          foregroundOperations.push(...pulled.operations.filter(({ actorId }) => actorId !== device.actorId));
+          await capturePreviousExpenseNet(pulled.operations, device.actorId, previousExpenseNetMinor);
+        }
         await applyRemoteBatch(pulled.operations, device.actorId);
         const receivedCursor = pulled.operations.reduce(
           (maximum, operation) => Math.max(maximum, operation.serverSequence ?? 0),
@@ -242,6 +272,15 @@ export class SyncEngine {
           { key: "generation", value: generation },
         ]);
         if (cursor >= pulled.latestServerSequence || pulled.operations.length === 0) break;
+      }
+      const foregroundMessage = foregroundActivityMessage(foregroundOperations, {
+        currentActorId: device.actorId,
+        actorNames: new Map(snapshot.members.map((member) => [member.userId, member.displayName])),
+        groupNames: new Map(snapshot.groups.map((group) => [group.id, group.name])),
+        previousExpenseNetMinor,
+      });
+      if (foregroundMessage && !(await hasActiveLocalPushSubscription().catch(() => false))) {
+        window.dispatchEvent(new CustomEvent("tallied:remote-activity", { detail: { message: foregroundMessage } }));
       }
       this.onState("online");
       this.ensureEvents();

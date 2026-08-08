@@ -809,6 +809,7 @@ textarea.form-control { height: auto; } select.form-control { appearance: auto; 
 .preference-switch[aria-checked="true"]::before { border-color: var(--primary); background: var(--primary); }
 .preference-switch[aria-checked="true"] > span { background: var(--primary-foreground); transform: translateX(1.58rem); }
 .preference-switch:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 20%, transparent); }
+.preference-switch:disabled { cursor: not-allowed; opacity: .5; }
 
 .expense-category-control { display: flex; width: 100%; min-height: 3.25rem; align-items: center; gap: .65rem; border: 1px solid color-mix(in srgb, var(--border) 68%, transparent); border-radius: .75rem; background: color-mix(in srgb, var(--muted) 38%, transparent); padding: .4rem .55rem .4rem .4rem; color: var(--foreground); text-align: left; transition: background-color 140ms ease, border-color 140ms ease, transform 120ms ease; }
 .expense-category-control:hover { border-color: color-mix(in srgb, var(--foreground) 18%, var(--border)); background: color-mix(in srgb, var(--muted) 68%, transparent); }

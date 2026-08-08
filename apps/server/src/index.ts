@@ -23,6 +23,18 @@ import { ConfidentialLedgerStore } from "./confidential-ledger";
 import { openDatabase, runDomainMigrations } from "./database";
 import { enqueueEmail, startEmailWorker } from "./email";
 import { LedgerStore } from "./ledger";
+import {
+  enqueueOperationNotifications,
+  ensureVapidKeys,
+  loadAcceptedOperations,
+  markNotificationsRead,
+  pushSubscriptionStatus,
+  refreshPushSubscription,
+  registerPushSubscription,
+  revokePushSubscription,
+  startPushWorker,
+  type BrowserPushSubscription,
+} from "./push-notifications";
 import { loadReleaseMetadata } from "./release";
 import { SplitwiseImportConnector } from "./splitwise-import";
 
@@ -37,10 +49,18 @@ const authMigrations = await getMigrations(auth.options);
 await authMigrations.runMigrations();
 const ledger = new LedgerStore(db, { emailHashSecret: config.authSecret });
 const confidentialLedger = new ConfidentialLedgerStore(db);
+const vapid = ensureVapidKeys(db, config.authSecret);
 const splitwiseConnector = config.splitwiseOAuth
   ? new SplitwiseImportConnector(db, config.splitwiseOAuth, config.authSecret)
   : undefined;
 const stopEmailWorker = startEmailWorker(db, config);
+const stopPushWorker = startPushWorker(db, {
+  authSecret: config.authSecret,
+  vapid: {
+    ...vapid,
+    subject: `mailto:${config.ownerEmail ?? "notifications@localhost.invalid"}`,
+  },
+});
 ledger.recoverInterruptedImportActivations();
 ledger.pruneExpiredImportUploads();
 splitwiseConnector?.pruneExpired();
@@ -178,7 +198,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
       headers: {
         ...corsHeaders(request),
         "Access-Control-Allow-Headers": "Content-Type, X-Dev-User",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
         "Access-Control-Max-Age": "86400",
       },
     });
@@ -343,6 +363,51 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
   const actorOrResponse = await requireActor(request);
   if (actorOrResponse instanceof Response) return actorOrResponse;
   const actorId = actorOrResponse;
+
+  if (url.pathname === "/api/v1/push/config" && request.method === "GET") {
+    const deviceId = url.searchParams.get("deviceId")?.trim() ?? "";
+    if (!deviceId || deviceId.length > 100) {
+      return errorResponse(request, 400, "INVALID_DEVICE", "A registered device is required");
+    }
+    return json(request, {
+      publicKey: vapid.publicKey,
+      ...pushSubscriptionStatus(db, actorId, deviceId),
+    });
+  }
+
+  if (url.pathname === "/api/v1/push/subscriptions" && request.method === "POST") {
+    const body = await bodyJson<{ deviceId?: string; subscription?: BrowserPushSubscription }>(request, 8_000);
+    const deviceId = body.deviceId?.trim() ?? "";
+    if (!deviceId || deviceId.length > 100 || !body.subscription) {
+      return errorResponse(request, 400, "INVALID_SUBSCRIPTION", "A device and push subscription are required");
+    }
+    registerPushSubscription(db, config.authSecret, actorId, deviceId, body.subscription);
+    return json(request, { subscribed: true }, 201);
+  }
+
+  if (url.pathname === "/api/v1/push/subscriptions" && request.method === "DELETE") {
+    const body = await bodyJson<{ deviceId?: string }>(request, 2_000);
+    const deviceId = body.deviceId?.trim() ?? "";
+    if (!deviceId || deviceId.length > 100) {
+      return errorResponse(request, 400, "INVALID_DEVICE", "A registered device is required");
+    }
+    revokePushSubscription(db, actorId, deviceId);
+    return json(request, { subscribed: false });
+  }
+
+  if (url.pathname === "/api/v1/push/subscriptions/refresh" && request.method === "POST") {
+    const body = await bodyJson<{ oldEndpoint?: string; subscription?: BrowserPushSubscription }>(request, 8_000);
+    const oldEndpoint = body.oldEndpoint?.trim() ?? "";
+    if (!oldEndpoint || !body.subscription) {
+      return errorResponse(request, 400, "INVALID_SUBSCRIPTION", "The old and replacement subscriptions are required");
+    }
+    refreshPushSubscription(db, config.authSecret, actorId, oldEndpoint, body.subscription);
+    return json(request, { subscribed: true });
+  }
+
+  if (url.pathname === "/api/v1/notifications/read" && request.method === "POST") {
+    return json(request, { read: markNotificationsRead(db, actorId) });
+  }
 
   if (url.pathname === "/api/v1/imports" && request.method === "GET") {
     return json(request, { imports: ledger.listImports(actorId) });
@@ -827,6 +892,11 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
       return errorResponse(request, 400, "INVALID_BATCH", "operations must be an array");
     }
     const result = await ledger.push(actorId, body.operations as OperationEnvelope<JsonValue>[]);
+    if (result.accepted.length > 0 || result.duplicates.length > 0) {
+      const acknowledgedIds = new Set([...result.accepted, ...result.duplicates].map(({ id }) => id));
+      const acknowledgedOperations = loadAcceptedOperations(db, [...acknowledgedIds]);
+      enqueueOperationNotifications(db, acknowledgedOperations);
+    }
     if (result.accepted.length > 0) {
       const acceptedIds = new Set(result.accepted.map(({ id }) => id));
       const groupIds = body.operations
@@ -978,6 +1048,7 @@ console.info(`Tallied API listening on ${server.url}`);
 function shutdown(): void {
   clearInterval(importCleanupTimer);
   stopEmailWorker();
+  stopPushWorker();
   server.stop(true);
   db.close();
 }
