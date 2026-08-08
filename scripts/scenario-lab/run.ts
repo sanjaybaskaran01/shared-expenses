@@ -19,7 +19,11 @@ import {
   type ScenarioStepReport,
 } from "./report";
 import { startScenarioRuntime, type ScenarioRuntime } from "./runtime";
-import { readScenarioServerSnapshot } from "./sandbox";
+import {
+  IMPORT_CLAIM_SCENARIO,
+  readScenarioImportClaimEvidence,
+  readScenarioServerSnapshot,
+} from "./sandbox";
 
 interface ActorSession {
   actor: ScenarioActor;
@@ -92,6 +96,20 @@ function scenarioDefinitions(): ScenarioCaseReport[] {
       status: "pending",
       steps: [],
     },
+    {
+      id: "imported-identity-claim",
+      title: "An imported person securely joins their history",
+      purpose: "Reproduces the production mismatch and proves owner approval converges group access, history, balances, and immutable signed operations across isolated devices.",
+      status: "pending",
+      steps: [],
+    },
+    {
+      id: "responsive-layout",
+      title: "Phone and desktop layouts stay intentional",
+      purpose: "Verifies the desktop navigation and centered form independently of the mobile four-person run.",
+      status: "pending",
+      steps: [],
+    },
   ];
 }
 
@@ -139,11 +157,25 @@ async function waitForClients(
     snapshots = await Promise.all(sessions.map(({ page }) => bridgeSnapshot(page)));
     return snapshots.every((snapshot) =>
       snapshot.connection === "online" &&
-      snapshot.expenses.length === expectedExpenseCount &&
-      snapshot.expenses.every(({ syncStatus }) => syncStatus === "accepted"),
+      snapshot.expenses.filter(({ groupId }) => groupId === "scenario-goa-trip").length === expectedExpenseCount &&
+      snapshot.expenses.filter(({ groupId }) => groupId === "scenario-goa-trip").every(({ syncStatus }) => syncStatus === "accepted"),
     );
   }, timeoutMs);
   return snapshots;
+}
+
+async function scenarioApi<T>(
+  apiUrl: string,
+  actorId: string,
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set("X-Dev-User", actorId);
+  if (init.body) headers.set("Content-Type", "application/json");
+  const response = await fetch(`${apiUrl}${path}`, { ...init, headers });
+  if (!response.ok) throw new Error(`${actorId} ${path} returned ${response.status}: ${await response.text()}`);
+  return response.json() as Promise<T>;
 }
 
 async function outsiderSnapshot(apiUrl: string): Promise<{ actorId: string; groups: Array<{ id: string; name: string }>; expenses: unknown[] }> {
@@ -360,6 +392,125 @@ async function run(): Promise<void> {
     sessions = await createActorSessions(browser, runtime.webUrl);
 
     const findScenario = (scenarioId: string) => report.scenarios.find(({ id: value }) => value === scenarioId);
+    const responsive = findScenario("responsive-layout");
+    if (responsive) await runCase(report, responsive, outputDirectory, async () => {
+      const context = await browser!.newContext({
+        viewport: { width: 1440, height: 900 },
+        deviceScaleFactor: 1,
+        locale: "en-US",
+        timezoneId: "America/New_York",
+        reducedMotion: "reduce",
+      });
+      const page = await context.newPage();
+      const desktopSession: ActorSession = {
+        actor: { id: "dev-desktop", name: "Dev desktop", color: "#426b91" },
+        context,
+        page,
+      };
+      try {
+        await page.goto(`${runtime!.webUrl}/?scenarioActor=dev`, { waitUntil: "domcontentloaded", timeout: 60_000 });
+        await page.waitForFunction(() => Boolean((window as ScenarioWindow).__TALLY_SCENARIO__));
+        await waitUntil("desktop account to load", async () => (await bridgeSnapshot(page)).connection === "online");
+        await prepareExpense(page, "Desktop layout check", "12.34");
+        const composer = page.getByRole("dialog", { name: "Add an expense" });
+        const composerBox = await composer.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return { width: rect.width, top: rect.top, bottom: rect.bottom };
+        });
+        const checks = [
+          makeCheck("desktop-sidebar", "Desktop navigation replaces the phone tab bar", await page.locator(".desktop-sidebar").isVisible() && !(await page.locator(".mobile-tabbar").isVisible()), "1440×900 viewport"),
+          makeCheck("desktop-composer", "Expense form remains centered and readable", composerBox.width >= 480 && composerBox.width <= 640 && composerBox.top >= 0 && composerBox.bottom <= 900, JSON.stringify(composerBox)),
+        ];
+        await recordStep(report, responsive, outputDirectory, {
+          id: "desktop-form",
+          title: "Desktop navigation and expense form",
+          sessions: [desktopSession],
+          checks,
+        });
+        await composer.getByRole("button", { name: "Cancel expense form" }).click();
+      } finally {
+        await context.close();
+      }
+    });
+
+    const importedClaim = findScenario("imported-identity-claim");
+    if (importedClaim) await runCase(report, importedClaim, outputDirectory, async () => {
+      const owner = sessions.find(({ actor }) => actor.id === "maya");
+      const claimant = sessions.find(({ actor }) => actor.id === "dev");
+      const observer = sessions.find(({ actor }) => actor.id === "mira");
+      if (!owner || !claimant || !observer) throw new Error("Imported-identity actors are unavailable");
+      const imported = IMPORT_CLAIM_SCENARIO;
+      const before = await Promise.all([bridgeSnapshot(owner.page), bridgeSnapshot(claimant.page)]);
+      await recordStep(report, importedClaim, outputDirectory, {
+        id: "isolated-before-claim",
+        title: "The placeholder history is not readable by the real account",
+        sessions: [owner, claimant],
+        clients: before,
+        server: readScenarioServerSnapshot(runtime!.databasePath, imported.groupId),
+        checks: [
+          makeCheck("owner-has-import", "The migration owner sees the imported group", before[0]!.groups.some(({ id }) => id === imported.groupId), `${before[0]!.groups.length} owner groups`),
+          makeCheck("claimant-isolated", "The signed-in claimant cannot read placeholder history before approval", !before[1]!.groups.some(({ id }) => id === imported.groupId), `${before[1]!.groups.length} claimant groups`),
+        ],
+      });
+
+      const link = await scenarioApi<{ url: string }>(
+        runtime!.apiUrl,
+        owner.actor.id,
+        `/api/v1/imports/${imported.batchId}/identities/${imported.identityId}/claim-link`,
+        { method: "POST" },
+      );
+      const token = new URLSearchParams(new URL(link.url).hash.slice(1)).get("migrationClaim");
+      if (!token) throw new Error("The scenario claim link did not contain a token");
+      const request = await scenarioApi<{ status: string; requestId?: string }>(
+        runtime!.apiUrl,
+        claimant.actor.id,
+        "/api/v1/import-claims/claim",
+        { method: "POST", body: JSON.stringify({ token }) },
+      );
+      if (request.status !== "awaiting_owner") throw new Error(`Unexpected claim state ${request.status}`);
+      await scenarioApi(
+        runtime!.apiUrl,
+        owner.actor.id,
+        `/api/v1/import-identities/${imported.identityId}/approve`,
+        { method: "POST" },
+      );
+      await Promise.all([forceSync(owner), forceSync(claimant), forceSync(observer)]);
+
+      let after: ScenarioClientSnapshot[] = [];
+      await waitUntil("imported history to converge after approval", async () => {
+        after = await Promise.all([bridgeSnapshot(owner.page), bridgeSnapshot(claimant.page), bridgeSnapshot(observer.page)]);
+        const ownerExpense = after[0]!.expenses.find(({ id }) => id === imported.expenseId);
+        const claimantExpense = after[1]!.expenses.find(({ id }) => id === imported.expenseId);
+        return after[0]!.groups.some(({ id }) => id === imported.groupId)
+          && after[1]!.groups.some(({ id }) => id === imported.groupId)
+          && !after[2]!.groups.some(({ id }) => id === imported.groupId)
+          && ownerExpense?.yourNetMinor === imported.amountMinor
+          && claimantExpense?.yourNetMinor === -imported.amountMinor;
+      });
+      const server = readScenarioServerSnapshot(runtime!.databasePath, imported.groupId);
+      const evidence = readScenarioImportClaimEvidence(runtime!.databasePath);
+      const observerSnapshot = await scenarioApi<{ participantAliases?: unknown[] }>(runtime!.apiUrl, observer.actor.id, "/api/v1/snapshot");
+      const ownerExpense = after[0]!.expenses.find(({ id }) => id === imported.expenseId);
+      const claimantExpense = after[1]!.expenses.find(({ id }) => id === imported.expenseId);
+      await recordStep(report, importedClaim, outputDirectory, {
+        id: "approved-and-converged",
+        title: "Both devices agree after verified owner approval",
+        sessions: [owner, claimant, observer],
+        clients: after,
+        server,
+        note: "The accepted signed operation still names the non-readable placeholder; a group-scoped alias safely projects it onto the approved account.",
+        checks: [
+          ...evaluateLedger(server).checks,
+          makeCheck("claim-complete", "The placeholder was securely claimed by the intended account", evidence.identityStatus === "claimed" && evidence.claimedByUserId === claimant.actor.id, JSON.stringify(evidence)),
+          makeCheck("group-parity", "Owner and claimant now see the same imported group", after.slice(0, 2).every((client) => client.groups.some(({ id }) => id === imported.groupId)), `${after[0]!.groups.length}/${after[1]!.groups.length} groups`),
+          makeCheck("history-parity", "Both devices received the same imported expense", ownerExpense?.amountMinor === imported.amountMinor && claimantExpense?.amountMinor === imported.amountMinor, `${ownerExpense?.amountMinor}/${claimantExpense?.amountMinor}`),
+          makeCheck("balance-parity", "The imported balance has equal and opposite device projections", ownerExpense?.yourNetMinor === imported.amountMinor && claimantExpense?.yourNetMinor === -imported.amountMinor, `${ownerExpense?.yourNetMinor}/${claimantExpense?.yourNetMinor}`),
+          makeCheck("signed-history-immutable", "Claiming did not rewrite the accepted signed operation", evidence.signedAllocationParticipantId === imported.placeholderUserId && evidence.materializedAllocationParticipantId === claimant.actor.id, JSON.stringify(evidence)),
+          makeCheck("observer-isolated-from-alias", "An unrelated group member receives neither the group nor its identity alias", !after[2]!.groups.some(({ id }) => id === imported.groupId) && (observerSnapshot.participantAliases?.length ?? 0) === 0, `${after[2]!.groups.length} groups · ${observerSnapshot.participantAliases?.length ?? 0} aliases`),
+        ],
+      });
+    });
+
     const concurrent = findScenario("four-way-create");
     if (concurrent) await runCase(report, concurrent, outputDirectory, async () => {
       const inputs = [
@@ -368,9 +519,99 @@ async function run(): Promise<void> {
         { description: "Groceries", amount: "42.25" },
         { description: "Beach cab", amount: "36.00" },
       ];
+      const submissions = await Promise.all(sessions.map((session, index) =>
+        prepareExpense(session.page, inputs[index]!.description, inputs[index]!.amount),
+      ));
+      const formChecks = await Promise.all(sessions.map(async ({ page, actor }) => {
+        const composer = page.getByRole("dialog", { name: "Add an expense" });
+        const details = await composer.locator(".quick-control").evaluateAll((buttons) => buttons.map((button) => {
+          const rect = button.getBoundingClientRect();
+          return { label: button.textContent?.trim() ?? "", width: rect.width, height: rect.height, top: rect.top, bottom: rect.bottom };
+        }));
+        const naturalTextareaVisible = await composer.getByPlaceholder(/I paid \$35/).isVisible().catch(() => false);
+        return makeCheck(
+          `form-first-${actor.id}`,
+          `${actor.name} sees the compact form without scrolling`,
+          !naturalTextareaVisible && details.length === 3 && details.every(({ width, height, top, bottom }) => width >= 88 && height >= 44 && top >= 0 && bottom <= 844),
+          `controls=${JSON.stringify(details)}`,
+        );
+      }));
+      await recordStep(report, concurrent, outputDirectory, {
+        id: "form-ready",
+        title: "The structured form is compact on every phone",
+        sessions,
+        note: "Form entry is the default; payer, split, and date are all visible in one row at 390×844.",
+        checks: formChecks,
+      });
+
+      const keyboardSession = sessions[0]!;
+      const firstComposer = keyboardSession.page.getByRole("dialog", { name: "Add an expense" });
+      await firstComposer.getByPlaceholder("What was it for?").focus();
+      await keyboardSession.page.setViewportSize({ width: 390, height: 500 });
+      await keyboardSession.page.waitForTimeout(150);
+      const compactControls = await firstComposer.locator(".quick-control").evaluateAll((buttons) => buttons.map((button) => {
+        const rect = button.getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom };
+      }));
+      const keyboardChecks: ScenarioCheck[] = [makeCheck(
+        "keyboard-controls-reachable",
+        "Paid by, Split, and Date stay reachable above a reduced keyboard viewport",
+        compactControls.length === 3 && compactControls.every(({ top, bottom }) => top >= 0 && bottom <= 500),
+        JSON.stringify(compactControls),
+      )];
+      const panelCases = [
+        { id: "payer", button: /Paid by/, label: "Choose who paid" },
+        { id: "split", button: /Split/, label: "Choose how to split" },
+        { id: "date", button: /Date/, label: "Choose expense date" },
+      ] as const;
+      for (const panelCase of panelCases) {
+        await firstComposer.getByRole("button", { name: panelCase.button }).click();
+        const panel = firstComposer.getByLabel(panelCase.label);
+        await panel.waitFor({ state: "visible" });
+        const panelCheck = await panel.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return {
+            fixed: getComputedStyle(element).position === "fixed",
+            withinViewport: rect.top >= 0 && rect.bottom <= window.innerHeight + 1,
+            activeTag: document.activeElement?.tagName ?? "",
+          };
+        });
+        keyboardChecks.push(makeCheck(
+          `keyboard-safe-${panelCase.id}`,
+          `${panelCase.id} choices replace text input without leaving the reduced viewport`,
+          panelCheck.fixed && panelCheck.withinViewport && !["INPUT", "TEXTAREA", "SELECT"].includes(panelCheck.activeTag),
+          JSON.stringify(panelCheck),
+        ));
+        if (panelCase.id === "split") {
+          await panel.getByRole("button", { name: "Amounts" }).click();
+          const lastExactInput = panel.getByLabel(/^Amount for /).last();
+          await lastExactInput.focus();
+          await keyboardSession.page.waitForTimeout(150);
+          const inputBox = await lastExactInput.evaluate((input) => {
+            const rect = input.getBoundingClientRect();
+            return { top: rect.top, bottom: rect.bottom, viewport: window.innerHeight };
+          });
+          keyboardChecks.push(makeCheck(
+            "keyboard-safe-exact-split",
+            "The active exact-split input scrolls inside the picker instead of behind the keyboard",
+            inputBox.top >= 0 && inputBox.bottom <= inputBox.viewport,
+            JSON.stringify(inputBox),
+          ));
+        }
+        await panel.getByRole("button", { name: "Done" }).click();
+        await firstComposer.getByPlaceholder("What was it for?").focus();
+      }
+      await recordStep(report, concurrent, outputDirectory, {
+        id: "keyboard-safe-details",
+        title: "Every fast detail remains usable with the keyboard open",
+        sessions: [keyboardSession],
+        note: "The visual viewport is reduced to 390×500 while the description owns focus, reproducing the covered-controls failure without relying on a desktop-only screenshot.",
+        checks: keyboardChecks,
+      });
+      await keyboardSession.page.setViewportSize({ width: 390, height: 844 });
+
       const barrier = new ScenarioBarrier(sessions.length);
-      await Promise.all(sessions.map(async (session, index) => {
-        const submit = await prepareExpense(session.page, inputs[index]!.description, inputs[index]!.amount);
+      await Promise.all(submissions.map(async (submit) => {
         await barrier.wait();
         await submit();
       }));

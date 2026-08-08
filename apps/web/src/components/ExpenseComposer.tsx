@@ -12,6 +12,7 @@ import UsersRound from "lucide-solid/icons/users-round";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import type { LocalExpense } from "../lib/db";
 import { isLocalToday, localDateValue } from "../lib/dates";
+import { initialExpenseEntryMode, shouldDismissKeyboardForPanel, type ExpenseEntryMode } from "../lib/expense-composer-state";
 import { validateExpenseForm, type ExpenseFormIssue } from "../lib/expense-form";
 import { EXPENSE_CATEGORIES, suggestExpenseCategory } from "../lib/expense-categories";
 import { parseExpenseLanguage, type ExpenseLanguageChip, type ExpenseLanguageIssue, type ParsedExpenseLanguage } from "../lib/expense-language";
@@ -70,7 +71,7 @@ function languageFormIssue(draft: ParsedExpenseLanguage): ExpenseFormIssue | und
 }
 
 export function ExpenseComposer(props: ExpenseComposerProps) {
-  const [entryMode, setEntryMode] = createSignal<"natural" | "form">("natural");
+  const [entryMode, setEntryMode] = createSignal<ExpenseEntryMode>(initialExpenseEntryMode(false));
   const [languageText, setLanguageText] = createSignal("");
   const [groupId, setGroupId] = createSignal("");
   const [description, setDescription] = createSignal("");
@@ -165,7 +166,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       setNotes(editingExpense?.notes ?? "");
       setCurrency(editingExpense?.currency ?? appStore.groups().find((group) => group.id === nextGroupId)?.settlementCurrency ?? "USD");
       setRecurrence(editingExpense?.recurrence ?? "none");
-      setEntryMode(editingExpense ? "form" : "natural");
+      setEntryMode(initialExpenseEntryMode(Boolean(editingExpense)));
       setLanguageText("");
       setActivePanel("none");
       setActiveSplitParticipantId(undefined);
@@ -451,7 +452,14 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
 
   function togglePanel(panel: Exclude<ComposerPanel, "none">): void {
     if (activePanel() !== panel) {
-      setActivePanel(panel);
+      const activeElement = document.activeElement as HTMLElement | null;
+      const dismissKeyboard = shouldDismissKeyboardForPanel(panel, activeElement?.tagName);
+      if (dismissKeyboard) activeElement?.blur();
+      if (dismissKeyboard) {
+        window.setTimeout(() => setActivePanel(panel), 120);
+      } else {
+        setActivePanel(panel);
+      }
       return;
     }
     closePanel();
@@ -554,7 +562,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
             class="composer-dialog max-h-[100dvh] w-full overflow-y-auto border border-border bg-card outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:max-h-[94dvh] sm:max-w-xl"
             onOpenAutoFocus={(event) => {
               event.preventDefault();
-              queueMicrotask(() => props.expense ? dialogRef?.focus() : languageInputRef?.focus());
+              queueMicrotask(() => dialogRef?.focus());
             }}
           >
             <header class="composer-header sticky top-0 z-20 grid min-h-14 grid-cols-[1fr_auto_1fr] items-center border-b border-border bg-card px-4">
@@ -566,7 +574,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
               <span />
             </header>
 
-            <form class="grid gap-4 p-4 pb-0 sm:p-6 sm:pb-0" onSubmit={(event) => void submit(event)}>
+            <form class="expense-form grid gap-4 p-4 pb-0 sm:p-6 sm:pb-0" onSubmit={(event) => void submit(event)}>
               <Show when={!props.expense && props.onChangeTarget} fallback={
                 <div class="expense-context-row">
                   <span class="target-icon"><UsersRound size={17} /></span>
@@ -755,7 +763,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
               </Show>
 
               <Show when={activePanel() === "payer"}>
-                <section id="payer-panel" class="disclosure-panel split-panel grid gap-3 border border-border p-4" aria-label="Choose who paid">
+                <section id="payer-panel" class="composer-option-panel disclosure-panel split-panel grid gap-3 border border-border p-4" aria-label="Choose who paid">
                   <div class="disclosure-heading"><div><p>Who paid?</p><small>Choose one person, or use multiple payers.</small></div><button type="button" onClick={closePanel}>Done</button></div>
                   <div class="flex items-center justify-end"><Show when={groupMembers().length > 1}><button type="button" class="flex min-h-11 items-center gap-1.5 px-2 text-xs font-semibold text-primary" onClick={enableMultiplePayers}><UsersRound size={14} />{payerIds().length > 1 ? "Use one payer" : "Multiple payers"}</button></Show></div>
                   <Show when={payerIds().length > 1} fallback={<div class="payer-avatar-rail"><For each={groupMembers()}>{(member) => <button type="button" class="payer-avatar-choice" classList={{ active: payerIds()[0] === member.userId }} aria-pressed={payerIds()[0] === member.userId} onClick={() => { setPayerIds([member.userId]); setPayerValues({}); closePanel(); }}><Avatar name={member.displayName} class="size-9 text-xs" /><span>{member.userId === props.actorId ? "You" : member.displayName}</span></button>}</For></div>}>
@@ -767,7 +775,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
               </Show>
 
               <Show when={activePanel() === "split"}>
-                <section id="split-panel" class="disclosure-panel split-panel grid gap-4 border border-border p-4" aria-label="Choose how to split">
+                <section id="split-panel" class="composer-option-panel disclosure-panel split-panel grid gap-4 border border-border p-4" aria-label="Choose how to split">
                   <div class="disclosure-heading"><div><p>Who owes what?</p><small>{splitMethod() === "equal" ? "The total is divided equally among everyone selected." : splitMethod() === "shares" ? "Give someone more shares when they should cover more of the total." : splitMethod() === "exact" ? "Enter the exact amount each person should cover." : splitMethod() === "adjustment" ? "Add or subtract from an equal split. Adjustments must balance to zero." : "Enter the percentage each person should cover."}</small></div><button type="button" onClick={closePanel}>Done</button></div>
                   <div>
                     <p class="mb-2 text-sm font-medium">Split method</p>
@@ -802,7 +810,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
               </Show>
 
               <Show when={activePanel() === "date"}>
-                <section id="date-panel" class="disclosure-panel split-panel grid gap-3 border border-border p-4" aria-label="Choose expense date">
+                <section id="date-panel" class="composer-option-panel disclosure-panel split-panel grid gap-3 border border-border p-4" aria-label="Choose expense date">
                   <div class="disclosure-heading"><div><p>When was it?</p><small>Today is selected by default.</small></div><button type="button" onClick={closePanel}>Done</button></div>
                   <div class="date-choice-row">
                     <button type="button" classList={{ active: isLocalToday(date()) }} onClick={() => { setDate(localDateValue()); closePanel(); }}>Today</button>

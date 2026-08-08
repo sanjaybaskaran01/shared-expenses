@@ -50,11 +50,13 @@ function convergedClient(actorId: string): ScenarioClientSnapshot {
     groups: [{ id: "goa-trip", name: "Goa trip" }],
     expenses: [{
       id: "dinner",
+      groupId: "goa-trip",
       description: "Ramen dinner",
       status: "active",
       version: 1,
       syncStatus: "accepted",
       amountMinor: 12_000,
+      yourNetMinor: 0,
     }],
     operations: [{ id: "op-expense", targetId: "dinner", syncStatus: "accepted" }],
   };

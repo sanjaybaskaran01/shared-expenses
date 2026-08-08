@@ -1,7 +1,7 @@
 import { createServer } from "node:net";
 import { cp, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { seedScenarioDatabase } from "./sandbox";
+import { seedScenarioAuthUsers, seedScenarioDatabase } from "./sandbox";
 
 interface LoggedProcess {
   process: ReturnType<typeof Bun.spawn>;
@@ -179,6 +179,7 @@ export async function startScenarioRuntime(repositoryRoot: string, outputDirecto
   let web: LoggedProcess | undefined;
   try {
     await waitForHttp(`${apiUrl}/health`, server, "Scenario API");
+    seedScenarioAuthUsers(databasePath);
     web = spawnLogged([bun, "run", "dev", "--", "--host", "127.0.0.1", "--port", String(webPort), "--strictPort"], {
       cwd: join(root, "apps/web"),
       outputDirectory: output,

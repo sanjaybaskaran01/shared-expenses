@@ -65,6 +65,24 @@ describe("ledger presentation", () => {
     expect(computeBalances([], [imported], "group-1", "USD")).toEqual({ a: 750, "import:mira": -750 });
   });
 
+  test("reprojects immutable imported effects after a person securely claims them", () => {
+    const imported = {
+      ...payment,
+      id: "claimed-effect-operation",
+      type: "ImportedTransactionRecorded",
+      targetId: "claimed-effect-1",
+      payload: {
+        currency: "USD",
+        effects: [
+          { participantId: "a", amountMinor: 750 },
+          { participantId: "import:mira", amountMinor: -750 },
+        ],
+      },
+      participantAliases: { "import:mira": "mira-account" },
+    } satisfies LocalOperation;
+    expect(computeBalances([], [imported], "group-1", "USD")).toEqual({ a: 750, "mira-account": -750 });
+  });
+
   test("reduces balances to a deterministic settlement plan", () => {
     expect(simplifyBalances({ a: 3000, b: -1000, c: -2000 })).toEqual([
       { payerId: "c", recipientId: "a", amountMinor: 2000 },

@@ -1,5 +1,5 @@
 import type { LocalExpense, LocalOperation } from "./db";
-import { activeImportedTransactions, activePayments } from "./ledger-view";
+import { activeImportedTransactions, activePayments, operationPayload } from "./ledger-view";
 
 export interface CategoryInsight {
   name: string;
@@ -122,13 +122,13 @@ export function buildGroupReconciliation(
 ): GroupReconciliation {
   const insight = buildGroupInsights(expenses.filter((expense) => expense.groupId === groupId), currency, actorId);
   const payments = activePayments(operations, groupId, currency).filter((payment) => {
-    const data = payment.payload as { payerId?: unknown; recipientId?: unknown };
+    const data = operationPayload(payment);
     return data.payerId === actorId || data.recipientId === actorId;
   });
   let paymentsSentMinor = 0;
   let paymentsReceivedMinor = 0;
   for (const payment of payments) {
-    const data = payment.payload as { payerId?: unknown; recipientId?: unknown; amountMinor?: unknown };
+    const data = operationPayload(payment);
     const amountMinor = Number(data.amountMinor);
     if (!Number.isFinite(amountMinor)) continue;
     if (data.payerId === actorId) paymentsSentMinor += amountMinor;
@@ -136,7 +136,7 @@ export function buildGroupReconciliation(
   }
   let importedBalanceMinor = 0;
   for (const operation of activeImportedTransactions(operations, groupId, currency)) {
-    const data = operation.payload as { effects?: unknown };
+    const data = operationPayload(operation);
     if (!Array.isArray(data.effects)) continue;
     for (const value of data.effects) {
       const effect = value as { participantId?: unknown; amountMinor?: unknown };

@@ -4,16 +4,35 @@ import { localDb, type LocalExpense, type LocalOperation } from "./db";
 import { ensureDevice } from "./device";
 import { foregroundActivityMessage, hasActiveLocalPushSubscription } from "./push-notifications";
 
+export function staleSnapshotMemberIds(
+  localMembers: ReadonlyArray<{ id: string; groupId: string; userId: string }>,
+  remoteMembers: ReadonlyArray<{ groupId: string; userId: string }>,
+  remoteGroupIds: ReadonlySet<string>,
+): string[] {
+  const remoteIds = new Set(remoteMembers.map(({ groupId, userId }) => `${groupId}:${userId}`));
+  return localMembers
+    .filter(({ id, groupId }) => remoteGroupIds.has(groupId) && !remoteIds.has(id))
+    .map(({ id }) => id);
+}
+
 export function expenseFromOperation(
   operation: OperationEnvelope,
   syncStatus: LocalOperation["syncStatus"],
   currentActorId: string,
   originalCreatedBy?: string,
+  participantAliases: ReadonlyMap<string, string> = new Map(),
 ): LocalExpense | null {
   if (operation.type !== "ExpenseCreated" && operation.type !== "ExpenseAmended") return null;
   const payload = operation.payload as Record<string, JsonValue>;
-  const payers = payload.payers as Array<{ participantId: string; amountMinor: number }>;
-  const allocations = payload.allocations as Array<{ participantId: string; amountMinor: number }>;
+  const resolveParticipant = (participantId: string) => participantAliases.get(`${operation.groupId}:${participantId}`) ?? participantId;
+  const payers = (payload.payers as Array<{ participantId: string; amountMinor: number }>).map((payer) => ({
+    ...payer,
+    participantId: resolveParticipant(payer.participantId),
+  }));
+  const allocations = (payload.allocations as Array<{ participantId: string; amountMinor: number }>).map((allocation) => ({
+    ...allocation,
+    participantId: resolveParticipant(allocation.participantId),
+  }));
   const paid = payers.find(({ participantId }) => participantId === currentActorId)?.amountMinor ?? 0;
   const owed = allocations.find(({ participantId }) => participantId === currentActorId)?.amountMinor ?? 0;
   const importMetadata = payload.import && typeof payload.import === "object" && !Array.isArray(payload.import)
@@ -51,12 +70,25 @@ export function remoteProjectionSyncStatus(
   return currentStatus === "conflicted" || currentStatus === "rejected" ? currentStatus : "accepted";
 }
 
-async function applyRemoteBatch(operations: readonly OperationEnvelope[], currentActorId: string): Promise<void> {
+async function applyRemoteBatch(
+  operations: readonly OperationEnvelope[],
+  currentActorId: string,
+  participantAliases: ReadonlyMap<string, string> = new Map(),
+): Promise<void> {
   if (operations.length === 0) return;
   await localDb.transaction("rw", localDb.operations, localDb.expenses, localDb.groups, async () => {
     await localDb.operations.bulkPut(operations.map((operation): LocalOperation => ({
       ...operation,
       syncStatus: "accepted",
+      ...(() => {
+        const prefix = `${operation.groupId}:`;
+        const aliases = Object.fromEntries(
+          [...participantAliases]
+            .filter(([key]) => key.startsWith(prefix))
+            .map(([key, value]) => [key.slice(prefix.length), value]),
+        );
+        return Object.keys(aliases).length > 0 ? { participantAliases: aliases } : {};
+      })(),
     })));
     const targetIds = [...new Set(operations
       .filter(({ type }) => ["ExpenseCreated", "ExpenseAmended", "ExpenseVoided", "ExpenseRestored"].includes(type))
@@ -67,7 +99,7 @@ async function applyRemoteBatch(operations: readonly OperationEnvelope[], curren
     for (const operation of operations) {
       const current = expenses.get(operation.targetId);
       const projectionStatus = remoteProjectionSyncStatus(current?.syncStatus);
-      const projected = expenseFromOperation(operation, projectionStatus, currentActorId, current?.createdBy);
+      const projected = expenseFromOperation(operation, projectionStatus, currentActorId, current?.createdBy, participantAliases);
       if (projected) {
         expenses.set(operation.targetId, projected);
         touched.add(operation.targetId);
@@ -101,6 +133,7 @@ async function capturePreviousExpenseNet(
   operations: readonly OperationEnvelope[],
   currentActorId: string,
   result: Map<string, number>,
+  participantAliases: ReadonlyMap<string, string> = new Map(),
 ): Promise<void> {
   const targetIds = [...new Set(operations
     .filter(({ type }) => type === "ExpenseAmended")
@@ -113,13 +146,17 @@ async function capturePreviousExpenseNet(
       result.set(operation.id, -previous.yourNetMinor);
     }
     if (operation.type === "ExpenseCreated" || operation.type === "ExpenseAmended") {
-      const projected = expenseFromOperation(operation, "accepted", currentActorId, previous?.createdBy);
+      const projected = expenseFromOperation(operation, "accepted", currentActorId, previous?.createdBy, participantAliases);
       if (projected) projections.set(operation.targetId, projected);
     }
   }
 }
 
 export type ConnectionState = "connecting" | "online" | "offline" | "error";
+
+export function eventStreamRetryDelay(): number {
+  return 2_000;
+}
 
 export class SyncRequestQueue {
   private running: Promise<void> | undefined;
@@ -151,6 +188,8 @@ export class SyncRequestQueue {
 
 export class SyncEngine {
   private eventSource: EventSource | undefined;
+  private eventRetryTimer: number | undefined;
+  private disposed = false;
   private readonly requests = new SyncRequestQueue();
 
   constructor(private readonly onState: (state: ConnectionState, message?: string) => void) {}
@@ -173,6 +212,9 @@ export class SyncEngine {
         name: "This browser",
       });
       const snapshot = await getSnapshot();
+      const participantAliases = new Map(
+        (snapshot.participantAliases ?? []).map(({ groupId, fromUserId, toUserId }) => [`${groupId}:${fromUserId}`, toUserId]),
+      );
       const knownGeneration = String((await localDb.settings.get("generation"))?.value ?? "");
       const recovering = Boolean(knownGeneration && knownGeneration !== snapshot.manifest.generation);
       await localDb.transaction("rw", localDb.groups, localDb.members, localDb.operations, async () => {
@@ -189,6 +231,12 @@ export class SyncEngine {
           await localDb.groups.bulkDelete(removedGroupIds);
           await localDb.members.where("groupId").anyOf(removedGroupIds).delete();
         }
+        const staleMemberIds = staleSnapshotMemberIds(
+          await localDb.members.toArray(),
+          snapshot.members,
+          remoteGroupIds,
+        );
+        if (staleMemberIds.length > 0) await localDb.members.bulkDelete(staleMemberIds);
         await localDb.groups.bulkPut(snapshot.groups);
         await localDb.members.bulkPut(
           snapshot.members.map((member) => ({
@@ -198,9 +246,17 @@ export class SyncEngine {
             displayName: member.displayName,
             ...(member.email ? { email: member.email } : {}),
             status: member.status,
+            ...(member.importClaim ? { importClaim: member.importClaim } : {}),
           })),
         );
       });
+      if (participantAliases.size > 0) {
+        const visibleGroupIds = new Set(snapshot.groups.map(({ id }) => id));
+        const acceptedOperations = (await localDb.operations.toArray())
+          .filter((operation) => operation.syncStatus === "accepted" && visibleGroupIds.has(operation.groupId))
+          .sort((left, right) => (left.serverSequence ?? 0) - (right.serverSequence ?? 0));
+        await applyRemoteBatch(acceptedOperations, device.actorId, participantAliases);
+      }
 
       const outbound = recovering
         ? (await localDb.operations.toArray()).filter((operation) => operation.syncStatus !== "rejected" && operation.syncStatus !== "conflicted")
@@ -217,7 +273,7 @@ export class SyncEngine {
             const operation = await localDb.operations.get(accepted.id);
             if (operation) {
               const existingExpense = await localDb.expenses.get(operation.targetId);
-              const expense = expenseFromOperation(operation, "accepted", device.actorId, existingExpense?.createdBy);
+              const expense = expenseFromOperation(operation, "accepted", device.actorId, existingExpense?.createdBy, participantAliases);
               if (expense) await localDb.expenses.put(expense);
               if (operation.type === "ExpenseVoided" || operation.type === "ExpenseRestored") {
                 await localDb.expenses.update(operation.targetId, {
@@ -259,9 +315,9 @@ export class SyncEngine {
         generation = pulled.generation;
         if (storedCursor) {
           foregroundOperations.push(...pulled.operations.filter(({ actorId }) => actorId !== device.actorId));
-          await capturePreviousExpenseNet(pulled.operations, device.actorId, previousExpenseNetMinor);
+          await capturePreviousExpenseNet(pulled.operations, device.actorId, previousExpenseNetMinor, participantAliases);
         }
-        await applyRemoteBatch(pulled.operations, device.actorId);
+        await applyRemoteBatch(pulled.operations, device.actorId, participantAliases);
         const receivedCursor = pulled.operations.reduce(
           (maximum, operation) => Math.max(maximum, operation.serverSequence ?? 0),
           cursor,
@@ -290,7 +346,11 @@ export class SyncEngine {
   }
 
   private ensureEvents(): void {
-    if (this.eventSource) return;
+    if (this.eventSource || this.disposed) return;
+    if (this.eventRetryTimer !== undefined) {
+      window.clearTimeout(this.eventRetryTimer);
+      this.eventRetryTimer = undefined;
+    }
     const eventsUrl = new URL(`${apiBaseUrl}/api/v1/sync/events`);
     if (import.meta.env.DEV) eventsUrl.searchParams.set("devUser", developmentActorId);
     this.eventSource = new EventSource(eventsUrl, { withCredentials: true });
@@ -298,10 +358,18 @@ export class SyncEngine {
     this.eventSource.onerror = () => {
       this.eventSource?.close();
       this.eventSource = undefined;
+      if (!this.disposed) {
+        this.eventRetryTimer = window.setTimeout(() => {
+          this.eventRetryTimer = undefined;
+          this.ensureEvents();
+        }, eventStreamRetryDelay());
+      }
     };
   }
 
   dispose(): void {
+    this.disposed = true;
     this.eventSource?.close();
+    if (this.eventRetryTimer !== undefined) window.clearTimeout(this.eventRetryTimer);
   }
 }

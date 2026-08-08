@@ -14,15 +14,31 @@ export interface RelationshipBalance {
   groupIds: string[];
 }
 
-function payload(operation: LocalOperation): Record<string, JsonValue> {
-  return operation.payload as Record<string, JsonValue>;
+export function operationPayload(operation: LocalOperation): Record<string, JsonValue> {
+  const data = operation.payload as Record<string, JsonValue>;
+  const aliases = operation.participantAliases;
+  if (!aliases) return data;
+  const resolve = (value: JsonValue | undefined): JsonValue | undefined =>
+    typeof value === "string" ? aliases[value] ?? value : value;
+  return {
+    ...data,
+    ...(data.payerId !== undefined ? { payerId: resolve(data.payerId)! } : {}),
+    ...(data.recipientId !== undefined ? { recipientId: resolve(data.recipientId)! } : {}),
+    ...(Array.isArray(data.effects) ? {
+      effects: data.effects.map((effect) => {
+        if (!effect || typeof effect !== "object" || Array.isArray(effect)) return effect;
+        const participantId = resolve(effect.participantId);
+        return { ...effect, ...(participantId !== undefined ? { participantId } : {}) };
+      }),
+    } : {}),
+  };
 }
 
 export function activePayments(operations: readonly LocalOperation[], groupId?: string, currency?: string): LocalOperation[] {
   const reversed = new Set(operations.filter((operation) => operation.type === "PaymentReversed").map((operation) => operation.targetId));
   return operations.filter((operation) => {
     if (operation.type !== "PaymentRecorded" || reversed.has(operation.targetId) || operation.syncStatus === "rejected" || operation.syncStatus === "conflicted") return false;
-    const data = payload(operation);
+    const data = operationPayload(operation);
     return (!groupId || operation.groupId === groupId) && (!currency || String(data.currency) === currency);
   });
 }
@@ -44,7 +60,7 @@ export function activeImportedTransactions(
       operation.syncStatus === "rejected" ||
       operation.syncStatus === "conflicted"
     ) return false;
-    const data = payload(operation);
+    const data = operationPayload(operation);
     const metadata = data.import;
     const sourceDeleted = metadata && typeof metadata === "object" && !Array.isArray(metadata)
       ? (metadata as Record<string, JsonValue>).sourceDeleted === true
@@ -67,13 +83,13 @@ export function computeBalances(
     for (const allocation of expense.allocations) add(allocation.participantId, -allocation.amountMinor);
   }
   for (const operation of activePayments(operations, groupId, currency)) {
-    const data = payload(operation);
+    const data = operationPayload(operation);
     const amountMinor = Number(data.amountMinor);
     add(String(data.payerId), amountMinor);
     add(String(data.recipientId), -amountMinor);
   }
   for (const operation of activeImportedTransactions(operations, groupId, currency)) {
-    const effects = payload(operation).effects;
+    const effects = operationPayload(operation).effects;
     if (!Array.isArray(effects)) continue;
     for (const value of effects) {
       if (!value || typeof value !== "object" || Array.isArray(value)) continue;
@@ -132,10 +148,10 @@ export function computeRelationshipBalances(
       if (expense.groupId === group.id && expense.status === "active") currencies.add(expense.currency);
     }
     for (const operation of activePayments(operations, group.id)) {
-      currencies.add(String(payload(operation).currency));
+      currencies.add(String(operationPayload(operation).currency));
     }
     for (const operation of activeImportedTransactions(operations, group.id)) {
-      currencies.add(String(payload(operation).currency));
+      currencies.add(String(operationPayload(operation).currency));
     }
 
     for (const currency of currencies) {

@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { OperationEnvelope } from "@expenses/protocol";
-import { SyncRequestQueue, expenseFromOperation, remoteProjectionSyncStatus } from "../src/lib/sync";
+import {
+  SyncRequestQueue,
+  expenseFromOperation,
+  eventStreamRetryDelay,
+  remoteProjectionSyncStatus,
+  staleSnapshotMemberIds,
+} from "../src/lib/sync";
 
 describe("sync request queue", () => {
   test("coalesces requests received during a sync into one immediate rerun", async () => {
@@ -23,6 +29,36 @@ describe("sync request queue", () => {
     releaseFirst();
     await Promise.all([first, second, third]);
     expect(runs).toBe(2);
+  });
+});
+
+test("reconnects the realtime stream promptly without a hot loop", () => {
+  expect(eventStreamRetryDelay()).toBeGreaterThanOrEqual(1_000);
+  expect(eventStreamRetryDelay()).toBeLessThanOrEqual(5_000);
+});
+
+describe("snapshot membership reconciliation", () => {
+  test("removes a stale member even when the group itself remains visible", () => {
+    expect(staleSnapshotMemberIds(
+      [
+        { id: "trip:me", groupId: "trip", userId: "me" },
+        { id: "trip:old", groupId: "trip", userId: "old" },
+        { id: "home:me", groupId: "home", userId: "me" },
+      ],
+      [
+        { groupId: "trip", userId: "me" },
+        { groupId: "home", userId: "me" },
+      ],
+      new Set(["trip", "home"]),
+    )).toEqual(["trip:old"]);
+  });
+
+  test("does not remove members from a pending offline-created group", () => {
+    expect(staleSnapshotMemberIds(
+      [{ id: "local:me", groupId: "local", userId: "me" }],
+      [],
+      new Set(),
+    )).toEqual([]);
   });
 });
 
@@ -63,6 +99,42 @@ describe("remote expense projection", () => {
     };
 
     expect(expenseFromOperation(operation, "accepted", "current-user")?.yourNetMinor).toBe(-500);
+  });
+
+  test("projects a securely claimed imported participant onto the signed-in account", () => {
+    const operation: OperationEnvelope = {
+      id: "operation-claimed",
+      groupId: "group-1",
+      actorId: "importer",
+      deviceId: "device-1",
+      type: "ExpenseCreated",
+      targetId: "expense-claimed",
+      baseVersion: 0,
+      clientTimestamp: "2026-08-04T00:00:00.000Z",
+      payload: {
+        description: "Imported dinner",
+        category: "Dining out",
+        amountMinor: 2400,
+        currency: "USD",
+        expenseDate: "2026-08-03",
+        notes: "",
+        payers: [{ participantId: "import:maya", amountMinor: 2400 }],
+        allocations: [{ participantId: "import:maya", amountMinor: 2400 }],
+      },
+      contentHash: "0".repeat(64),
+      signature: "test-signature",
+    };
+
+    const projected = expenseFromOperation(
+      operation,
+      "accepted",
+      "maya-account",
+      undefined,
+      new Map([["group-1:import:maya", "maya-account"]]),
+    );
+    expect(projected?.payers).toEqual([{ participantId: "maya-account", amountMinor: 2400 }]);
+    expect(projected?.allocations).toEqual([{ participantId: "maya-account", amountMinor: 2400 }]);
+    expect(projected?.yourNetMinor).toBe(0);
   });
 
   test("preserves the original creator when another member amends an expense", () => {

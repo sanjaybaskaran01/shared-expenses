@@ -40,6 +40,8 @@
   --positive: #147a52;
   --negative: #b25518;
   --action-text: #43505a;
+  --identity: oklch(.43 .095 244);
+  --identity-surface: oklch(.965 .022 244);
   --radius: .75rem;
   --shadow-card: none;
   --mint: #e9f3ee;
@@ -83,6 +85,8 @@
   --positive: #6ed3a3;
   --negative: #ff9b81;
   --action-text: #d9dee1;
+  --identity: oklch(.78 .09 244);
+  --identity-surface: oklch(.27 .035 244);
   --shadow-card: none;
   --mint: #193229;
   --coral: #38231f;
@@ -130,6 +134,20 @@ button { cursor: pointer; }
 .eyebrow, .micro-label { color: var(--muted-foreground); font-size: .75rem; font-weight: 620; letter-spacing: .035em; text-transform: none; }
 .money-in { color: var(--positive) !important; }
 .money-out { color: var(--negative) !important; }
+
+.import-member-claim { display: flex; min-height: 4.75rem; align-items: flex-start; gap: .75rem; border: 1px solid color-mix(in oklch, var(--identity) 28%, var(--border)); border-left: 3px solid var(--identity); border-radius: .75rem; background: var(--identity-surface); padding: .8rem; }
+.import-member-claim-icon { display: grid; width: 2rem; height: 2rem; flex: 0 0 auto; place-items: center; border-radius: .55rem; background: color-mix(in oklch, var(--identity) 13%, var(--card)); color: var(--identity); }
+.import-member-claim strong, .import-member-claim p { display: block; }
+.import-member-claim strong { font-size: .86rem; font-weight: 680; }
+.import-member-claim p { margin-top: .15rem; color: var(--muted-foreground); font-size: .75rem; line-height: 1.45; }
+.import-claim-action { display: inline-flex; min-height: 2.75rem; flex: 0 0 auto; align-items: center; gap: .4rem; border: 1px solid color-mix(in oklch, var(--identity) 35%, var(--border)); border-radius: .6rem; background: var(--card); padding: 0 .7rem; color: var(--identity); font-size: .75rem; font-weight: 680; }
+.import-claim-review { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: .5rem; margin-top: .65rem; border-top: 1px solid color-mix(in oklch, var(--identity) 22%, var(--border)); padding-top: .65rem; }
+.import-claim-review span, .import-claim-review b, .import-claim-review small { display: block; min-width: 0; }
+.import-claim-review b, .import-claim-review small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-claim-review small { margin-top: .08rem; color: var(--muted-foreground); font-size: .72rem; }
+.import-claim-review button { display: inline-flex; min-height: 2.75rem; align-items: center; gap: .3rem; border-radius: .55rem; background: var(--card); padding: 0 .6rem; color: var(--foreground); font-size: .73rem; font-weight: 650; }
+.import-claim-review button:last-child { background: var(--primary); color: var(--primary-foreground); }
+.member-link-status { min-height: 2.75rem; align-content: center; color: var(--identity); font-size: .75rem; font-weight: 650; }
 
 .form-control {
   width: 100%; height: 2.75rem; border: 1px solid var(--border); border-radius: .75rem;
@@ -781,11 +799,18 @@ textarea.form-control { height: auto; } select.form-control { appearance: auto; 
   box-shadow: 0 -12px 34px rgb(0 0 0 / .13) !important;
 }
 .composer-header { background: var(--card); }
-.amount-stage { min-height: 7rem; border-radius: .75rem; background: var(--background); }
+.amount-stage { min-height: 5.75rem; border-radius: .75rem; background: var(--background); }
 .amount-stage:focus-within { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent); }
 .amount-native-row { font-family: inherit; font-variant-numeric: tabular-nums slashed-zero; }
 .amount-native-input:focus-visible { outline: none; }
 .expense-context-row, .expense-quick-controls, .split-panel { border-radius: .75rem; }
+.expense-quick-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.quick-control { min-height: 4.25rem; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: .4rem; row-gap: .08rem; padding: .5rem .55rem; }
+.quick-control + .quick-control { border-top: 0; border-left: 1px solid var(--border); }
+.quick-control-icon { width: 1.6rem; height: 1.6rem; grid-row: 1 / span 2; }
+.quick-control-label { align-self: end; font-size: .72rem; }
+.quick-control strong { align-self: start; font-size: .76rem; text-align: left; }
+.quick-control > svg { display: none; }
 .quick-control[aria-expanded="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--brand-accent); }
 .quick-control-icon { color: var(--action-text); }
 .date-choice-row > button.active { border-color: var(--primary); background: var(--primary); color: var(--primary-foreground); }
@@ -881,14 +906,23 @@ textarea.form-control { height: auto; } select.form-control { appearance: auto; 
   .balance-cell-net { grid-column: 1 / -1; border-top: 1px solid var(--border); border-left: 0 !important; }
   .balance-cell-net .micro-label { padding-right: 4rem; }
   .composer-dialog { max-height: 96dvh; }
+  .expense-form > .expense-context-row { order: -2; }
+  .expense-form > .expense-quick-controls { position: sticky; z-index: 15; top: 3.5rem; order: -1; box-shadow: 0 6px 18px rgb(20 29 33 / .06); }
   .migration-dialog { border-radius: 1rem 1rem 0 0; }
   #split-panel { max-height: min(58dvh, 28rem); grid-auto-rows: max-content; }
   #split-panel .split-people-list { min-height: 3.5rem; }
+  .composer-option-panel { position: fixed; z-index: 70; right: 0; bottom: 0; left: 0; max-height: min(72dvh, 38rem); margin: 0; border-radius: 1rem 1rem 0 0 !important; background: var(--card); padding-bottom: calc(1rem + env(safe-area-inset-bottom)); box-shadow: 0 -18px 46px rgb(0 0 0 / .2); transform-origin: center bottom; }
+  .import-member-claim { flex-wrap: wrap; }
+  .import-member-claim > div { min-width: calc(100% - 3rem); }
+  .import-claim-action { margin-left: 2.75rem; }
+  .import-claim-review { grid-template-columns: minmax(0, 1fr) auto; }
+  .import-claim-review button:first-of-type { grid-column: 1; }
 }
 
 @media (max-height: 600px) and (pointer: coarse) {
-  #split-panel { max-height: none; overflow: visible; }
-  #split-panel .split-people-list { min-height: 7rem; overflow: visible; }
+  .expense-form:focus-within > .expense-quick-controls { position: fixed; z-index: 65; top: calc(3.5rem + env(safe-area-inset-top)); right: 1rem; left: 1rem; }
+  .composer-option-panel, #split-panel { max-height: calc(100dvh - .5rem); overflow-y: auto; }
+  #split-panel .split-people-list { min-height: 3.5rem; overflow: visible; }
 }
 
 @media (min-width: 640px) {

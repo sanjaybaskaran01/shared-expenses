@@ -8,11 +8,13 @@ export interface ScenarioBridgeSnapshot {
   members: Array<{ groupId: string; userId: string; displayName: string; status: string }>;
   expenses: Array<{
     id: string;
+    groupId: string;
     description: string;
     status: "active" | "voided";
     version: number;
     syncStatus: string;
     amountMinor: number;
+    yourNetMinor: number;
   }>;
   operations: Array<{ id: string; targetId: string; syncStatus: string }>;
 }
@@ -46,13 +48,15 @@ export function installScenarioBridge(actorId: string): void {
         connection: appStore.connection(),
         groups: groups.map(({ id, name }) => ({ id, name })),
         members: members.map(({ groupId, userId, displayName, status }) => ({ groupId, userId, displayName, status })),
-        expenses: expenses.map(({ id, description, status, version, syncStatus, amountMinor }) => ({
+        expenses: expenses.map(({ id, groupId, description, status, version, syncStatus, amountMinor, yourNetMinor }) => ({
           id,
+          groupId,
           description,
           status,
           version,
           syncStatus,
           amountMinor,
+          yourNetMinor,
         })),
         operations: operations.map(({ id, targetId, syncStatus }) => ({ id, targetId, syncStatus })),
       };

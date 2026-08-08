@@ -60,6 +60,7 @@ describe("ledger ingestion", () => {
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/001_domain.sql"), "utf8"));
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/004_confidential_sync.sql"), "utf8"));
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/005_imports.sql"), "utf8"));
+    db.exec(readFileSync(resolve(import.meta.dir, "../migrations/009_import_participant_aliases.sql"), "utf8"));
     db.query("INSERT INTO app_meta(key, value) VALUES ('generation', 'test-generation')").run();
     store = new LedgerStore(db);
     store.bootstrapGroup({

@@ -97,6 +97,8 @@ Resolution order is importer identity, an owner-scoped provider mapping previous
 
 Before a new account can be created, the claimant reserves the claim with the email they will verify. For a trusted source email, that email must hash to the imported identity before Google or email-link sign-in starts. For a name-only or untrusted identity, the claimant verifies an email, explicitly confirms the claim while signed in, and the importer sees the claimant's verified name/email before approving or rejecting the transfer. The claimant can safely resume or poll a pending request from the same account. Forwarding a link therefore cannot silently attach the wrong account. Migration claim links are separate from referral invitations and consume no referral credit.
 
+Claiming never rewrites an accepted signed operation. The relational projection and group membership move to the verified account, while an indexed alias is recorded only for each group where that exact imported placeholder was a member. Synchronization returns the alias only to active readers of that group, and clients reproject the immutable history locally. This preserves signatures without revealing account linkage to someone who merely shares another group from the same import batch.
+
 ## Reconciliation report
 
 Activation independently calculates balances from normalized records and compares any supplied Splitwise balances by group, person, and currency. It also recomputes and verifies each participant's total paid, total owed, payments sent, payments received, and net amount, plus group totals by currency. These audit totals are progressively disclosed in the final review.
@@ -137,6 +139,7 @@ Splitwise's public OAuth material does not document PKCE behavior, so Tallied do
 | Staging race or disk exhaustion | Transactional conditional byte reservation, 768 MiB instance ceiling, owner-scoped cancellation, and automatic expiry |
 | Formula/HTML injection | Imported values remain plain text; no CSV generation or HTML rendering |
 | Forwarded identity claim | Opaque token, no pre-verification disclosure, trusted-email hash or owner approval |
+| Cross-group identity linkage | Participant aliases are materialized from the placeholder's exact group memberships and returned only to active readers of that group |
 | Forged proxy headers | Cloudflare client-IP trust is opt-in; self-host gateways strip the header and otherwise share a conservative public limit key |
 | Unclaimed data access | Placeholder memberships are financial participants but never authorized readers |
 | Importer undo harming later work | Undo targets batch-owned records only and preserves groups with later activity |

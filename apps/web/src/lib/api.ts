@@ -100,8 +100,14 @@ export interface RemoteSnapshot {
     displayName: string;
     email: string | null;
     status: string;
+    importClaim?: {
+      batchId: string;
+      identityId: string;
+      status: "unclaimed" | "reserved" | "awaiting_owner";
+    };
   }>;
   manifest: { generation: string; latestServerSequence: number };
+  participantAliases?: Array<{ groupId: string; fromUserId: string; toUserId: string }>;
 }
 
 export async function bootstrapDevelopment(): Promise<void> {

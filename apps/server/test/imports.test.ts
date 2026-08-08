@@ -52,6 +52,7 @@ describe("Splitwise migration ledger", () => {
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/005_imports.sql"), "utf8"));
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/006_import_hardening.sql"), "utf8"));
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/007_import_preparation_binding.sql"), "utf8"));
+    db.exec(readFileSync(resolve(import.meta.dir, "../migrations/009_import_participant_aliases.sql"), "utf8"));
     db.exec(`
       CREATE TABLE "user" (
         id TEXT PRIMARY KEY,
@@ -192,6 +193,28 @@ describe("Splitwise migration ledger", () => {
     expect(JSON.stringify(db.query<{ payload_json: string }, [string]>(
       "SELECT payload_json FROM operations WHERE id = ?",
     ).get("import-record-operation"))).not.toContain("csv:goa:2");
+  });
+
+  test("shows claim controls only to the migration owner in a shared group snapshot", async () => {
+    const body = await request();
+    await store.activateImport("user-1", body);
+    db.exec(`
+      INSERT INTO "user"(id, name, email) VALUES ('user-3', 'Observer', 'observer@example.com');
+      INSERT INTO group_members(group_id, user_id, display_name, email, status, joined_at)
+      VALUES ('import-group-1', 'user-3', 'Observer', 'observer@example.com', 'active', '2026-08-04T12:00:00.000Z');
+    `);
+
+    const ownerMembers = store.snapshot("user-1").members as Array<Record<string, unknown>>;
+    expect(ownerMembers.find(({ userId }) => userId === "import:identity-friend")).toEqual(expect.objectContaining({
+      importClaim: {
+        batchId: body.id,
+        identityId: "identity-friend",
+        status: "unclaimed",
+      },
+    }));
+
+    const observerMembers = store.snapshot("user-3").members as Array<Record<string, unknown>>;
+    expect(observerMembers.find(({ userId }) => userId === "import:identity-friend")).not.toHaveProperty("importClaim");
   });
 
   test("does not enumerate or auto-bind a trusted exported email", async () => {
@@ -590,6 +613,31 @@ describe("Splitwise migration ledger", () => {
     expect(db.query<{ participant_id: string }, [string]>(
       "SELECT participant_id FROM imported_transaction_effects WHERE amount_minor < 0 AND transaction_id = ?",
     ).get("import-record-1")?.participant_id).toBe("user-2");
+    expect((store.snapshot("user-2") as { participantAliases?: unknown }).participantAliases).toEqual([
+      { groupId: "import-group-1", fromUserId: "import:identity-friend", toUserId: "user-2" },
+    ]);
+    db.query("DELETE FROM import_participant_aliases WHERE identity_id = ?").run("identity-friend");
+    db.exec(readFileSync(resolve(import.meta.dir, "../migrations/009_import_participant_aliases.sql"), "utf8"));
+    expect((store.snapshot("user-2") as { participantAliases?: unknown }).participantAliases).toEqual([
+      { groupId: "import-group-1", fromUserId: "import:identity-friend", toUserId: "user-2" },
+    ]);
+    db.exec(`
+      INSERT INTO "user"(id, name, email) VALUES ('user-3', 'Unrelated member', 'unrelated@example.com');
+      INSERT INTO groups(id, name, settlement_currency, created_by, created_at)
+      VALUES ('unrelated-group', 'Unrelated group', 'USD', 'user-1', '2026-08-04T12:00:00.000Z');
+      INSERT INTO group_members(group_id, user_id, display_name, email, status, joined_at) VALUES
+        ('unrelated-group', 'user-1', 'Sam', 'sam@example.com', 'active', '2026-08-04T12:00:00.000Z'),
+        ('unrelated-group', 'user-2', 'Mira', 'mira@example.com', 'active', '2026-08-04T12:00:00.000Z'),
+        ('unrelated-group', 'user-3', 'Unrelated member', 'unrelated@example.com', 'active', '2026-08-04T12:00:00.000Z');
+      INSERT INTO import_external_mappings(
+        batch_id, imported_by, provider, external_type, external_id,
+        external_id_hash, local_id
+      ) VALUES (
+        '${body.id}', 'user-1', 'splitwise', 'group', 'unrelated:USD',
+        '${"e".repeat(64)}', 'unrelated-group'
+      );
+    `);
+    expect((store.snapshot("user-3") as { participantAliases?: unknown }).participantAliases).toEqual([]);
   });
 
   test("rejects a forwarded untrusted claim with an auditable claimant and permits a fresh link", async () => {

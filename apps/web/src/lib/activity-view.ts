@@ -1,6 +1,5 @@
-import type { JsonValue } from "@expenses/protocol";
 import type { LocalExpense, LocalOperation } from "./db";
-import { activePayments } from "./ledger-view";
+import { activePayments, operationPayload } from "./ledger-view";
 
 export interface PaymentActivityDetails {
   payerId: string;
@@ -12,10 +11,10 @@ export interface PaymentActivityDetails {
 }
 
 export function paymentActivityDetails(
-  operation: Pick<LocalOperation, "type" | "payload">,
+  operation: LocalOperation,
 ): PaymentActivityDetails | undefined {
   if (operation.type !== "PaymentRecorded") return undefined;
-  const payload = operation.payload as Record<string, JsonValue>;
+  const payload = operationPayload(operation);
   const payerId = typeof payload.payerId === "string" ? payload.payerId : "";
   const recipientId = typeof payload.recipientId === "string" ? payload.recipientId : "";
   const amountMinor = typeof payload.amountMinor === "number" ? payload.amountMinor : Number.NaN;

@@ -15,6 +15,7 @@ export type SyncStatus = "pending" | "accepted" | "conflicted" | "rejected";
 export interface LocalOperation extends OperationEnvelope {
   syncStatus: SyncStatus;
   errorCode?: string;
+  participantAliases?: Record<string, string>;
 }
 
 export interface LocalGroup {
@@ -32,6 +33,11 @@ export interface LocalMember {
   displayName: string;
   email?: string;
   status: string;
+  importClaim?: {
+    batchId: string;
+    identityId: string;
+    status: "unclaimed" | "reserved" | "awaiting_owner";
+  };
 }
 
 export interface LocalExpense {

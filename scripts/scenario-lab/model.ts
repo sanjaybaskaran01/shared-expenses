@@ -48,11 +48,13 @@ export interface ScenarioClientSnapshot {
   groups: Array<{ id: string; name: string }>;
   expenses: Array<{
     id: string;
+    groupId: string;
     description: string;
     status: "active" | "voided";
     version: number;
     syncStatus: string;
     amountMinor: number;
+    yourNetMinor: number;
   }>;
   operations: Array<{ id: string; targetId: string; syncStatus: string }>;
 }
@@ -148,7 +150,7 @@ export function evaluateClientConvergence(
 ): ScenarioCheck[] {
   const canonical = server.expenses.map(expenseFingerprint).sort();
   return clients.map((client) => {
-    const local = client.expenses.map(expenseFingerprint).sort();
+    const local = client.expenses.filter(({ groupId }) => groupId === server.groupId).map(expenseFingerprint).sort();
     const matching = JSON.stringify(local) === JSON.stringify(canonical);
     const settled = client.expenses.every(({ syncStatus }) => syncStatus === "accepted");
     const online = client.connection === "online";

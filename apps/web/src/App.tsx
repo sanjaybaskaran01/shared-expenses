@@ -1,29 +1,15 @@
 import Activity from "lucide-solid/icons/activity";
-import ArrowRightLeft from "lucide-solid/icons/arrow-right-left";
 import CheckCircle2 from "lucide-solid/icons/check-circle-2";
 import ChevronLeft from "lucide-solid/icons/chevron-left";
 import ChevronRight from "lucide-solid/icons/chevron-right";
 import CircleUserRound from "lucide-solid/icons/circle-user-round";
 import Cloud from "lucide-solid/icons/cloud";
 import CloudOff from "lucide-solid/icons/cloud-off";
-import DatabaseBackup from "lucide-solid/icons/database-backup";
 import House from "lucide-solid/icons/house";
-import LockKeyhole from "lucide-solid/icons/lock-keyhole";
-import LogOut from "lucide-solid/icons/log-out";
-import Mail from "lucide-solid/icons/mail";
-import Moon from "lucide-solid/icons/moon";
-import MessageCircle from "lucide-solid/icons/message-circle";
-import PencilLine from "lucide-solid/icons/pencil-line";
 import Plus from "lucide-solid/icons/plus";
 import ReceiptText from "lucide-solid/icons/receipt-text";
 import RefreshCw from "lucide-solid/icons/refresh-cw";
-import RotateCcw from "lucide-solid/icons/rotate-ccw";
 import Scale from "lucide-solid/icons/scale";
-import ShieldCheck from "lucide-solid/icons/shield-check";
-import Sparkles from "lucide-solid/icons/sparkles";
-import Sun from "lucide-solid/icons/sun";
-import Trash2 from "lucide-solid/icons/trash-2";
-import UserMinus from "lucide-solid/icons/user-minus";
 import UsersRound from "lucide-solid/icons/users-round";
 import UserPlus from "lucide-solid/icons/user-plus";
 import X from "lucide-solid/icons/x";
@@ -42,6 +28,11 @@ import {
   onMount,
 } from "solid-js";
 import { BrandMark } from "./components/BrandMark";
+import { AuthScreen } from "./components/AuthScreen";
+import { AccountView } from "./components/AccountView";
+import { ActivityView } from "./components/ActivityView";
+import { OverviewView } from "./components/OverviewView";
+import { SectionHeading } from "./components/SectionHeading";
 import { CategoryMark } from "./components/CategoryMark";
 import { ContactInviteDialog } from "./components/ContactInviteDialog";
 import { ExpenseComposer } from "./components/ExpenseComposer";
@@ -49,6 +40,7 @@ import { ExpenseDetail } from "./components/ExpenseDetail";
 import { ExpenseTargetPicker } from "./components/ExpenseTargetPicker";
 import { FeedbackButton } from "./components/FeedbackDialog";
 import { GroupComposer } from "./components/GroupComposer";
+import { ImportedMemberClaim } from "./components/ImportedMemberClaim";
 import { PaymentComposer } from "./components/PaymentComposer";
 import { NotificationSettings } from "./components/NotificationSettings";
 import { RelationshipDetail } from "./components/RelationshipDetail";
@@ -64,21 +56,17 @@ import {
 import {
   acceptCurrentContactInvitation,
   claimImportedIdentity,
-  claimContactInvitation,
-  getAuthCapabilities,
-  getContacts,
   getImportClaimStatus,
-  previewImportClaim,
-  requestImportClaimMagicLink,
-  reserveImportClaim,
 } from "./lib/api";
 import {
   authClient,
   getOfflineActorId,
-  signOutAndClearLocalLedger,
 } from "./lib/auth";
 import { clearInviteToken, inviteTokenFromHash } from "./lib/contact-invites";
-import { groupTimelineItems, paymentActivityDetails, type GroupTimelineItem } from "./lib/activity-view";
+import { money } from "./lib/format-money";
+import { isVisibleGroupMember, memberName } from "./lib/member-label";
+import { accountSyncCopy } from "./lib/connection-status";
+import { groupTimelineItems, type GroupTimelineItem } from "./lib/activity-view";
 import { developmentIdentity } from "./lib/development-actor";
 import { localDb, type LocalExpense, type LocalOperation } from "./lib/db";
 import {
@@ -90,17 +78,17 @@ import {
 } from "./lib/expense-launch";
 import { mostRecentExpenseGroupId, type ExpenseTarget } from "./lib/expense-targets";
 import { releaseWatch, reloadForUpdate } from "./lib/release-watch";
+import { clearLocationHash, migrationClaimFromHash } from "./lib/migration-claim-link";
 import { acknowledgeNotifications, queuedForegroundActivityMessage } from "./lib/push-notifications";
 import { buildGroupInsights, buildGroupReconciliation, settlementBlockerCount, summarizeOperationHealth } from "./lib/group-insights";
 import {
   computeBalances,
-  computeRelationshipBalances,
   simplifyBalances,
   activePayments,
-  type RelationshipBalance,
   type Settlement,
 } from "./lib/ledger-view";
-import { appStore, changeGroupCurrency, initializeStore, restoreExpense } from "./lib/store";
+import { appStore, changeGroupCurrency, initializeStore } from "./lib/store";
+import { applyTheme, type Theme } from "./lib/theme";
 
 const MigrationDialog = lazy(() =>
   import("./components/MigrationDialog").then((module) => ({ default: module.MigrationDialog })),
@@ -108,16 +96,6 @@ const MigrationDialog = lazy(() =>
 
 type Tab = "overview" | "groups" | "activity" | "account";
 
-function migrationClaimFromHash(hash = window.location.hash): string | undefined {
-  if (!hash.startsWith("#")) return undefined;
-  const token = new URLSearchParams(hash.slice(1)).get("migrationClaim")?.trim();
-  return token && /^[A-Za-z0-9_-]{43}$/.test(token) ? token : undefined;
-}
-
-function clearLocationHash(): void {
-  history.replaceState(history.state, "", `${location.pathname}${location.search}`);
-}
-type Theme = "system" | "light" | "dark";
 const smartCategoriesStorageKey = "tallied:smart-categories-preview";
 const SpendingChart = lazy(() =>
   import("./components/SpendingChart").then((module) => ({
@@ -125,37 +103,12 @@ const SpendingChart = lazy(() =>
   })),
 );
 
-function applyTheme(value: Theme): void {
-  const dark =
-    value === "dark" ||
-    (value === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
-  document.documentElement.classList.toggle("dark", dark);
-}
-
-function money(amountMinor: number, currency = "USD", compact = false): string {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency,
-    ...(compact ? { notation: "compact", maximumFractionDigits: 1 } : {}),
-  }).format(amountMinor / 100);
-}
-
 function expenseDate(value: string): Date {
   return new Date(`${value}T12:00:00`);
 }
 
 function monthLabel(value: string): string {
   return new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(`${value}-15T12:00:00`));
-}
-
-function memberName(groupId: string, userId: string, actorId: string): string {
-  if (userId === actorId) return "You";
-  return (
-    appStore
-      .members()
-      .find((member) => member.groupId === groupId && member.userId === userId)
-      ?.displayName ?? "Member"
-  );
 }
 
 function currenciesFor(groupId: string): string[] {
@@ -170,10 +123,6 @@ function currenciesFor(groupId: string): string[] {
   return [...values];
 }
 
-function isVisibleGroupMember(status: string): boolean {
-  return status === "active" || status === "placeholder";
-}
-
 function ConnectionPill() {
   const pending = createMemo(
     () =>
@@ -181,32 +130,32 @@ function ConnectionPill() {
         .operations()
         .filter((operation) => operation.syncStatus === "pending").length,
   );
-  const connectionLabel = createMemo(() => {
-    if (appStore.connection() === "online") return pending() ? `${pending()} changes syncing` : "Synced";
-    if (appStore.connection() === "connecting") return "Checking connection";
-    return pending() ? `Offline, ${pending()} changes saved on this device` : "Offline";
-  });
+  const copy = createMemo(() => accountSyncCopy({
+    connection: appStore.connection(),
+    pendingCount: pending(),
+    groupCount: appStore.groups().length,
+  }));
   return (
     <>
       <button
         type="button"
         class="connection-pill glass-control"
         onClick={() => void appStore.sync()}
-        aria-label={connectionLabel()}
-        title={connectionLabel()}
+        aria-label={copy().detail}
+        title={copy().detail}
       >
         <Switch>
           <Match when={appStore.connection() === "online"}>
             <Cloud class="text-foreground" size={14} />
-            <span>{pending() ? `${pending()} syncing` : "Synced"}</span>
+            <span>{copy().short}</span>
           </Match>
           <Match when={appStore.connection() === "connecting"}>
             <RefreshCw class="animate-spin" size={14} />
-            <span>Checking</span>
+            <span>{copy().short}</span>
           </Match>
           <Match when={true}>
             <CloudOff class="connection-warning" size={14} />
-            <span>{pending() ? `${pending()} on device` : "Offline"}</span>
+            <span>{copy().short}</span>
           </Match>
         </Switch>
       </button>
@@ -214,24 +163,6 @@ function ConnectionPill() {
         {appStore.connectionMessage()}
       </span>
     </>
-  );
-}
-
-function SectionHeading(props: {
-  title: string;
-  detail?: string;
-  action?: unknown;
-}) {
-  return (
-    <div class="flex min-h-14 items-center justify-between gap-4 border-b border-border/65 px-4 sm:px-5">
-      <div>
-        <h2 class="text-sm font-semibold tracking-tight">{props.title}</h2>
-        <Show when={props.detail}>
-          <p class="text-xs text-muted-foreground">{props.detail}</p>
-        </Show>
-      </div>
-      {props.action as never}
-    </div>
   );
 }
 
@@ -495,6 +426,7 @@ function GroupsView(props: {
           isVisibleGroupMember(member.status),
       ),
   );
+  const claimablePeople = createMemo(() => people().filter((member) => member.importClaim));
   const insights = createMemo(() => buildGroupInsights(activeExpenses(), currency(), props.actorId));
   const reconciliation = createMemo(() => buildGroupReconciliation(
     activeExpenses(),
@@ -556,6 +488,9 @@ function GroupsView(props: {
       >
         {(activeGroup) => (
           <>
+            <For each={claimablePeople()}>{(member) => (
+              <ImportedMemberClaim member={member} onNotify={props.onToast} />
+            )}</For>
             <AccessibleTabs
               class="group-view-tabs"
               items={[
@@ -602,7 +537,9 @@ function GroupsView(props: {
                           <Avatar name={member.displayName} class="person-avatar" />
                           <div class="min-w-0 flex-1"><strong class="block truncate">{member.displayName}</strong><span class="micro-label block truncate">{member.status === "placeholder" ? "Not claimed · " : ""}{related() || activeGroup.name}</span></div>
                           <div class="shrink-0 text-right"><strong class="money-type block" classList={{ "money-in": balance() < 0, "money-out": balance() > 0 }}>{balance() === 0 ? money(0, currency()) : `${balance() < 0 ? "+" : "−"}${money(Math.abs(balance()), currency())}`}</strong><span class="micro-label" classList={{ "money-in": balance() < 0, "money-out": balance() > 0 }}>{balance() < 0 ? "owes you" : balance() > 0 ? "you owe" : "settled"}</span></div>
-                          <button class="ink-action" type="button" disabled={!settlement() || settlementBlockers() > 0} onClick={() => props.onSettle(settlement(), currency())}>{member.status === "placeholder" ? "Unclaimed" : balance() > 0 ? "Pay" : "Settle"}</button>
+                          <Show when={member.status !== "placeholder"} fallback={<span class="member-link-status">Not connected</span>}>
+                            <button class="ink-action" type="button" disabled={!settlement() || settlementBlockers() > 0} onClick={() => props.onSettle(settlement(), currency())}>{balance() > 0 ? "Pay" : "Settle"}</button>
+                          </Show>
                         </article>
                       );
                     }}
@@ -666,462 +603,6 @@ function GroupsView(props: {
           </>
         )}
       </Show>
-    </div>
-  );
-}
-
-function OverviewView(props: {
-  actorId: string;
-  activeGroupId?: string | undefined;
-  onCreateGroup(): void;
-  onOpenGroup(groupId: string): void;
-  onSettle(settlement: Settlement, currency: string, groupId: string): void;
-}) {
-  const [inviteOpen, setInviteOpen] = createSignal(false);
-  const [selectedRelationship, setSelectedRelationship] = createSignal<RelationshipBalance>();
-  const [homeSection, setHomeSection] = createSignal<"people" | "groups">("people");
-  const [contactState, { refetch: refetchContacts }] = createResource(async () => {
-    try {
-      return await getContacts();
-    } catch {
-      return { creditsTotal: 5, creditsRemaining: 0, invitations: [], contacts: [] };
-    }
-  });
-  const relationships = createMemo(() =>
-    computeRelationshipBalances(
-      appStore.expenses(),
-      appStore.operations(),
-      appStore.groups(),
-      appStore.members(),
-      props.actorId,
-    ),
-  );
-  const totals = createMemo(() => {
-    const values = new Map<string, { currency: string; incoming: number; outgoing: number; net: number }>();
-    for (const relationship of relationships()) {
-      const current = values.get(relationship.currency) ?? { currency: relationship.currency, incoming: 0, outgoing: 0, net: 0 };
-      if (relationship.amountMinor > 0) current.incoming += relationship.amountMinor;
-      else current.outgoing += Math.abs(relationship.amountMinor);
-      current.net += relationship.amountMinor;
-      values.set(relationship.currency, current);
-    }
-    if (values.size === 0) {
-      const fallback = appStore.groups()[0]?.settlementCurrency ?? "USD";
-      values.set(fallback, { currency: fallback, incoming: 0, outgoing: 0, net: 0 });
-    }
-    return [...values.values()];
-  });
-  const nameFor = (userId: string) =>
-    appStore.members().find((member) => member.userId === userId)?.displayName ?? "Friend";
-  const groupNames = (groupIds: string[]) =>
-    groupIds
-      .map((id) => appStore.groups().find((group) => group.id === id)?.name)
-      .filter(Boolean)
-      .join(" · ");
-  const groupMemberCount = (groupId: string) =>
-    appStore.members().filter((member) => member.groupId === groupId && isVisibleGroupMember(member.status)).length;
-  const groupExpenseCount = (groupId: string) =>
-    appStore.expenses().filter((expense) => expense.groupId === groupId && expense.status === "active").length;
-  const groupPaymentCount = (groupId: string) => activePayments(appStore.operations(), groupId).length;
-  const groupBalance = (groupId: string, currency: string) =>
-    computeBalances(appStore.expenses(), appStore.operations(), groupId, currency)[props.actorId] ?? 0;
-  const relationshipUserIds = createMemo(() => new Set(relationships().map((relationship) => relationship.userId)));
-  const contactsWithoutBalance = createMemo(() =>
-    (contactState()?.contacts ?? []).filter((contact) => !relationshipUserIds().has(contact.userId)),
-  );
-  return (
-    <div class="page-enter home-page space-y-5">
-      <header class="home-heading">
-        <h1 class="page-title">Your balances</h1>
-        <p class="home-summary-copy">
-          {relationships().length} open {relationships().length === 1 ? "balance" : "balances"} · {appStore.groups().length} {appStore.groups().length === 1 ? "group" : "groups"}
-        </p>
-      </header>
-
-      <div class="overview-currency-grid">
-        <For each={totals()}>
-          {(total) => (
-            <section class="overview-balance" aria-label={`${total.currency} balance across all groups`}>
-              <div class="overview-balance-primary">
-                <span class="micro-label">Summary · {total.currency}</span>
-                <strong class="money-type" classList={{ "money-in": total.net > 0, "money-out": total.net < 0 }}>
-                  {total.net === 0 ? money(0, total.currency) : `${total.net > 0 ? "+" : "−"}${money(Math.abs(total.net), total.currency)}`}
-                </strong>
-                <p>{total.net > 0 ? "owed to you" : total.net < 0 ? "you owe overall" : "all settled"}</p>
-              </div>
-              <div class="overview-balance-details">
-                <span><small>You’re owed</small><strong class="money-in">{money(total.incoming, total.currency)}</strong></span>
-                <span><small>You owe</small><strong class="money-out">{money(total.outgoing, total.currency)}</strong></span>
-              </div>
-            </section>
-          )}
-        </For>
-      </div>
-
-      <AccessibleTabs
-        class="home-list-tabs"
-        items={[
-          { id: "people", label: "By person" },
-          { id: "groups", label: "By group" },
-        ] as const}
-        value={homeSection()}
-        onChange={setHomeSection}
-        ariaLabel="Home balance views"
-        idPrefix="home-balance"
-      />
-
-      <Show when={homeSection() === "people"}>
-        <Card id={tabPanelId("home-balance", "people")} class="home-list-card overflow-hidden" role="tabpanel" aria-labelledby={tabId("home-balance", "people")}>
-          <SectionHeading
-            title="People"
-            detail={relationships().length ? "Net across all shared groups" : contactsWithoutBalance().length ? "Connected on Tallied" : "No open balances"}
-            action={<button type="button" class="list-add-action" onClick={() => setInviteOpen(true)}><UserPlus size={14} /> Invite</button>}
-          />
-          <For
-            each={relationships()}
-            fallback={<Show when={!contactsWithoutBalance().length}><div class="px-6 py-12 text-center"><ReceiptText class="mx-auto text-muted-foreground" size={25} /><p class="mt-3 text-sm text-muted-foreground">Invite a friend or add an expense to get started.</p></div></Show>}
-          >
-            {(relationship, index) => {
-              const personName = createMemo(() => nameFor(relationship.userId));
-              const settlement = createMemo<Settlement>(() => relationship.amountMinor > 0
-                ? { payerId: relationship.userId, recipientId: props.actorId, amountMinor: relationship.amountMinor }
-                : { payerId: props.actorId, recipientId: relationship.userId, amountMinor: Math.abs(relationship.amountMinor) });
-              const needsReview = createMemo(() => relationship.groupIds.length === 1 && settlementBlockerCount(appStore.expenses(), relationship.groupIds[0]!, relationship.currency) > 0);
-              const canSettleHere = createMemo(() => relationship.groupIds.length === 1 && !needsReview());
-              return (
-                <article class="relationship-row" style={{ "--row-index": Math.min(index(), 7) }}>
-                  <Avatar name={personName()} class="size-10 text-xs" />
-                  <button type="button" class="min-h-11 min-w-0 flex-1 text-left" aria-label={`View balance details with ${personName()}`} onClick={() => setSelectedRelationship(relationship)}>
-                    <strong class="block truncate text-sm">{personName()}</strong>
-                    <span class="block truncate text-xs text-muted-foreground">{groupNames(relationship.groupIds)}</span>
-                  </button>
-                  <div class="text-right">
-                    <span class="relationship-direction" classList={{ "money-in": relationship.amountMinor > 0, "money-out": relationship.amountMinor < 0 }}>{relationship.amountMinor > 0 ? "owes you" : "you owe"}</span>
-                    <strong class="block text-sm tabular-nums" classList={{ "money-in": relationship.amountMinor > 0, "money-out": relationship.amountMinor < 0 }}>{money(Math.abs(relationship.amountMinor), relationship.currency)}</strong>
-                  </div>
-                  <button
-                    type="button"
-                    class="relationship-action"
-                    classList={{ "relationship-action-settle": canSettleHere() }}
-                    aria-label={canSettleHere() ? `Settle balance with ${personName()}` : needsReview() ? `Review balance with ${personName()}` : `View shared groups with ${personName()}`}
-                    onClick={() => canSettleHere() ? props.onSettle(settlement(), relationship.currency, relationship.groupIds[0]!) : setSelectedRelationship(relationship)}
-                  >
-                    <span class="relationship-action-label">{canSettleHere() ? "Settle" : needsReview() ? "Review" : "View"}</span>
-                    <Show when={!canSettleHere()}><ChevronRight class="relationship-action-chevron" size={16} /></Show>
-                  </button>
-                </article>
-              );
-            }}
-          </For>
-          <For each={contactsWithoutBalance()}>
-            {(contact) => (
-              <article class="relationship-row">
-                <Avatar name={contact.displayName} class="size-10 text-xs" />
-                <div class="min-w-0 flex-1 text-left">
-                  <strong class="block truncate text-sm">{contact.displayName}</strong>
-                  <span class="block truncate text-xs text-muted-foreground">Connected · no shared expenses yet</span>
-                </div>
-                <span class="inline-flex items-center gap-1 text-xs text-muted-foreground"><CheckCircle2 size={14} /> Joined</span>
-              </article>
-            )}
-          </For>
-        </Card>
-      </Show>
-
-      <Show when={homeSection() === "groups"}>
-        <Card id={tabPanelId("home-balance", "groups")} class="home-list-card overflow-hidden" role="tabpanel" aria-labelledby={tabId("home-balance", "groups")}>
-          <SectionHeading title="Groups" detail="Your groups" action={<button type="button" class="list-add-action" onClick={props.onCreateGroup}><UsersRound size={14} /> Create group</button>} />
-          <For each={appStore.groups()} fallback={<div class="px-6 py-12 text-center text-sm text-muted-foreground">Create a group to start splitting.</div>}>
-            {(group) => {
-              const balance = createMemo(() => groupBalance(group.id, group.settlementCurrency));
-              const paymentCount = createMemo(() => groupPaymentCount(group.id));
-              return <button type="button" class="home-group-row" onClick={() => props.onOpenGroup(group.id)}>
-                <Avatar name={group.name} class="size-10 text-xs" />
-                <span class="min-w-0 flex-1 text-left"><strong>{group.name}</strong><small>{groupMemberCount(group.id)} {groupMemberCount(group.id) === 1 ? "person" : "people"} · {groupExpenseCount(group.id)} {groupExpenseCount(group.id) === 1 ? "expense" : "expenses"}{paymentCount() ? ` · ${paymentCount()} ${paymentCount() === 1 ? "payment" : "payments"}` : ""}</small></span>
-                <span class="home-group-balance"><small classList={{ "money-in": balance() > 0, "money-out": balance() < 0 }}>{balance() > 0 ? "you’re owed" : balance() < 0 ? "you owe" : "settled"}</small><strong classList={{ "money-in": balance() > 0, "money-out": balance() < 0 }}>{money(Math.abs(balance()), group.settlementCurrency)}</strong></span>
-                <ChevronRight size={16} />
-              </button>;
-            }}
-          </For>
-        </Card>
-      </Show>
-
-      <ContactInviteDialog
-        open={inviteOpen()}
-        onOpenChange={setInviteOpen}
-        onChanged={() => void refetchContacts()}
-      />
-      <RelationshipDetail
-        open={Boolean(selectedRelationship())}
-        actorId={props.actorId}
-        relationship={selectedRelationship()}
-        onOpenChange={(open) => { if (!open) setSelectedRelationship(undefined); }}
-        onOpenGroup={props.onOpenGroup}
-        onSettle={props.onSettle}
-      />
-    </div>
-  );
-}
-
-const activityCopy: Partial<Record<LocalOperation["type"], string>> = {
-  ExpenseCreated: "added an expense",
-  ExpenseAmended: "updated an expense",
-  ExpenseVoided: "deleted an expense",
-  ExpenseRestored: "restored an expense",
-  CommentAdded: "commented",
-  PaymentRecorded: "recorded a payment",
-  PaymentReversed: "reversed a payment",
-  ImportedTransactionRecorded: "imported a balance adjustment",
-  ImportedTransactionVoided: "removed an imported adjustment",
-  OpeningBalanceCreated: "added an opening balance",
-  OpeningBalanceVoided: "removed an opening balance",
-  GroupCreated: "created a group",
-  GroupCurrencyChanged: "changed the group currency",
-  GroupMemberAdded: "added a member",
-  GroupMemberRemoved: "removed a member",
-};
-
-function ActivityMark(props: { operation: LocalOperation; expense: LocalExpense | undefined }) {
-  if (props.operation.type === "ExpenseCreated" && props.expense) {
-    return <CategoryMark category={props.expense.category} />;
-  }
-  const visual = () => {
-    switch (props.operation.type) {
-      case "ExpenseAmended": return { Icon: PencilLine, tone: "change" };
-      case "ExpenseVoided": return { Icon: Trash2, tone: "danger" };
-      case "ExpenseRestored": return { Icon: RotateCcw, tone: "change" };
-      case "CommentAdded": return { Icon: MessageCircle, tone: "change" };
-      case "PaymentRecorded":
-      case "PaymentReversed": return { Icon: ArrowRightLeft, tone: "payment" };
-      case "ImportedTransactionRecorded":
-      case "ImportedTransactionVoided":
-      case "OpeningBalanceCreated":
-      case "OpeningBalanceVoided": return { Icon: DatabaseBackup, tone: "import" };
-      case "GroupCreated": return { Icon: UsersRound, tone: "group" };
-      case "GroupCurrencyChanged": return { Icon: RefreshCw, tone: "change" };
-      case "GroupMemberAdded": return { Icon: UserPlus, tone: "group" };
-      case "GroupMemberRemoved": return { Icon: UserMinus, tone: "danger" };
-      default: return { Icon: Activity, tone: "general" };
-    }
-  };
-  const { Icon, tone } = visual();
-  return <span class={`category-icon activity-mark category-tone-${tone}`} aria-hidden="true"><Icon size={17} stroke-width={2} /></span>;
-}
-
-function ActivityView(props: {
-  actorId: string;
-  onOpenExpense(expense: LocalExpense): void;
-  onToast(message: string): void;
-}) {
-  const activityDays = createMemo(() => {
-    const groups = new Map<string, { label: string; operations: LocalOperation[] }>();
-    const now = new Date();
-    const todayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
-    const yesterday = new Date(now);
-    yesterday.setDate(now.getDate() - 1);
-    const yesterdayKey = `${yesterday.getFullYear()}-${yesterday.getMonth()}-${yesterday.getDate()}`;
-    for (const operation of [...appStore.operations()].sort((left, right) => right.clientTimestamp.localeCompare(left.clientTimestamp))) {
-      const date = new Date(operation.clientTimestamp);
-      const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
-      const label = key === todayKey
-        ? "Today"
-        : key === yesterdayKey
-          ? "Yesterday"
-          : new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric", year: date.getFullYear() === now.getFullYear() ? undefined : "numeric" }).format(date);
-      const existing = groups.get(key);
-      if (existing) existing.operations.push(operation);
-      else groups.set(key, { label, operations: [operation] });
-    }
-    return [...groups.values()];
-  });
-  async function restore(expense: LocalExpense) {
-    await restoreExpense(expense);
-    props.onToast("Expense restored");
-  }
-  return (
-    <div class="page-enter space-y-5">
-      <header>
-        <h1 class="page-title">Activity</h1>
-        <p class="mt-2 flex items-center gap-2 text-xs text-muted-foreground" role="status" aria-live="polite">
-          <span class="sync-dot" classList={{ pending: appStore.connection() !== "online" }} />
-          {appStore.connection() === "online" ? "Synced" : "Saved on this device"} · just now
-        </p>
-      </header>
-      <div>
-        <h2 class="activity-feed-title">Everything that changed</h2>
-        <For
-          each={activityDays()}
-          fallback={
-            <Card class="mt-4 px-6 py-12 text-center text-sm text-muted-foreground">
-              Activity appears after your first change.
-            </Card>
-          }
-        >
-          {(day) => <section class="activity-day" aria-label={day.label}>
-            <h3>{day.label}</h3>
-            <Card class="activity-day-card overflow-hidden">
-              <For each={day.operations}>{(operation) => {
-                const expense = createMemo(() => appStore.expenses().find((item) => item.id === operation.targetId));
-                const payment = createMemo(() => paymentActivityDetails(operation));
-                const imported = createMemo(() => {
-                  if (operation.type !== "ImportedTransactionRecorded" && operation.type !== "OpeningBalanceCreated") return undefined;
-                  const payload = operation.payload as { description?: unknown; amountMinor?: unknown; currency?: unknown };
-                  return typeof payload.description === "string" && Number.isSafeInteger(payload.amountMinor) && typeof payload.currency === "string"
-                    ? { description: payload.description, amountMinor: Number(payload.amountMinor), currency: payload.currency }
-                    : undefined;
-                });
-                const group = createMemo(() => appStore.groups().find((item) => item.id === operation.groupId));
-                const actor = createMemo(() => operation.actorId === props.actorId ? "You" : memberName(operation.groupId, operation.actorId, props.actorId));
-                return <article class="activity-row">
-                  <ActivityMark operation={operation} expense={expense()} />
-                  <Show when={expense()} fallback={
-                    <div class="activity-row-main min-h-11">
-                      <strong>{actor()} {activityCopy[operation.type] ?? "updated the group"}</strong>
-                      <span>{payment() ? `${memberName(operation.groupId, payment()!.payerId, props.actorId)} paid ${memberName(operation.groupId, payment()!.recipientId, props.actorId)} · ${group()?.name ?? "Shared group"}${payment()!.note ? ` · ${payment()!.note}` : ""}` : imported() ? `${imported()!.description} · ${group()?.name ?? "Shared group"}` : group()?.name ?? "Shared group"}</span>
-                      <time>{new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(operation.clientTimestamp))}</time>
-                    </div>
-                  }>{(item) => <button type="button" class="activity-row-main min-h-11" onClick={() => props.onOpenExpense(item())}>
-                    <strong>{actor()} {activityCopy[operation.type] ?? "updated the group"}</strong>
-                    <span>{item().description} · {group()?.name ?? "Shared group"}</span>
-                    <time>{new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(operation.clientTimestamp))}</time>
-                  </button>}</Show>
-                  <div class="activity-row-value">
-                    <Show when={expense()} fallback={<Show when={payment()} fallback={<Show when={imported()}>{(item) => <><strong>{money(item().amountMinor, item().currency)}</strong><span class="activity-payment-label">imported</span></>}</Show>}>{(item) => <><strong>{money(item().amountMinor, item().currency)}</strong><span class="activity-payment-label">payment</span></>}</Show>}>{(item) => <strong>{money(item().amountMinor, item().currency)}</strong>}</Show>
-                    <Show when={operation.type === "ExpenseVoided" && expense()?.status === "voided" && !expense()?.readOnly}>
-                      <button class="min-h-11 px-2" onClick={() => expense() && void restore(expense()!)}>Restore</button>
-                    </Show>
-                  </div>
-                  <Show when={expense()}><ChevronRight size={15} class="activity-row-chevron" /></Show>
-                </article>;
-              }}</For>
-            </Card>
-          </section>}
-        </For>
-      </div>
-    </div>
-  );
-}
-
-function AccountView(props: { displayName: string; email: string | undefined; smartCategoriesEnabled: boolean; onSmartCategoriesChange(enabled: boolean): void; onOpenMigration(): void; onNotify(message: string): void }) {
-  const [theme, setTheme] = createSignal<Theme>(
-    (localStorage.getItem("expenses-theme") as Theme | null) ?? "system",
-  );
-  createEffect(() => {
-    const value = theme();
-    localStorage.setItem("expenses-theme", value);
-    applyTheme(value);
-  });
-  return (
-    <div class="page-enter space-y-5">
-      <header>
-        <p class="eyebrow">Preferences & security</p>
-        <h1 class="page-title">Account</h1>
-      </header>
-      <Card class="p-5">
-        <div class="flex items-center gap-4">
-          <Avatar name={props.displayName} class="size-14 text-lg" />
-          <div class="min-w-0 flex-1">
-            <h2 class="font-semibold">{props.displayName}</h2>
-            <p class="truncate text-sm text-muted-foreground">{props.email ?? "Offline account on this device"}</p>
-          </div>
-          <Show when={!import.meta.env.DEV}>
-            <Button
-              variant="secondary"
-              size="sm"
-              class="shrink-0"
-              onClick={() => void signOutAndClearLocalLedger()}
-            >
-              <LogOut size={15} /> Log out
-            </Button>
-          </Show>
-        </div>
-        <Show when={!import.meta.env.DEV}>
-          <p class="mt-4 border-t border-border/60 pt-3 text-xs leading-5 text-muted-foreground">
-            Logging out removes this account's cached ledger from this device.
-          </p>
-        </Show>
-      </Card>
-      <button class="migration-account-card" type="button" onClick={props.onOpenMigration}>
-        <span class="category-icon"><DatabaseBackup size={18} /></span>
-        <span class="min-w-0 flex-1 text-left"><strong class="block text-sm">Move from Splitwise</strong><small class="mt-0.5 block text-xs text-muted-foreground">Review balances before anything changes</small></span>
-        <ChevronRight size={16} class="text-muted-foreground" />
-      </button>
-      <Card class="overflow-hidden">
-        <SectionHeading title="Expense entry" detail="On-device preview" />
-        <div class="smart-category-setting">
-          <span class="category-icon category-tone-leisure"><Sparkles size={17} /></span>
-          <span class="min-w-0 flex-1"><strong>Smart category suggestions</strong><small>Uses built-in English rules and your past choices. No description is sent to a model.</small></span>
-          <button type="button" class="preference-switch" role="switch" aria-checked={props.smartCategoriesEnabled} aria-label="Smart category suggestions" onClick={() => props.onSmartCategoriesChange(!props.smartCategoriesEnabled)}><span /></button>
-        </div>
-      </Card>
-      <NotificationSettings onNotify={props.onNotify} />
-      <Card class="overflow-hidden">
-        <SectionHeading title="Appearance" detail="Optimized for iPhone" />
-        <div class="grid grid-cols-3 gap-2 p-4">
-          <For
-            each={
-              [
-                { id: "system", label: "System", icon: Sparkles },
-                { id: "light", label: "Light", icon: Sun },
-                { id: "dark", label: "Dark", icon: Moon },
-              ] as const
-            }
-          >
-            {(item) => (
-              <button
-                class="appearance-choice"
-                classList={{ active: theme() === item.id }}
-                aria-pressed={theme() === item.id}
-                onClick={() => setTheme(item.id)}
-              >
-                <item.icon size={17} />
-                <span>{item.label}</span>
-              </button>
-            )}
-          </For>
-        </div>
-      </Card>
-      <Card class="overflow-hidden">
-        <For
-          each={[
-            {
-              icon: ShieldCheck,
-              title: "Protected on this device",
-              detail: "This device signs changes so edits can be attributed",
-            },
-            {
-              icon: Cloud,
-              title: "Works offline",
-              detail: "New entries stay safe here until sync resumes",
-            },
-            {
-              icon: Scale,
-              title: "Reviewable history",
-              detail: "Edits and deletions remain visible in Activity",
-            },
-          ]}
-        >
-          {(item) => (
-            <article class="flex items-center gap-3 border-b border-border/60 px-4 py-4 last:border-0">
-              <span class="category-icon">
-                <item.icon size={17} />
-              </span>
-              <div>
-                <strong class="block text-sm">{item.title}</strong>
-                <span class="text-xs text-muted-foreground">{item.detail}</span>
-              </div>
-            </article>
-          )}
-        </For>
-        <Show when={!import.meta.env.DEV}>
-          <div class="border-t border-border/60 p-3">
-            <FeedbackButton />
-          </div>
-        </Show>
-      </Card>
-      <Card class="p-4 text-xs text-muted-foreground">
-        <VersionBadge />
-      </Card>
     </div>
   );
 }
@@ -1685,236 +1166,6 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
         />
       </Show>
     </div>
-  );
-}
-
-function GoogleMark() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 18 18" width="18" height="18">
-      <path fill="#4285F4" d="M17.64 9.2c0-.63-.06-1.22-.16-1.8H9v3.4h4.84a4.15 4.15 0 0 1-1.8 2.72l2.91 2.26c1.7-1.57 2.69-3.89 2.69-6.58Z" />
-      <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.95-2.22l-2.91-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.33-1.58-5.04-3.71L.95 13c1.47 2.96 4.53 5 8.05 5Z" />
-      <path fill="#FBBC05" d="M3.96 10.67A5.41 5.41 0 0 1 3.68 9c0-.58.1-1.14.28-1.67L.95 5A9 9 0 0 0 0 9c0 1.45.35 2.82.95 4l3.01-2.33Z" />
-      <path fill="#EA4335" d="M9 3.62c1.32 0 2.51.45 3.44 1.34l2.58-2.52C13.46.98 11.43 0 9 0 5.48 0 2.42 2.04.95 5l3.01 2.33C4.67 5.2 6.66 3.62 9 3.62Z" />
-    </svg>
-  );
-}
-
-function AuthScreen() {
-  const search = new URLSearchParams(location.search);
-  const invitationToken = inviteTokenFromHash();
-  const migrationClaimToken = migrationClaimFromHash();
-  const initialAuthFailed = search.get("auth") === "failed";
-  const [email, setEmail] = createSignal(
-    search.get("email") ?? "",
-  );
-  const [message, setMessage] = createSignal(
-    initialAuthFailed
-      ? "Sign-in could not be completed. Use the Google account or email address that was invited."
-      : "",
-  );
-  const [messageTone, setMessageTone] = createSignal<"status" | "error">(
-    initialAuthFailed ? "error" : "status",
-  );
-  const [busy, setBusy] = createSignal<"google" | "email" | null>(null);
-  let emailInputRef: HTMLInputElement | undefined;
-  const [capabilities] = createResource(async () => {
-    try {
-      return await getAuthCapabilities();
-    } catch {
-      return { google: false, magicLink: true };
-    }
-  });
-  const [migrationPreview] = createResource(
-    () => migrationClaimToken,
-    async (token) => previewImportClaim(token),
-  );
-
-  async function signInWithGoogle() {
-    setBusy("google");
-    setMessage("");
-    setMessageTone("status");
-    try {
-      if (migrationClaimToken) {
-        if (!emailInputRef?.checkValidity()) {
-          setMessageTone("error");
-          setMessage("Enter the email address you will use with Google first.");
-          emailInputRef?.focus();
-          return;
-        }
-        await reserveImportClaim(migrationClaimToken, email().trim());
-      }
-      const claimFailureUrl = migrationClaimToken
-        ? `${location.origin}/?auth=failed#${new URLSearchParams({ migrationClaim: migrationClaimToken })}`
-        : `${location.origin}/?auth=failed`;
-      const result = await authClient.signIn.social({
-        provider: "google",
-        callbackURL: migrationClaimToken ? location.href : location.origin,
-        newUserCallbackURL: migrationClaimToken ? location.href : location.origin,
-        errorCallbackURL: claimFailureUrl,
-      });
-      if (result.error) {
-        setMessageTone("error");
-        setMessage(result.error.message ?? "Google sign-in could not be started.");
-      }
-    } catch {
-      setMessageTone("error");
-      setMessage("The server is unavailable. Try the email link or continue on a previously signed-in device.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function requestLink(event: SubmitEvent) {
-    event.preventDefault();
-    if (migrationClaimToken && !emailInputRef?.checkValidity()) {
-      setMessageTone("error");
-      setMessage("Enter a valid email address first.");
-      emailInputRef?.focus();
-      return;
-    }
-    setBusy("email");
-    setMessage("");
-    setMessageTone("status");
-    try {
-      if (invitationToken) {
-        await claimContactInvitation(invitationToken, email().trim());
-        setMessage("Check your inbox — the verification link signs you in and connects you to your inviter.");
-        return;
-      }
-      if (migrationClaimToken) {
-        await requestImportClaimMagicLink(migrationClaimToken, email().trim());
-        setMessage("Check your inbox — the link verifies this email and returns you to the claim review.");
-        return;
-      }
-      const result = await authClient.signIn.magicLink({
-        email: email().trim(),
-        callbackURL: migrationClaimToken ? location.href : location.origin,
-        newUserCallbackURL: migrationClaimToken ? location.href : location.origin,
-        errorCallbackURL: `${location.origin}/?auth=failed`,
-      });
-      setMessageTone(result.error ? "error" : "status");
-      setMessage(
-        result.error
-          ? (result.error.message ?? "Could not send the link.")
-          : "Check your inbox — the secure link signs you in directly.",
-      );
-    } catch {
-      setMessageTone("error");
-      setMessage(
-        "The server is unavailable. Previously signed-in devices can continue offline.",
-      );
-    } finally {
-      setBusy(null);
-    }
-  }
-  return (
-    <main class="auth-shell grid min-h-dvh place-items-center px-4 py-10">
-      <div class="w-full max-w-sm">
-        <div class="mb-6 flex items-center justify-center gap-2.5 text-white">
-          <BrandMark size={38} />
-          <strong class="brand-wordmark text-lg">Tallied</strong>
-        </div>
-        <Card class="glass-auth rounded-xl p-6 sm:p-8">
-          <span class="mb-5 grid size-11 place-items-center rounded-2xl bg-primary/10 text-primary">
-            <LockKeyhole size={19} />
-          </span>
-          <h1 class="text-2xl font-semibold tracking-tight">{invitationToken ? "You’re invited" : migrationClaimToken ? "Claim your history" : "Welcome back"}</h1>
-          <p class="mt-2 text-sm leading-6 text-muted-foreground">
-            {invitationToken
-              ? "Verify the email you want to use. The invitation is bound to that identity before anyone is shown as joined."
-              : migrationClaimToken
-                ? migrationPreview()
-                  ? "Someone moved Splitwise history to Tallied. Sign in to claim it securely."
-                  : migrationPreview.error
-                    ? "This private claim link is invalid or expired. Ask the migration owner for a new one."
-                    : "Checking this private claim link…"
-              : "Sign in with the Google account or email address that was invited."}
-          </p>
-          <Show when={migrationPreview()}>
-            <p class="mt-3 text-xs text-muted-foreground">
-              Single-use link · expires {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(migrationPreview()!.expiresAt))}
-            </p>
-          </Show>
-          <Show when={migrationClaimToken}>
-            <label class="mt-5 grid gap-2 text-sm font-medium">
-              Email you will verify
-              <div class="relative">
-                <Mail class="absolute left-3 top-3 text-muted-foreground" size={17} />
-                <input
-                  ref={emailInputRef}
-                  class="form-control h-12 pl-9"
-                  required
-                  type="email"
-                  autocomplete="email"
-                  value={email()}
-                  onInput={(event) => setEmail(event.currentTarget.value)}
-                  placeholder="you@example.com"
-                />
-              </div>
-              <span class="text-xs font-normal leading-5 text-muted-foreground">Use the same address for Google or the email link. Claiming can join this account to imported groups; members will see your verified identity. Tallied records balances—it does not move money.</span>
-            </label>
-          </Show>
-          <Show when={capabilities()?.google && !invitationToken}>
-            <Button
-              class="mt-6 h-12 w-full rounded-xl"
-              type="button"
-              variant="secondary"
-              disabled={busy() !== null || Boolean(migrationClaimToken && !migrationPreview())}
-              onClick={() => void signInWithGoogle()}
-            >
-              <GoogleMark />
-              {busy() === "google" ? "Connecting…" : "Continue with Google"}
-            </Button>
-            <div class="auth-divider" aria-hidden="true"><span>or use email</span></div>
-          </Show>
-          <Show when={capabilities()?.magicLink} fallback={
-            <p class="mt-5 rounded-xl border border-border bg-muted/60 p-3 text-sm text-muted-foreground">
-              Email links are not configured on this Tallied server.
-            </p>
-          }>
-          <form class="mt-6 grid gap-4" onSubmit={requestLink}>
-            <Show when={!migrationClaimToken}>
-              <label class="grid gap-2 text-sm font-medium">
-                Email address
-                <div class="relative">
-                  <Mail class="absolute left-3 top-3 text-muted-foreground" size={17} />
-                  <input
-                    ref={emailInputRef}
-                    class="form-control h-12 pl-9"
-                    required
-                    type="email"
-                    autocomplete="email"
-                    value={email()}
-                    onInput={(event) => setEmail(event.currentTarget.value)}
-                    placeholder="you@example.com"
-                  />
-                </div>
-              </label>
-            </Show>
-            <Button
-              class="h-12 w-full rounded-xl"
-              type="submit"
-              disabled={busy() !== null || Boolean(migrationClaimToken && !migrationPreview())}
-            >
-              {busy() === "email" ? "Sending…" : invitationToken ? "Verify email and join" : migrationClaimToken ? "Verify with email" : "Email me a sign-in link"}
-            </Button>
-          </form>
-          </Show>
-          <Show when={message()}>
-            <p
-              class="mt-4 rounded-xl border border-border bg-muted/60 p-3 text-sm text-muted-foreground"
-              role={messageTone() === "error" ? "alert" : "status"}
-              aria-live={messageTone() === "error" ? "assertive" : "polite"}
-            >
-              {message()}
-            </p>
-          </Show>
-          <p class="mt-5 text-center text-xs text-muted-foreground">
-            Access-controlled · Passwordless · Offline-ready
-          </p>
-        </Card>
-      </div>
-    </main>
   );
 }
 

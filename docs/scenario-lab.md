@@ -32,6 +32,8 @@ Exploratory persona sessions must use the same isolation. Query parameters in se
 3. **Lost response:** the server accepts Dev's signed operation while the browser receives a synthetic network failure. Retrying must produce one operation and one expense, not a duplicate.
 4. **Concurrent edit:** Mira and Arjun amend the same base version together. One value becomes canonical and the losing device must retain a visible, reviewable conflict.
 5. **Authorization:** an unrelated authenticated development actor requests a snapshot and must receive no group or expense data.
+6. **Imported identity claim:** the migration owner starts with a group that the real signed-in person cannot read. A secure claim plus owner approval must converge the group, history, and equal/opposite balance on both isolated devices without rewriting the accepted signed operation; an observer must receive neither the group nor its alias metadata.
+7. **Responsive and keyboard layout:** the structured expense form is checked at phone and desktop sizes. A reduced phone visual viewport reproduces the software-keyboard boundary and verifies Paid by, Split, Date, and exact-split inputs stay reachable.
 
 ## Independent oracle
 
@@ -45,6 +47,7 @@ A green UI is not treated as proof. At each checkpoint, the lab reads the dispos
 - queued writes remain local while offline;
 - stale edits produce one canonical winner and one explicit conflict;
 - a non-member receives no scoped financial data.
+- imported participant aliases preserve signed history, remain group-scoped, and converge only after verified approval.
 
 ## Evidence
 

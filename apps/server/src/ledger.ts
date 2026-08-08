@@ -2227,6 +2227,15 @@ export class LedgerStore {
         "SELECT group_id FROM group_members WHERE user_id = ? AND status = 'placeholder'",
       ).all(identity.placeholder_user_id);
       for (const { group_id: groupId } of memberships) {
+        this.db.query(
+          `INSERT INTO import_participant_aliases(
+             group_id, placeholder_user_id, claimed_user_id, identity_id, created_at
+           ) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(group_id, placeholder_user_id) DO UPDATE SET
+             claimed_user_id = excluded.claimed_user_id,
+             identity_id = excluded.identity_id,
+             created_at = excluded.created_at`,
+        ).run(groupId, identity.placeholder_user_id, claimedBy, identityId, now);
         const existing = this.db.query<{ one: number }, [string, string]>(
           "SELECT 1 AS one FROM group_members WHERE group_id = ? AND user_id = ? LIMIT 1",
         ).get(groupId, claimedBy);
@@ -2793,7 +2802,7 @@ export class LedgerStore {
     return { generation: this.generation, latestServerSequence: this.latestSequenceFor(actorId), groups };
   }
 
-  snapshot(actorId: string): { groups: unknown[]; expenses: unknown[]; members: unknown[] } {
+  snapshot(actorId: string): { groups: unknown[]; expenses: unknown[]; members: unknown[]; participantAliases: unknown[] } {
     const groups = this.db
       .query(
         `SELECT g.id, g.name, g.settlement_currency AS settlementCurrency, g.created_at AS createdAt,
@@ -2814,16 +2823,49 @@ export class LedgerStore {
          ORDER BY e.expense_date DESC, e.created_at DESC`,
       )
       .all(actorId);
-    const members = this.db
-      .query(
+    const memberRows = this.db
+      .query<{
+        groupId: string;
+        userId: string;
+        displayName: string;
+        email: string | null;
+        status: string;
+        importIdentityId: string | null;
+        importBatchId: string | null;
+        importClaimStatus: "unclaimed" | "reserved" | "awaiting_owner" | null;
+      }, [string, string]>(
         `SELECT gm.group_id AS groupId, gm.user_id AS userId, gm.display_name AS displayName,
-                gm.email, gm.status
+                gm.email, gm.status, ii.id AS importIdentityId, ib.id AS importBatchId,
+                CASE WHEN ii.status IN ('unclaimed', 'reserved', 'awaiting_owner') THEN ii.status END AS importClaimStatus
          FROM group_members gm
+         LEFT JOIN imported_identities ii ON ii.placeholder_user_id = gm.user_id
+         LEFT JOIN import_batches ib ON ib.id = ii.batch_id AND ib.imported_by = ? AND ib.status = 'completed'
          WHERE gm.group_id IN (
            SELECT group_id FROM group_members WHERE user_id = ? AND status = 'active'
          ) ORDER BY gm.joined_at`,
       )
-      .all(actorId);
-    return { groups, expenses, members };
+      .all(actorId, actorId);
+    const members = memberRows.map(({ importIdentityId, importBatchId, importClaimStatus, ...member }) => ({
+      ...member,
+      ...(importIdentityId && importBatchId && importClaimStatus
+        ? { importClaim: { identityId: importIdentityId, batchId: importBatchId, status: importClaimStatus } }
+        : {}),
+    }));
+    const participantAliases = this.db.query<{ groupId: string; fromUserId: string; toUserId: string }, [string]>(
+      `SELECT aliases.group_id AS groupId,
+              aliases.placeholder_user_id AS fromUserId,
+              aliases.claimed_user_id AS toUserId
+       FROM import_participant_aliases aliases
+       JOIN imported_identities identity
+         ON identity.id = aliases.identity_id AND identity.status = 'claimed'
+       JOIN group_members viewer ON viewer.group_id = aliases.group_id
+       JOIN group_members claimed_member
+         ON claimed_member.group_id = viewer.group_id
+        AND claimed_member.user_id = aliases.claimed_user_id
+        AND claimed_member.status = 'active'
+       WHERE viewer.user_id = ? AND viewer.status = 'active'
+       ORDER BY aliases.group_id, aliases.placeholder_user_id`,
+    ).all(actorId);
+    return { groups, expenses, members, participantAliases };
   }
 }
