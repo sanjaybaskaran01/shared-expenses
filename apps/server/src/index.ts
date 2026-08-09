@@ -16,12 +16,13 @@ import type {
   SyncPushRequest,
 } from "@expenses/protocol";
 import { getMigrations } from "better-auth/db/migration";
-import { createAuth, deriveDisplayNameFromEmail } from "./auth";
+import { authRequestForPeer, createAuth, deriveDisplayNameFromEmail } from "./auth";
 import { loadConfig, resolvePublicRateKey } from "./config";
 import { ContactInviteError, ContactInviteStore } from "./contact-invites";
 import { ConfidentialLedgerStore } from "./confidential-ledger";
 import { openDatabase, runDomainMigrations } from "./database";
 import { enqueueEmail, startEmailWorker } from "./email";
+import { createGroupInvitation, GroupInvitationError } from "./group-invitations";
 import { LedgerStore } from "./ledger";
 import {
   enqueueOperationNotifications,
@@ -145,11 +146,13 @@ function consumeImportMutation(actorId: string, limit = 30, windowMs = 60 * 60_0
   return true;
 }
 
-function publicRateKey(request: Request): string {
+function publicRateKey(request: Request, peerAddress: string | undefined): string {
   const cloudflareIp = request.headers.get("cf-connecting-ip");
   return resolvePublicRateKey({
     ...(cloudflareIp ? { cloudflareIp } : {}),
+    ...(peerAddress ? { peerAddress } : {}),
     trustCloudflareProxy: config.trustCloudflareProxy,
+    trustedProxies: config.trustedProxies,
     production: config.nodeEnv === "production",
   });
 }
@@ -191,7 +194,7 @@ function publish(actorId: string, sequence: number): void {
   }
 }
 
-async function apiRoute(request: Request, url: URL): Promise<Response> {
+async function apiRoute(request: Request, url: URL, peerAddress: string | undefined): Promise<Response> {
   if (request.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
@@ -234,7 +237,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
   }
 
   if (url.pathname === "/api/v1/import-claims/preview" && request.method === "POST") {
-    if (!consumeImportMutation(`claim-preview:${publicRateKey(request)}`, 30, 60 * 60_000)) {
+    if (!consumeImportMutation(`claim-preview:${publicRateKey(request, peerAddress)}`, 30, 60 * 60_000)) {
       return errorResponse(request, 429, "CLAIM_RATE_LIMITED", "Too many connection checks. Wait a moment, then try again.");
     }
     const body = await bodyJson<{ token?: string }>(request, 2_000);
@@ -253,7 +256,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     (url.pathname === "/api/v1/import-claims/reserve" || url.pathname === "/api/v1/import-claims/email") &&
     request.method === "POST"
   ) {
-    const rateKey = publicRateKey(request);
+    const rateKey = publicRateKey(request, peerAddress);
     if (!consumeImportMutation(`claim-auth:${rateKey}`, 15, 60 * 60_000)) {
       return errorResponse(request, 429, "CLAIM_RATE_LIMITED", "Too many connection attempts. Wait a moment, then try again.");
     }
@@ -321,8 +324,23 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     return json(request, { status: "verification-sent" }, 202);
   }
 
+  if (url.pathname === "/api/v1/contact-invitations/reserve" && request.method === "POST") {
+    if (!config.googleAuth) {
+      return errorResponse(request, 503, "GOOGLE_NOT_CONFIGURED", "Google sign-in is unavailable on this Tallied installation.");
+    }
+    const body = await bodyJson<{ token?: string; email?: string }>(request);
+    const token = body.token?.trim() ?? "";
+    const email = body.email?.trim().toLowerCase() ?? "";
+    if (!validContactInviteToken(token)) {
+      return errorResponse(request, 400, "INVALID_INVITATION", "This invitation link has expired or is no longer available.");
+    }
+    if (!validEmail(email)) return errorResponse(request, 400, "INVALID_EMAIL", "Enter a valid email address.");
+    const reservation = contactInvites.reserve(token, email);
+    return json(request, { status: "reserved", invitationId: reservation.invitationId }, 201);
+  }
+
   if (url.pathname.startsWith("/api/auth/")) {
-    const response = await auth.handler(request);
+    const response = await auth.handler(authRequestForPeer(request, config, peerAddress));
     const headers = new Headers(response.headers);
     for (const [key, value] of Object.entries(corsHeaders(request))) headers.set(key, value);
     for (const [key, value] of Object.entries(securityHeaders())) headers.set(key, value);
@@ -335,7 +353,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     const state = url.searchParams.get("state") ?? "";
     const code = url.searchParams.get("code") ?? "";
     const destination = new URL(config.webOrigin);
-    if (!consumeImportMutation(`splitwise-callback:${publicRateKey(request)}`, 60, 60 * 60_000)) {
+    if (!consumeImportMutation(`splitwise-callback:${publicRateKey(request, peerAddress)}`, 60, 60 * 60_000)) {
       destination.hash = new URLSearchParams({ migration: "splitwise-auth-rate-limited" }).toString();
       return new Response(null, { status: 303, headers: { ...securityHeaders(), Location: destination.toString(), "Cache-Control": "no-store" } });
     }
@@ -784,62 +802,35 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
 
   const invitationMatch = /^\/api\/v1\/groups\/([^/]+)\/invitations$/.exec(url.pathname);
   if (invitationMatch && request.method === "POST") {
-    if (!config.smtp.enabled) {
-      return errorResponse(request, 503, "EMAIL_NOT_CONFIGURED", "Email invitations are unavailable on this Tallied installation.");
-    }
     const groupId = decodeURIComponent(invitationMatch[1]!);
-    const membership = db.query<{ one: number }, [string, string]>(
-      "SELECT 1 AS one FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'active'",
-    ).get(groupId, actorId);
-    if (!membership) return errorResponse(request, 403, "NOT_A_GROUP_MEMBER", "You must be a current group member to do this.");
     const body = await bodyJson<{ email?: string }>(request);
     const email = body.email?.trim().toLowerCase() ?? "";
     if (!validEmail(email)) {
       return errorResponse(request, 400, "INVALID_EMAIL", "Enter a valid email address.");
     }
-    const existingUser = db.query<{ name: string }, [string]>(
-      `SELECT name FROM "user" WHERE lower(email) = ? LIMIT 1`,
-    ).get(email);
-    const displayName = existingUser?.name.trim() || deriveDisplayNameFromEmail(email);
-    const duplicate = db.query<{ one: number }, [string, string]>(
-      `SELECT 1 AS one FROM group_members
-       WHERE group_id = ? AND lower(email) = ? AND status IN ('placeholder', 'active') LIMIT 1`,
-    ).get(groupId, email);
-    if (duplicate) return errorResponse(request, 409, "ALREADY_INVITED", "This email is already in the group.");
-
-    const invitationId = randomUUID();
-    const now = new Date().toISOString();
-    const placeholderUserId = `invite:${invitationId}`;
-    db.transaction(() => {
-      db.query(
-        `INSERT INTO group_invitations(id, group_id, email, display_name, invited_by, status, created_at)
-         VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
-      ).run(invitationId, groupId, email, displayName, actorId, now);
-      db.query(
-        `INSERT INTO group_members(group_id, user_id, display_name, email, status, joined_at)
-         VALUES (?, ?, ?, ?, 'placeholder', ?)`,
-      ).run(groupId, placeholderUserId, displayName, email, now);
-    })();
-    try {
-      await auth.api.signInMagicLink({
-        headers: request.headers,
-        body: {
-          email,
-          name: displayName,
-          callbackURL: config.webOrigin,
-          newUserCallbackURL: config.webOrigin,
-          errorCallbackURL: `${config.webOrigin}/?auth=failed`,
-          metadata: { invitationId },
-        },
-      });
-    } catch {
-      db.transaction(() => {
-        db.query("DELETE FROM group_members WHERE group_id = ? AND user_id = ?").run(groupId, placeholderUserId);
-        db.query("DELETE FROM group_invitations WHERE id = ?").run(invitationId);
-      })();
-      return errorResponse(request, 503, "INVITE_EMAIL_FAILED", "Unable to send the invitation. Check the email address and try again.");
-    }
-    return json(request, { id: invitationId, email, status: "pending" }, 201);
+    const invitation = await createGroupInvitation({
+      db,
+      actorId,
+      groupId,
+      email,
+      webOrigin: config.webOrigin,
+      smtpEnabled: config.smtp.enabled,
+      googleEnabled: Boolean(config.googleAuth),
+      sendMagicLink: async ({ email: recipient, displayName, invitationId }) => {
+        await auth.api.signInMagicLink({
+          headers: request.headers,
+          body: {
+            email: recipient,
+            name: displayName,
+            callbackURL: config.webOrigin,
+            newUserCallbackURL: config.webOrigin,
+            errorCallbackURL: `${config.webOrigin}/?auth=failed`,
+            metadata: { invitationId },
+          },
+        });
+      },
+    });
+    return json(request, invitation, 201);
   }
 
   if (url.pathname === "/api/v1/feedback" && request.method === "POST") {
@@ -1016,11 +1007,15 @@ const server = Bun.serve({
   port: config.port,
   maxRequestBodySize: 16_000_000,
   idleTimeout: 60,
-  async fetch(request) {
+  async fetch(request, bunServer) {
     try {
-      return await apiRoute(request, new URL(request.url));
+      const peerAddress = bunServer.requestIP(request)?.address;
+      return await apiRoute(request, new URL(request.url), peerAddress);
     } catch (error) {
       if (error instanceof ContactInviteError) {
+        return errorResponse(request, error.status, error.code, error.message);
+      }
+      if (error instanceof GroupInvitationError) {
         return errorResponse(request, error.status, error.code, error.message);
       }
       if (error instanceof RangeError) {

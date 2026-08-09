@@ -31,6 +31,8 @@ https://your-tally-origin.example/api/auth/callback/google
 
 Google sign-in does not grant access to Gmail or contacts; request only OpenID, email, and profile identity scopes. Invite-only account creation applies to both sign-in modes.
 
+With SMTP, Tallied emails the group invitation. On a Google-only installation, Tallied creates the pending group member and gives the inviter a link to share; the recipient must sign in with the invited Google address. Standalone invite links similarly reserve the first submitted email before starting Google sign-in, so forwarding a link cannot bind it to a different account while that reservation is active.
+
 ## Database movement
 
 Use SQLite's online backup mechanism while the service is running, or stop the API before copying the database plus any attachment directory. Do not copy only the main file while WAL writes are active. Restore into a private volume/path, verify integrity, and then start one API instance against it.
@@ -40,6 +42,7 @@ Use SQLite's online backup mechanism while the service is running, or stop the A
 - HTTPS is mandatory and the configured origins match exactly.
 - `DEV_AUTH_BYPASS=false`.
 - The API/database is not exposed directly to the internet.
+- `TRUST_CLOUDFLARE_PROXY` stays disabled unless Cloudflare is the only path to the origin and overwrites `cf-connecting-ip`. If a forwarded chain is required, `TRUSTED_PROXY_CIDRS` contains only the exact proxy addresses or narrow subnets—not a broad private range.
 - Backups are encrypted and a restore has been tested.
 - SMTP sender alignment and delivery are verified.
 - Dependencies and GitHub Actions remain pinned and CI is green.

@@ -11,11 +11,15 @@ export function clearInviteToken(): void {
 
 export type InvitationShareResult = "shared" | "copied" | "cancelled";
 
-export async function shareInvitation(url: string): Promise<InvitationShareResult> {
-  const text = "Join me on Tallied to split expenses and keep track of who owes what.";
+export async function shareInvitation(
+  url: string,
+  content: { title?: string; text?: string } = {},
+): Promise<InvitationShareResult> {
+  const title = content.title ?? "Join me on Tallied";
+  const text = content.text ?? "Join me on Tallied to split expenses and keep track of who owes what.";
   if (navigator.share) {
     try {
-      await navigator.share({ title: "Join me on Tallied", text, url });
+      await navigator.share({ title, text, url });
       return "shared";
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return "cancelled";

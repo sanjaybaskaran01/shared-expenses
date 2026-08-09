@@ -30,20 +30,35 @@ export interface PublicReleaseUrls {
   publicApiUrl: string;
 }
 
-const DEFAULT_PUBLIC_RELEASE_URLS: PublicReleaseUrls = {
-  webUrl: "https://expenses.example.com",
-  publicApiUrl: "https://api.example.com",
-};
+export function parsePrivateReleaseEnvironment(content: string): Record<string, string> {
+  const parsed: Record<string, string> = {};
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const match = /^(?:export\s+)?(TALLY_WEB_URL|TALLY_API_URL)=(.*)$/.exec(line);
+    if (!match?.[1]) continue;
+    let value = match[2]?.trim() ?? "";
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    parsed[match[1]] = value;
+  }
+  return parsed;
+}
 
 export function resolvePublicReleaseUrls(
   environment: Record<string, string | undefined>,
 ): PublicReleaseUrls {
-  const normalize = (value: string | undefined, fallback: string): string =>
-    (value?.trim() || fallback).replace(/\/+$/, "");
+  const webUrl = environment.TALLY_WEB_URL?.trim();
+  const publicApiUrl = environment.TALLY_API_URL?.trim();
+  if (!webUrl || !publicApiUrl) {
+    throw new Error("TALLY_WEB_URL and TALLY_API_URL are required in private release configuration");
+  }
+  const normalize = (value: string): string => value.replace(/\/+$/, "");
 
   return {
-    webUrl: normalize(environment.TALLY_WEB_URL, DEFAULT_PUBLIC_RELEASE_URLS.webUrl),
-    publicApiUrl: normalize(environment.TALLY_API_URL, DEFAULT_PUBLIC_RELEASE_URLS.publicApiUrl),
+    webUrl: normalize(webUrl),
+    publicApiUrl: normalize(publicApiUrl),
   };
 }
 

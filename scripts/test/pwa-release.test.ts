@@ -55,7 +55,10 @@ describe("PWA release upgrades", () => {
     };
     const networkFetch = async (request: string | { url?: string }): Promise<Response> => {
       const path = normalize(request);
-      return new Response(path === "/" ? onlineShell : `asset:${path}`, { status: 200 });
+      return new Response(path === "/" ? onlineShell : `asset:${path}`, {
+        status: 200,
+        headers: { "Content-Type": path === "/" ? "text/html; charset=utf-8" : "application/octet-stream" },
+      });
     };
     const cache = {
       async addAll(paths: string[]) {
@@ -67,7 +70,7 @@ describe("PWA release upgrades", () => {
     };
     const caches = {
       async open() { return cache; },
-      async keys() { return ["tallied-shell-v3"]; },
+      async keys() { return ["tallied-shell-v3", "unrelated-cache"]; },
       async delete(name: string) { deletedCaches.push(name); return true; },
       async match(request: string | { url?: string }) { return cacheEntries.get(normalize(request))?.clone(); },
     };
@@ -105,6 +108,74 @@ describe("PWA release upgrades", () => {
     await Bun.sleep(0);
     expect(await cacheEntries.get("/")?.text()).toContain("v2.js");
     expect(deviceLedger.get("pending-operation")).toEqual({ amountMinor: 5500 });
+  });
+
+  test("never reads or writes private and release endpoints through the shell cache", async () => {
+    const source = await readFile(resolve(import.meta.dir, "../../apps/web/public/tally-sw.js"), "utf8");
+    const listeners = new Map<string, (event: Record<string, any>) => void>();
+    const matched: string[] = [];
+    const cached: string[] = [];
+    const fetched: string[] = [];
+    const normalize = (request: string | { url?: string }): string =>
+      new URL(typeof request === "string" ? request : request.url ?? String(request), "https://tally.test").pathname;
+    const cache = {
+      async addAll() {},
+      async put(request: string | { url?: string }) { cached.push(normalize(request)); },
+    };
+    const caches = {
+      async open() { return cache; },
+      async keys() { return []; },
+      async delete() { return true; },
+      async match(request: string | { url?: string }) { matched.push(normalize(request)); return undefined; },
+    };
+    const self = {
+      location: { origin: "https://tally.test", href: "https://tally.test/tally-sw.js" },
+      clients: { async claim() {} },
+      async skipWaiting() {},
+      addEventListener(type: string, listener: (event: Record<string, any>) => void) { listeners.set(type, listener); },
+    };
+    const networkFetch = async (request: string | { url?: string }) => {
+      fetched.push(normalize(request));
+      return new Response("ok", { status: 200 });
+    };
+    vm.runInNewContext(source, { self, caches, fetch: networkFetch, URL, Response, Promise, Number });
+
+    const privatePaths = [
+      "/api/v1/snapshot",
+      "/api/v1/sync/pull?after=0",
+      "/api/auth/get-session",
+      "/health",
+      "/release.json",
+    ];
+    for (const path of privatePaths) {
+      for (const mode of ["cors", "navigate"]) {
+        let intercepted = false;
+        listeners.get("fetch")?.({
+          request: { method: "GET", mode, url: `https://tally.test${path}` },
+          respondWith() { intercepted = true; },
+        });
+        expect(intercepted).toBe(false);
+      }
+    }
+    let unversionedAssetIntercepted = false;
+    listeners.get("fetch")?.({
+      request: { method: "GET", mode: "cors", url: "https://tally.test/assets/runtime.js" },
+      respondWith() { unversionedAssetIntercepted = true; },
+    });
+    expect(unversionedAssetIntercepted).toBe(false);
+    expect(matched).toEqual([]);
+    expect(cached).toEqual([]);
+    expect(fetched).toEqual([]);
+
+    let assetPromise: Promise<Response> | undefined;
+    listeners.get("fetch")?.({
+      request: { method: "GET", mode: "cors", url: "https://tally.test/assets/index-abc12345.js" },
+      respondWith(value: Promise<Response>) { assetPromise = value; },
+    });
+    expect(await (await assetPromise)?.text()).toBe("ok");
+    await Bun.sleep(0);
+    expect(matched).toEqual(["/assets/index-abc12345.js"]);
+    expect(cached).toEqual(["/assets/index-abc12345.js"]);
   });
 
   test("shows every pushed financial update and deep-links notification clicks", async () => {

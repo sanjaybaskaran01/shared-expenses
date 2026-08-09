@@ -258,7 +258,7 @@ async function prepareExpense(page: Page, description: string, amount: string): 
   await targetDialog.getByTestId("expense-target-group:scenario-goa-trip").click();
   const composer = page.getByRole("dialog", { name: "Add an expense" });
   await composer.getByLabel("Total in USD").fill(amount);
-  await composer.getByPlaceholder("What was it for?").fill(description);
+  await composer.getByLabel("Description").fill(description);
   return async () => {
     await composer.getByRole("button", { name: /^Add / }).click();
     await composer.waitFor({ state: "hidden" });
@@ -270,9 +270,9 @@ async function openExpenseForEdit(page: Page, description: string, replacement: 
   await page.getByRole("button", { name: new RegExp(groupName, "i") }).click();
   await page.getByRole("button", { name: new RegExp(description, "i") }).click();
   const detail = page.getByRole("dialog", { name: "Expense details" });
-  await detail.getByRole("button", { name: "Edit", exact: true }).click();
+  await detail.getByRole("button", { name: "Edit expense", exact: true }).click();
   const composer = page.getByRole("dialog", { name: "Edit expense" });
-  await composer.getByPlaceholder("What was it for?").fill(replacement);
+  await composer.getByLabel("Description").fill(replacement);
   return async () => {
     await composer.getByRole("button", { name: "Save changes", exact: true }).click();
     await composer.waitFor({ state: "hidden" });
@@ -477,7 +477,7 @@ async function run(): Promise<void> {
         await compactTargetDialog.getByTestId("expense-target-group:scenario-goa-trip").click();
         const compactComposer = compactPage.getByRole("dialog", { name: "Add an expense" });
         const compactAmount = compactComposer.getByLabel("Total in USD");
-        const compactDescription = compactComposer.getByPlaceholder("What was it for?");
+        const compactDescription = compactComposer.getByLabel("Description");
         await compactAmount.waitFor({ state: "visible" });
         const amountStartsFocused = await compactAmount.evaluate((element) => document.activeElement === element);
         await compactAmount.press("Enter");
@@ -526,11 +526,11 @@ async function run(): Promise<void> {
       await owner.page.locator(".mobile-primary-action").click();
       const pendingComposer = owner.page.getByRole("dialog", { name: "Add an expense" });
       await pendingComposer.getByLabel("Total in USD").fill("24.00");
-      await pendingComposer.getByPlaceholder("What was it for?").fill("Coffee before Dev joins");
+      await pendingComposer.getByLabel("Description").fill("Coffee before Dev joins");
       await pendingComposer.getByRole("button", { name: /Split/ }).click();
       const pendingSplit = pendingComposer.getByLabel("Choose how to split");
       const pendingPersonVisible = await pendingSplit.getByText("Dev", { exact: true }).isVisible();
-      const pendingStatusVisible = await pendingSplit.getByText("Account not linked", { exact: true }).isVisible();
+      const pendingStatusVisible = await pendingSplit.getByText("Account not connected", { exact: true }).isVisible();
       await pendingSplit.getByRole("button", { name: "Done" }).click();
       await pendingComposer.getByRole("button", { name: /^Add / }).click();
       await pendingComposer.waitFor({ state: "hidden" });
@@ -553,7 +553,7 @@ async function run(): Promise<void> {
         note: "The pending person is selectable and clearly labeled. The expense remains private to current group members until the secure account link is approved.",
         checks: [
           makeCheck("pending-person-visible", "The split includes the pending person by name", pendingPersonVisible, "Dev"),
-          makeCheck("pending-state-explicit", "The split explains that the account is not linked", pendingStatusVisible, "Account not linked"),
+          makeCheck("pending-state-explicit", "The split explains that the account is not connected", pendingStatusVisible, "Account not connected"),
           makeCheck("pending-expense-accepted", "The canonical ledger accepts an expense involving the pending person", pendingExpense?.allocations.some(({ participantId }) => participantId === imported.placeholderUserId) === true, pendingExpenseId),
           makeCheck("claimant-still-isolated", "The real account cannot read the group before approval", !claimantStillIsolated.groups.some(({ id }) => id === imported.groupId), `${claimantStillIsolated.groups.length} claimant groups`),
         ],
@@ -646,7 +646,7 @@ async function run(): Promise<void> {
         ...evaluateMobilePrimaryAction(primaryActionBox, primaryNavigationBox, viewport),
         makeCheck("group-action-compact", "A group uses the compact context-aware expense action", groupActionIsCompact, "compact group action"),
         makeCheck("header-action-removed", "The mobile header no longer duplicates the primary expense action", await settingsSession.page.locator(".mobile-header").getByRole("button", { name: "Add expense" }).count() === 0, "0 header actions"),
-        makeCheck("group-settings-action", "The group header exposes a labeled settings action", await settingsSession.page.getByRole("button", { name: "Open settings for Goa trip" }).isVisible(), "Open settings for Goa trip"),
+        makeCheck("group-settings-action", "The group header exposes a labeled settings action", await settingsSession.page.getByRole("button", { name: "Open Goa trip settings" }).isVisible(), "Open Goa trip settings"),
         makeCheck("group-people-action", "The people count opens group management", await settingsSession.page.getByRole("button", { name: /4 people/ }).isVisible(), "4 people"),
         makeCheck("group-primary-views", "Activity, Balances, and Insights remain visible as group views", (await Promise.all(["Activity", "Balances", "Insights"].map((name) => settingsSession.page.getByRole("tab", { name }).isVisible()))).every(Boolean), "3 visible tabs"),
       ];
@@ -657,7 +657,7 @@ async function run(): Promise<void> {
         note: "Activity stays primary; people and settings remain visible in the group header, while a compact Add expense action floats above the full-width tab bar.",
         checks: groupHeaderChecks,
       });
-      await settingsSession.page.getByRole("button", { name: "Open settings for Goa trip" }).click();
+      await settingsSession.page.getByRole("button", { name: "Open Goa trip settings" }).click();
       const groupSettings = settingsSession.page.getByRole("dialog", { name: "Group settings" });
       await groupSettings.waitFor({ state: "visible" });
       await settingsSession.page.waitForTimeout(350);
@@ -668,7 +668,7 @@ async function run(): Promise<void> {
       const emailFields = await groupSettings.locator('input[type="email"]').count();
       const settingsChecks = [
         makeCheck("group-settings-visible", "Group settings is reachable from the group header", settingsBox.top >= 0 && settingsBox.bottom <= settingsBox.viewport + 1, JSON.stringify(settingsBox)),
-        makeCheck("group-invite-one-field", "Adding someone asks for one email and no name", emailFields === 1 && await groupSettings.getByText("One email is enough.").isVisible(), `${emailFields} email fields`),
+        makeCheck("group-invite-one-field", "Adding someone asks for one email and no name", emailFields === 1 && await groupSettings.getByLabel("Email address").isVisible(), `${emailFields} email fields`),
         makeCheck("group-members-visible", "The group member list is visible in the same destination", await groupSettings.getByRole("heading", { name: "People" }).isVisible(), "People section"),
         makeCheck("group-currency-visible", "Default currency and its change rule are explained in context", await groupSettings.getByRole("heading", { name: "Default currency" }).isVisible(), "Default currency section"),
       ];
@@ -687,7 +687,7 @@ async function run(): Promise<void> {
       await newGroup.getByLabel("Group name").fill("Synthetic invite trip");
       await newGroup.getByRole("button", { name: "Create group", exact: true }).click();
       await newGroup.waitFor({ state: "hidden" });
-      await settingsSession.page.getByRole("button", { name: "Open settings for Synthetic invite trip" }).click();
+      await settingsSession.page.getByRole("button", { name: "Open Synthetic invite trip settings" }).click();
       const newGroupSettings = settingsSession.page.getByRole("dialog", { name: "Group settings" });
       await newGroupSettings.getByRole("combobox", { name: "Currency" }).selectOption("CAD");
       await waitUntil("new group currency to persist", async () => {
@@ -698,7 +698,7 @@ async function run(): Promise<void> {
         newGroupSettings.getByRole("combobox", { name: "Currency" }).isEnabled(),
       );
       await newGroupSettings.getByLabel("Email address").fill("mira@example.com");
-      await newGroupSettings.getByRole("button", { name: "Send invite" }).click();
+      await newGroupSettings.getByRole("button", { name: "Add & invite" }).click();
       let invitationLink: string | undefined;
       await waitUntil("synthetic invitation email to reach the loopback outbox", async () => {
         invitationLink = readScenarioMagicLink(runtime!.databasePath, "mira@example.com");
@@ -769,7 +769,7 @@ async function run(): Promise<void> {
 
       const keyboardSession = sessions[0]!;
       const firstComposer = keyboardSession.page.getByRole("dialog", { name: "Add an expense" });
-      await firstComposer.getByPlaceholder("What was it for?").focus();
+      await firstComposer.getByLabel("Description").focus();
       await keyboardSession.page.setViewportSize({ width: 390, height: 500 });
       await keyboardSession.page.waitForTimeout(150);
       const compactControls = await firstComposer.locator(".quick-control").evaluateAll((buttons) => buttons.map((button) => {
@@ -822,7 +822,7 @@ async function run(): Promise<void> {
           ));
         }
         await panel.getByRole("button", { name: "Done" }).click();
-        await firstComposer.getByPlaceholder("What was it for?").focus();
+        await firstComposer.getByLabel("Description").focus();
       }
       await recordStep(report, concurrent, outputDirectory, {
         id: "keyboard-safe-details",

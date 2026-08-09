@@ -1,3 +1,4 @@
+import { BlockList, isIP } from "node:net";
 import { resolve } from "node:path";
 
 function booleanEnv(name: string, fallback = false): boolean {
@@ -20,12 +21,73 @@ export function validateProductionAuthSecret(value: string): void {
 
 export function resolvePublicRateKey(input: {
   cloudflareIp?: string;
+  peerAddress?: string;
   trustCloudflareProxy: boolean;
+  trustedProxies: readonly string[];
   production: boolean;
 }): string {
   const cloudflareIp = input.cloudflareIp?.trim() ?? "";
-  if (input.trustCloudflareProxy && /^[0-9a-f:.]{2,64}$/i.test(cloudflareIp)) return cloudflareIp;
+  if (
+    input.production &&
+    input.trustCloudflareProxy &&
+    isIP(cloudflareIp) !== 0 &&
+    isTrustedProxyAddress(input.peerAddress, input.trustedProxies)
+  ) return cloudflareIp;
   return input.production ? "unidentified" : "local-development";
+}
+
+interface ProxyNetwork {
+  address: string;
+  family: "ipv4" | "ipv6";
+  prefix?: number;
+}
+
+function parseProxyNetwork(entry: string): ProxyNetwork {
+  const slash = entry.lastIndexOf("/");
+  const address = slash === -1 ? entry : entry.slice(0, slash);
+  const familyValue = isIP(address);
+  if (familyValue === 0) throw new Error("TRUSTED_PROXY_CIDRS must contain valid IP addresses or CIDR ranges");
+  const family = familyValue === 4 ? "ipv4" : "ipv6";
+  if (slash === -1) return { address, family };
+  const prefixValue = entry.slice(slash + 1);
+  if (!/^\d+$/.test(prefixValue)) throw new Error("TRUSTED_PROXY_CIDRS must contain valid IP addresses or CIDR ranges");
+  const prefix = Number(prefixValue);
+  const maximum = family === "ipv4" ? 32 : 128;
+  const minimum = family === "ipv4" ? 24 : 64;
+  if (prefix > maximum) throw new Error("TRUSTED_PROXY_CIDRS must contain valid IP addresses or CIDR ranges");
+  if (prefix < minimum) {
+    if (prefix === 0) throw new Error("TRUSTED_PROXY_CIDRS must not trust every address");
+    throw new Error("TRUSTED_PROXY_CIDRS range is too broad; list the proxy addresses or a narrow subnet");
+  }
+  return { address, family, prefix };
+}
+
+export function resolveTrustedProxies(value: string | undefined, enabled: boolean): string[] {
+  const configured = value?.split(",").map((entry) => entry.trim()).filter(Boolean) ?? [];
+  if (!enabled && configured.length) {
+    throw new Error("TRUSTED_PROXY_CIDRS requires TRUST_CLOUDFLARE_PROXY=true");
+  }
+  if (enabled && configured.length === 0) {
+    throw new Error("TRUST_CLOUDFLARE_PROXY=true requires TRUSTED_PROXY_CIDRS");
+  }
+  if (configured.length > 32) throw new Error("TRUSTED_PROXY_CIDRS accepts at most 32 addresses or narrow CIDR ranges");
+  const unique = [...new Set(configured)];
+  for (const entry of unique) {
+    if (entry.length > 64) throw new Error("TRUSTED_PROXY_CIDRS must contain valid IP addresses or CIDR ranges");
+    parseProxyNetwork(entry);
+  }
+  return unique;
+}
+
+export function isTrustedProxyAddress(peerAddress: string | undefined, trustedProxies: readonly string[]): boolean {
+  if (!peerAddress || isIP(peerAddress) === 0 || trustedProxies.length === 0) return false;
+  const blockList = new BlockList();
+  for (const entry of trustedProxies) {
+    const network = parseProxyNetwork(entry);
+    if (network.prefix === undefined) blockList.addAddress(network.address, network.family);
+    else blockList.addSubnet(network.address, network.prefix, network.family);
+  }
+  return blockList.check(peerAddress, isIP(peerAddress) === 4 ? "ipv4" : "ipv6");
 }
 
 export interface GoogleAuthConfig {
@@ -90,6 +152,21 @@ export function resolveGoogleAuthConfig(
   return { clientId, clientSecret };
 }
 
+export function validateProductionAuthDelivery(input: {
+  production: boolean;
+  googleEnabled: boolean;
+  smtpEnabled: boolean;
+  smtpFrom?: string;
+}): void {
+  if (!input.production) return;
+  if (!input.googleEnabled && !input.smtpEnabled) {
+    throw new Error("SMTP or Google OAuth must be configured in production");
+  }
+  if (input.smtpEnabled && !input.smtpFrom?.trim()) {
+    throw new Error("SMTP_FROM is required when SMTP delivery is enabled in production");
+  }
+}
+
 export interface AppConfig {
   nodeEnv: string;
   host: string;
@@ -101,6 +178,7 @@ export interface AppConfig {
   authSecret: string;
   devAuthBypass: boolean;
   trustCloudflareProxy: boolean;
+  trustedProxies: string[];
   ownerEmail?: string;
   cookieDomain?: string;
   googleAuth?: GoogleAuthConfig;
@@ -125,6 +203,8 @@ export function loadConfig(): AppConfig {
     throw new Error("DEV_AUTH_BYPASS cannot be enabled in production");
   }
   if (nodeEnv === "production") validateProductionAuthSecret(authSecret);
+  const trustCloudflareProxy = booleanEnv("TRUST_CLOUDFLARE_PROXY", false);
+  const trustedProxies = resolveTrustedProxies(process.env.TRUSTED_PROXY_CIDRS, trustCloudflareProxy);
 
   const smtpUser = process.env.SMTP_USER;
   const smtpPassword = process.env.SMTP_APP_PASSWORD;
@@ -147,9 +227,13 @@ export function loadConfig(): AppConfig {
   if (nodeEnv === "production" && !ownerEmail) {
     throw new Error("OWNER_EMAIL is required in production");
   }
-  if (nodeEnv === "production" && !smtpFrom) {
-    throw new Error("SMTP_FROM is required in production");
-  }
+  const smtpEnabled = Boolean(smtpUser && smtpPassword);
+  validateProductionAuthDelivery({
+    production: nodeEnv === "production",
+    googleEnabled: Boolean(googleAuth),
+    smtpEnabled,
+    ...(smtpFrom ? { smtpFrom } : {}),
+  });
   const webOrigin = validatedBaseUrl("WEB_ORIGIN", process.env.WEB_ORIGIN ?? "http://localhost:5173", nodeEnv === "production");
   const publicApiUrl = validatedBaseUrl(
     "PUBLIC_API_URL",
@@ -169,14 +253,15 @@ export function loadConfig(): AppConfig {
     publicApiUrl,
     authSecret,
     devAuthBypass,
-    trustCloudflareProxy: booleanEnv("TRUST_CLOUDFLARE_PROXY", false),
+    trustCloudflareProxy,
+    trustedProxies,
     ...(ownerEmail ? { ownerEmail } : {}),
     ...(cookieDomain ? { cookieDomain } : {}),
     ...(googleAuth ? { googleAuth } : {}),
     ...(splitwiseOAuth ? { splitwiseOAuth } : {}),
     bootstrapGroupName: process.env.BOOTSTRAP_GROUP_NAME ?? "Shared expenses",
     smtp: {
-      enabled: Boolean(smtpUser && smtpPassword),
+      enabled: smtpEnabled,
       host: process.env.SMTP_HOST ?? "smtp.gmail.com",
       port: integerEnv("SMTP_PORT", 465),
       secure: booleanEnv("SMTP_SECURE", true),

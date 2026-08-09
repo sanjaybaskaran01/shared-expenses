@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import { betterAuth } from "better-auth";
 import { magicLink } from "better-auth/plugins/magic-link";
-import type { AppConfig } from "./config";
+import { isTrustedProxyAddress, type AppConfig } from "./config";
 import type { ContactInviteStore } from "./contact-invites";
 import { enqueueEmail } from "./email";
 import { keyedDigest } from "./security-keys";
@@ -102,6 +102,18 @@ export function claimPendingInvitations(
     ).run(now, normalized);
   })();
   contactInvites.acceptReservedForUser(userId, normalized);
+}
+
+export function authRequestForPeer(request: Request, config: AppConfig, peerAddress: string | undefined): Request {
+  const trusted = config.nodeEnv === "production" &&
+    config.trustCloudflareProxy &&
+    isTrustedProxyAddress(peerAddress, config.trustedProxies);
+  if (trusted) return request;
+  const sanitized = request.clone();
+  sanitized.headers.delete("cf-connecting-ip");
+  sanitized.headers.delete("x-forwarded-for");
+  sanitized.headers.delete("x-real-ip");
+  return sanitized;
 }
 
 export function createAuth(db: Database, config: AppConfig, contactInvites: ContactInviteStore) {
@@ -230,8 +242,13 @@ export function createAuth(db: Database, config: AppConfig, contactInvites: Cont
     },
     advanced: {
       useSecureCookies: config.nodeEnv === "production",
-      ...(config.nodeEnv === "production"
-        ? { ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] } }
+      ...(config.nodeEnv === "production" && config.trustCloudflareProxy
+        ? {
+            ipAddress: {
+              ipAddressHeaders: ["cf-connecting-ip"],
+              ...(config.trustedProxies.length ? { trustedProxies: config.trustedProxies } : {}),
+            },
+          }
         : {}),
       ...(config.nodeEnv === "production" && config.cookieDomain
         ? {

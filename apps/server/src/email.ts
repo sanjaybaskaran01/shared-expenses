@@ -38,6 +38,33 @@ interface OutboxRow {
   attempts: number;
 }
 
+export function markEmailDeliveryFailure(
+  db: Database,
+  id: string,
+  priorAttempts: number,
+  error: unknown,
+  now = new Date(),
+): boolean {
+  const attempts = priorAttempts + 1;
+  const terminal = attempts >= 8;
+  const delayMinutes = Math.min(2 ** attempts, 360);
+  const nextAttempt = new Date(now.getTime() + delayMinutes * 60_000).toISOString();
+  const code = error instanceof Error ? error.name.slice(0, 100) : "SMTP_ERROR";
+  if (terminal) {
+    db.query(
+      `UPDATE email_outbox
+       SET status = 'failed', attempts = ?, next_attempt_at = ?, last_error_code = ?,
+           recipient = '[redacted]', subject = '[redacted]', text_body = '[redacted]', html_body = NULL
+       WHERE id = ?`,
+    ).run(attempts, nextAttempt, code, id);
+  } else {
+    db.query(
+      "UPDATE email_outbox SET status = 'failed', attempts = ?, next_attempt_at = ?, last_error_code = ? WHERE id = ?",
+    ).run(attempts, nextAttempt, code, id);
+  }
+  return terminal;
+}
+
 export function startEmailWorker(db: Database, config: AppConfig): () => void {
   if (!config.smtp.enabled || !config.smtp.user || !config.smtp.appPassword) {
     console.info("SMTP credentials are absent; queued emails will remain pending");
@@ -84,12 +111,7 @@ export function startEmailWorker(db: Database, config: AppConfig): () => void {
           row.id,
         );
       } catch (error) {
-        const delayMinutes = Math.min(2 ** (row.attempts + 1), 360);
-        const nextAttempt = new Date(Date.now() + delayMinutes * 60_000).toISOString();
-        const code = error instanceof Error ? error.name.slice(0, 100) : "SMTP_ERROR";
-        db.query(
-          "UPDATE email_outbox SET status = 'failed', next_attempt_at = ?, last_error_code = ? WHERE id = ?",
-        ).run(nextAttempt, code, row.id);
+        markEmailDeliveryFailure(db, row.id, row.attempts, error);
       }
     } finally {
       running = false;

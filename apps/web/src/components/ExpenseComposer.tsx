@@ -663,7 +663,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                       </Show>
                     </div>
                   )}</Show>
-                  <p class="language-privacy"><span aria-hidden="true">●</span> Private on this device. Your text is never uploaded.</p>
+                  <p class="language-privacy"><span aria-hidden="true">●</span> Parsed on this device. The original sentence stays here; expense details you add sync with the group.</p>
                 </section>
 
                 <Show when={error()}><p id="expense-language-error" class="error-callout" role="alert">{error()}</p></Show>

@@ -480,6 +480,13 @@ export function claimContactInvitation(token: string, email: string): Promise<vo
   });
 }
 
+export function reserveContactInvitation(token: string, email: string): Promise<void> {
+  return apiFetch("/api/v1/contact-invitations/reserve", {
+    method: "POST",
+    body: JSON.stringify({ token, email }),
+  });
+}
+
 export function acceptCurrentContactInvitation(token: string): Promise<ContactInviteState> {
   return apiFetch("/api/v1/contact-invitations/accept", {
     method: "POST",
@@ -496,8 +503,16 @@ export async function registerDevice(input: {
   await apiFetch("/api/v1/devices/register", { method: "POST", body: JSON.stringify(input) });
 }
 
-export async function inviteGroupMember(groupId: string, input: { email: string }): Promise<void> {
-  await apiFetch(`/api/v1/groups/${encodeURIComponent(groupId)}/invitations`, {
+export interface GroupInvitationResult {
+  id: string;
+  email: string;
+  status: "pending";
+  delivery: "email" | "share";
+  joinUrl: string;
+}
+
+export function inviteGroupMember(groupId: string, input: { email: string }): Promise<GroupInvitationResult> {
+  return apiFetch(`/api/v1/groups/${encodeURIComponent(groupId)}/invitations`, {
     method: "POST",
     body: JSON.stringify(input),
   });

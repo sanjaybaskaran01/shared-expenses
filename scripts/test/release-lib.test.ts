@@ -13,6 +13,7 @@ import {
   planReleaseOperations,
   pollHealth,
   pollWebDeployment,
+  parsePrivateReleaseEnvironment,
   rollbackAndRethrow,
   resolvePublicReleaseUrls,
   selectSuccessfulCiRun,
@@ -61,11 +62,11 @@ describe("release arguments", () => {
 });
 
 describe("release public URLs", () => {
-  test("uses Tallied production endpoints when no override is configured", () => {
-    expect(resolvePublicReleaseUrls({})).toEqual({
-      webUrl: "https://expenses.example.com",
-      publicApiUrl: "https://api.example.com",
-    });
+  test("fails closed when private production endpoints are absent", () => {
+    expect(() => resolvePublicReleaseUrls({})).toThrow("TALLY_WEB_URL and TALLY_API_URL");
+    expect(() => resolvePublicReleaseUrls({ TALLY_WEB_URL: "https://tallied.example.org" })).toThrow(
+      "TALLY_WEB_URL and TALLY_API_URL",
+    );
   });
 
   test("normalizes explicit self-hosted endpoint overrides", () => {
@@ -75,6 +76,18 @@ describe("release public URLs", () => {
     })).toEqual({
       webUrl: "https://tallied.example.org",
       publicApiUrl: "https://api.example.org",
+    });
+  });
+
+  test("reads only release endpoints from a private environment file", () => {
+    expect(parsePrivateReleaseEnvironment(`
+      # This file may contain other private configuration.
+      TALLY_WEB_URL=https://tallied.example.org/
+      TALLY_API_URL="https://api.example.org/"
+      SMTP_APP_PASSWORD=not-a-real-secret-and-not-returned
+    `)).toEqual({
+      TALLY_WEB_URL: "https://tallied.example.org/",
+      TALLY_API_URL: "https://api.example.org/",
     });
   });
 });

@@ -106,6 +106,16 @@ describe("standalone contact invitations", () => {
     ]);
   });
 
+  test("does not accept a Google account whose verified email differs from the reservation", () => {
+    const { db, store } = fixture();
+    const invite = store.create("alice");
+    store.reserve(invite.token, "bob@example.com");
+
+    expect(store.acceptReservedForUser("carol", "carol@example.com")).toBe(0);
+    expect(db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM contacts").get()?.count).toBe(0);
+    expect(store.acceptReservedForUser("bob", "bob@example.com")).toBe(1);
+  });
+
   test("revoking an unclaimed link returns its credit and invalidates the token", () => {
     const { store } = fixture();
     const invite = store.create("alice");

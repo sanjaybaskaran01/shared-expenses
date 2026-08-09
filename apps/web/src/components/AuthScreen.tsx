@@ -6,9 +6,11 @@ import {
   getAuthCapabilities,
   previewImportClaim,
   requestImportClaimMagicLink,
+  reserveContactInvitation,
   reserveImportClaim,
 } from "../lib/api";
 import { authClient } from "../lib/auth";
+import { authEmailPlacement } from "../lib/auth-flow";
 import { inviteTokenFromHash } from "../lib/contact-invites";
 import { migrationClaimFromHash } from "../lib/migration-claim-link";
 import { BrandMark } from "./BrandMark";
@@ -29,6 +31,7 @@ export function AuthScreen() {
   const search = new URLSearchParams(location.search);
   const invitationToken = inviteTokenFromHash();
   const migrationClaimToken = migrationClaimFromHash();
+  const emailPlacement = authEmailPlacement({ invitationToken, migrationClaimToken });
   const initialAuthFailed = search.get("auth") === "failed";
   const [email, setEmail] = createSignal(search.get("email") ?? "");
   const [message, setMessage] = createSignal(initialAuthFailed
@@ -60,13 +63,26 @@ export function AuthScreen() {
         }
         await reserveImportClaim(migrationClaimToken, email().trim());
       }
-      const claimFailureUrl = migrationClaimToken
-        ? `${location.origin}/?auth=failed#${new URLSearchParams({ migrationClaim: migrationClaimToken })}`
-        : `${location.origin}/?auth=failed`;
+      if (invitationToken) {
+        if (!emailInputRef?.checkValidity()) {
+          setMessageTone("error");
+          setMessage("Enter the email address you’ll use with Google.");
+          emailInputRef?.focus();
+          return;
+        }
+        await reserveContactInvitation(invitationToken, email().trim());
+      }
+      const returnHash = migrationClaimToken
+        ? new URLSearchParams({ migrationClaim: migrationClaimToken })
+        : invitationToken
+          ? new URLSearchParams({ invite: invitationToken })
+          : undefined;
+      const claimReturnUrl = returnHash ? `${location.origin}/#${returnHash}` : location.origin;
+      const claimFailureUrl = returnHash ? `${location.origin}/?auth=failed#${returnHash}` : `${location.origin}/?auth=failed`;
       const result = await authClient.signIn.social({
         provider: "google",
-        callbackURL: migrationClaimToken ? location.href : location.origin,
-        newUserCallbackURL: migrationClaimToken ? location.href : location.origin,
+        callbackURL: claimReturnUrl,
+        newUserCallbackURL: claimReturnUrl,
         errorCallbackURL: claimFailureUrl,
       });
       if (result.error) {
@@ -138,21 +154,21 @@ export function AuthScreen() {
                 : "Sign in with the Google account or email address that was invited."}
           </p>
           <Show when={migrationPreview()}><p class="mt-3 text-xs text-muted-foreground">Single-use link · expires {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(migrationPreview()!.expiresAt))}</p></Show>
-          <Show when={migrationClaimToken}>
-            <label class="mt-5 grid gap-2 text-sm font-medium">Email address<div class="relative"><Mail class="absolute left-3 top-3 text-muted-foreground" size={17} /><input ref={emailInputRef} class="form-control h-12 pl-9" required type="email" autocomplete="email" value={email()} onInput={(event) => setEmail(event.currentTarget.value)} placeholder="you@example.com" /></div><span class="text-xs font-normal leading-5 text-muted-foreground">Use the same email for Google or the email link. Connecting gives this account access to the imported groups. Tallied tracks balances; it never moves money.</span></label>
+          <Show when={emailPlacement.shared}>
+            <label class="mt-5 grid gap-2 text-sm font-medium">Email address<div class="relative"><Mail class="absolute left-3 top-3 text-muted-foreground" size={17} /><input ref={emailInputRef} class="form-control h-12 pl-9" required type="email" autocomplete="email" value={email()} onInput={(event) => setEmail(event.currentTarget.value)} placeholder="you@example.com" /></div><span class="text-xs font-normal leading-5 text-muted-foreground">{migrationClaimToken ? "Use the same email for Google or the email link. Connecting gives this account access to the imported groups. Tallied tracks balances; it never moves money." : "Use this same email with Google or an email link. It becomes the account connected to this invitation."}</span></label>
           </Show>
-          <Show when={capabilities()?.google && !invitationToken}>
+          <Show when={capabilities()?.google}>
             <Button class="mt-6 h-12 w-full rounded-xl" type="button" variant="secondary" disabled={busy() !== null || Boolean(migrationClaimToken && !migrationPreview())} onClick={() => void signInWithGoogle()}><GoogleMark />{busy() === "google" ? "Signing in…" : "Continue with Google"}</Button>
             <div class="auth-divider" aria-hidden="true"><span>or use email</span></div>
           </Show>
-          <Show when={capabilities()?.magicLink} fallback={<p class="mt-5 rounded-xl border border-border bg-muted/60 p-3 text-sm text-muted-foreground">Email sign-in is unavailable on this Tallied installation.</p>}>
+          <Show when={capabilities()?.magicLink} fallback={<p class="mt-5 rounded-xl border border-border bg-muted/60 p-3 text-sm text-muted-foreground">{capabilities()?.google ? "Email links are unavailable here. Continue with Google." : "This Tallied installation has no sign-in method configured."}</p>}>
             <form class="mt-6 grid gap-4" onSubmit={requestLink}>
-              <Show when={!migrationClaimToken}><label class="grid gap-2 text-sm font-medium">Email address<div class="relative"><Mail class="absolute left-3 top-3 text-muted-foreground" size={17} /><input ref={emailInputRef} class="form-control h-12 pl-9" required type="email" autocomplete="email" value={email()} onInput={(event) => setEmail(event.currentTarget.value)} placeholder="you@example.com" /></div></label></Show>
+              <Show when={emailPlacement.magicLinkForm}><label class="grid gap-2 text-sm font-medium">Email address<div class="relative"><Mail class="absolute left-3 top-3 text-muted-foreground" size={17} /><input ref={emailInputRef} class="form-control h-12 pl-9" required type="email" autocomplete="email" value={email()} onInput={(event) => setEmail(event.currentTarget.value)} placeholder="you@example.com" /></div></label></Show>
               <Button class="h-12 w-full rounded-xl" type="submit" disabled={busy() !== null || Boolean(migrationClaimToken && !migrationPreview())}>{busy() === "email" ? "Sending…" : invitationToken ? "Send link to join" : migrationClaimToken ? "Send secure link" : "Send sign-in link"}</Button>
             </form>
           </Show>
           <Show when={message()}><p class="mt-4 rounded-xl border border-border bg-muted/60 p-3 text-sm text-muted-foreground" role={messageTone() === "error" ? "alert" : "status"} aria-live={messageTone() === "error" ? "assertive" : "polite"}>{message()}</p></Show>
-          <p class="mt-5 text-center text-xs text-muted-foreground">No password · Secure sign-in · Works offline</p>
+          <p class="mt-5 text-center text-xs text-muted-foreground">No password · Secure sign-in</p>
         </Card>
       </div>
     </main>

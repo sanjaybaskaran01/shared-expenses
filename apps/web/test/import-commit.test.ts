@@ -163,7 +163,7 @@ describe("migration commit planner", () => {
 
   test("combines multiple imported self aliases into one Tallied participant", async () => {
     const aliased = structuredClone(draft);
-    aliased.people.push({ externalId: "person:sam-alt", displayName: "Alex", emailTrust: "none" });
+    aliased.people.push({ externalId: "person:sam-alt", displayName: "Taylor", emailTrust: "none" });
     aliased.groups[0]!.memberExternalIds.push("person:sam-alt");
     aliased.records[0]!.payers = [
       { externalPersonId: "person:self", amountMinor: 600 },

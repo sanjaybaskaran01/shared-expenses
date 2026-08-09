@@ -147,7 +147,7 @@ describe("scenario lab model", () => {
       const databasePath = join(root, "scenario.sqlite");
       await seedScenarioDatabase({ databasePath });
       const snapshot = readScenarioServerSnapshot(databasePath);
-      expect(snapshot.memberIds).toEqual(["maya", "arjun", "dev", "mira"]);
+      expect(snapshot.memberIds).toEqual(["arjun", "dev", "maya", "mira"]);
       expect(snapshot.expenses).toEqual([]);
       expect(evaluateLedger(snapshot).checks.every(({ status }) => status === "passed")).toBe(true);
     } finally {

@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { resolve } from "node:path";
-import { canCreateTalliedAccount, claimPendingInvitations, createAuth, deriveDisplayNameFromEmail } from "../src/auth";
+import { authRequestForPeer, canCreateTalliedAccount, claimPendingInvitations, createAuth, deriveDisplayNameFromEmail } from "../src/auth";
 import {
+  isTrustedProxyAddress,
   resolveGoogleAuthConfig,
   resolvePublicRateKey,
   resolveSplitwiseOAuthConfig,
+  resolveTrustedProxies,
+  validateProductionAuthDelivery,
   validateProductionAuthSecret,
   type AppConfig,
 } from "../src/config";
@@ -26,6 +29,7 @@ function testConfig(googleAuth?: AppConfig["googleAuth"]): AppConfig {
     authSecret: "test-only-auth-secret-not-for-production",
     devAuthBypass: false,
     trustCloudflareProxy: false,
+    trustedProxies: [],
     ownerEmail: "owner@example.com",
     ...(googleAuth ? { googleAuth } : {}),
     bootstrapGroupName: "Test group",
@@ -112,8 +116,89 @@ describe("group invitation account handoff", () => {
 
 describe("public rate-limit identity", () => {
   test("ignores a forged Cloudflare header unless the proxy is explicitly trusted", () => {
-    expect(resolvePublicRateKey({ cloudflareIp: "203.0.113.9", trustCloudflareProxy: false, production: true })).toBe("unidentified");
-    expect(resolvePublicRateKey({ cloudflareIp: "203.0.113.9", trustCloudflareProxy: true, production: true })).toBe("203.0.113.9");
+    expect(resolvePublicRateKey({
+      cloudflareIp: "203.0.113.9",
+      peerAddress: "192.0.2.10",
+      trustCloudflareProxy: false,
+      trustedProxies: ["192.0.2.10"],
+      production: true,
+    })).toBe("unidentified");
+    expect(resolvePublicRateKey({
+      cloudflareIp: "203.0.113.9",
+      peerAddress: "198.51.100.10",
+      trustCloudflareProxy: true,
+      trustedProxies: ["192.0.2.10"],
+      production: true,
+    })).toBe("unidentified");
+    expect(resolvePublicRateKey({
+      cloudflareIp: "203.0.113.9",
+      peerAddress: "192.0.2.10",
+      trustCloudflareProxy: true,
+      trustedProxies: ["192.0.2.10"],
+      production: true,
+    })).toBe("203.0.113.9");
+  });
+
+  test("configures Better Auth IP tracking only behind the explicitly trusted proxy", () => {
+    const database = new Database(":memory:");
+    const contactInvites = new ContactInviteStore(database, { emailHashSecret: testConfig().authSecret });
+    const untrusted = createAuth(database, { ...testConfig(), nodeEnv: "production" }, contactInvites);
+    expect(untrusted.options.advanced?.ipAddress).toBeUndefined();
+
+    const trusted = createAuth(database, {
+      ...testConfig(),
+      nodeEnv: "production",
+      trustCloudflareProxy: true,
+      trustedProxies: ["192.0.2.10", "2001:db8::10"],
+    }, contactInvites);
+    expect(trusted.options.advanced?.ipAddress).toEqual({
+      ipAddressHeaders: ["cf-connecting-ip"],
+      trustedProxies: ["192.0.2.10", "2001:db8::10"],
+    });
+    database.close();
+  });
+
+  test("rejects broad or untrusted proxy CIDR configuration", () => {
+    expect(resolveTrustedProxies(undefined, false)).toEqual([]);
+    expect(resolveTrustedProxies("192.0.2.10, 2001:db8::10", true)).toEqual(["192.0.2.10", "2001:db8::10"]);
+    expect(() => resolveTrustedProxies("192.0.2.10", false)).toThrow("TRUST_CLOUDFLARE_PROXY");
+    expect(() => resolveTrustedProxies(undefined, true)).toThrow("requires TRUSTED_PROXY_CIDRS");
+    expect(() => resolveTrustedProxies("0.0.0.0/0", true)).toThrow("must not trust every address");
+    expect(() => resolveTrustedProxies("10.0.0.0/8", true)).toThrow("too broad");
+    expect(() => resolveTrustedProxies("100.0.0.0/1", true)).toThrow("too broad");
+    expect(() => resolveTrustedProxies("999.999.999.999/99", true)).toThrow("valid IP");
+    expect(() => resolveTrustedProxies("2001:db8::/32", true)).toThrow("too broad");
+  });
+
+  test("matches only validated proxy addresses and narrow subnets", () => {
+    expect(isTrustedProxyAddress("192.0.2.10", ["192.0.2.10"])).toBe(true);
+    expect(isTrustedProxyAddress("192.0.2.44", ["192.0.2.0/24"])).toBe(true);
+    expect(isTrustedProxyAddress("192.0.3.1", ["192.0.2.0/24"])).toBe(false);
+    expect(isTrustedProxyAddress("2001:db8::12", ["2001:db8::/64"])).toBe(true);
+    expect(isTrustedProxyAddress("2001:db9::12", ["2001:db8::/64"])).toBe(false);
+  });
+
+  test("removes forwarded identity headers before auth for an untrusted peer", () => {
+    const config = {
+      ...testConfig(),
+      nodeEnv: "production",
+      trustCloudflareProxy: true,
+      trustedProxies: ["192.0.2.10"],
+    };
+    const forged = new Request("https://example.com/api/auth/session", {
+      headers: {
+        "cf-connecting-ip": "203.0.113.9",
+        "x-forwarded-for": "203.0.113.9",
+        "x-real-ip": "203.0.113.9",
+      },
+    });
+    const sanitized = authRequestForPeer(forged, config, "198.51.100.10");
+    expect(sanitized.headers.get("cf-connecting-ip")).toBeNull();
+    expect(sanitized.headers.get("x-forwarded-for")).toBeNull();
+    expect(sanitized.headers.get("x-real-ip")).toBeNull();
+
+    const trusted = authRequestForPeer(forged, config, "192.0.2.10");
+    expect(trusted.headers.get("cf-connecting-ip")).toBe("203.0.113.9");
   });
 });
 
@@ -147,6 +232,22 @@ describe("Google authentication configuration", () => {
     expect(auth.options.socialProviders?.google?.clientId).toBe("client-id");
     expect(auth.options.account?.encryptOAuthTokens).toBe(true);
     database.close();
+  });
+
+  test("supports Google-only production and requires a sender only when SMTP is enabled", () => {
+    expect(() => validateProductionAuthDelivery({ production: true, googleEnabled: true, smtpEnabled: false })).not.toThrow();
+    expect(() => validateProductionAuthDelivery({ production: true, googleEnabled: false, smtpEnabled: false })).toThrow(
+      "SMTP or Google OAuth",
+    );
+    expect(() => validateProductionAuthDelivery({ production: true, googleEnabled: false, smtpEnabled: true })).toThrow(
+      "SMTP_FROM",
+    );
+    expect(() => validateProductionAuthDelivery({
+      production: true,
+      googleEnabled: false,
+      smtpEnabled: true,
+      smtpFrom: "Tallied <tally@example.com>",
+    })).not.toThrow();
   });
 });
 

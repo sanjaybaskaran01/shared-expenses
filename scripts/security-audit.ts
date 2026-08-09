@@ -21,6 +21,19 @@ const highConfidenceDetectors: Detector[] = [
 const assignmentPattern = /\b[A-Z][A-Z0-9_]*(?:SECRET|PASSWORD|TOKEN|API_KEY)[A-Z0-9_]*[ \t]*=[ \t]*["']?([A-Za-z0-9_+/.=-]{16,})/g;
 const propertyAssignmentPattern = /\b(?:authSecret|clientSecret|appPassword|password|token|apiKey)\s*:\s*["']([^"']{16,})["']/gi;
 const safeValue = /(example|replace|placeholder|development|test-only|not-a-real|fake|mock|fixture|secrets\.|process\.env)/i;
+const emailAddressPattern = /[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g;
+const allowedEmailDomain = /(?:^|\.)example\.(?:com|org|net)$|^localhost\.invalid$|^users\.noreply\.github\.com$/i;
+
+export function repositoryPolicyFindings(path: string, content: string): string[] {
+  const detected: string[] = [];
+  if (/^(?:artifacts|work)(?:\/|$)/.test(path) || path === "xaa") detected.push("tracked private artifact path");
+  if (/\.(?:log|sqlite|sqlite-(?:shm|wal)|db)$/i.test(path)) detected.push("tracked runtime data file");
+  for (const match of content.matchAll(emailAddressPattern)) {
+    const domain = match[1] ?? "";
+    if (!allowedEmailDomain.test(domain)) detected.push("non-example email address");
+  }
+  return [...new Set(detected)];
+}
 
 function findings(content: string, includeGenericAssignments: boolean): string[] {
   const detected = highConfidenceDetectors
@@ -37,6 +50,18 @@ function findings(content: string, includeGenericAssignments: boolean): string[]
     }
   }
   return [...new Set(detected)];
+}
+
+export function textBlobPolicyFindings(
+  path: string,
+  bytes: Uint8Array,
+  includeGenericAssignments: boolean,
+): string[] {
+  const content = new TextDecoder().decode(bytes);
+  return [...new Set([
+    ...findings(content, includeGenericAssignments),
+    ...repositoryPolicyFindings(path, content),
+  ])];
 }
 
 function command(arguments_: string[], input?: Uint8Array): Uint8Array {
@@ -149,8 +174,12 @@ async function scanTrackedTree(): Promise<Array<{ target: string; detectors: str
     }
     const bytes = modified.has(path) ? readFileSync(absolutePath) : blobs.get(objectId);
     if (!bytes) throw new Error(`Missing indexed Git blob for ${path}`);
-    if (bytes.includes(0)) continue;
-    const detected = findings(bytes.toString("utf8"), true);
+    const pathPolicy = repositoryPolicyFindings(path, "");
+    if (bytes.includes(0)) {
+      if (pathPolicy.length) results.push({ target: path, detectors: pathPolicy });
+      continue;
+    }
+    const detected = [...new Set([...pathPolicy, ...textBlobPolicyFindings(path, bytes, true)])];
     if (detected.length) results.push({ target: path, detectors: detected });
   }
   return results;
@@ -174,7 +203,7 @@ async function scanEveryLocalGitBlob(): Promise<Array<{ target: string; detector
   for (const { objectId, type, bytes } of objects) {
     if (type === "blob" && bytes.length <= 2_000_000) {
       if (!bytes.includes(0)) {
-        const detected = findings(new TextDecoder().decode(bytes), false);
+        const detected = textBlobPolicyFindings("", bytes, false);
         if (detected.length) results.push({ target: `git object ${objectId}`, detectors: detected });
       }
     }
@@ -182,11 +211,15 @@ async function scanEveryLocalGitBlob(): Promise<Array<{ target: string; detector
   return results;
 }
 
-const allObjects = Bun.argv.includes("--all-objects");
-const results = [...await scanTrackedTree(), ...(allObjects ? await scanEveryLocalGitBlob() : [])];
-if (results.length) {
-  for (const result of results) console.error(`${result.target}: ${result.detectors.join(", ")}`);
-  console.error("Security audit failed. Values are intentionally omitted from this report.");
-  process.exit(1);
+export async function runSecurityAudit(allObjects: boolean): Promise<number> {
+  const results = [...await scanTrackedTree(), ...(allObjects ? await scanEveryLocalGitBlob() : [])];
+  if (results.length) {
+    for (const result of results) console.error(`${result.target}: ${result.detectors.join(", ")}`);
+    console.error("Security audit failed. Values are intentionally omitted from this report.");
+    return 1;
+  }
+  console.info(`Security audit passed (${allObjects ? "tracked tree and every local Git blob" : "tracked tree"}).`);
+  return 0;
 }
-console.info(`Security audit passed (${allObjects ? "tracked tree and every local Git blob" : "tracked tree"}).`);
+
+if (import.meta.main) process.exit(await runSecurityAudit(Bun.argv.includes("--all-objects")));

@@ -105,8 +105,8 @@ export function AccountView(props: { displayName: string; email: string | undefi
             },
             {
               icon: Cloud,
-              title: "Works offline",
-              detail: "New entries save here until sync resumes",
+              title: "Available offline after sign-in",
+              detail: "This signed-in device saves new entries until sync resumes",
             },
             {
               icon: Scale,

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { constants as filesystemConstants } from "node:fs";
+import { constants as filesystemConstants, readFileSync } from "node:fs";
 import {
   access,
   chmod,
@@ -19,6 +19,7 @@ import {
   formatReleaseError,
   listFiles,
   parseReleaseArgs,
+  parsePrivateReleaseEnvironment,
   parseWranglerVersionId,
   planReleaseOperations,
   pollHealth,
@@ -112,7 +113,11 @@ const WEB_DEPLOYMENT_TIMEOUT_MS = 180_000;
 function contextFromEnvironment(): ReleaseContext {
   const repositoryRoot = resolve(import.meta.dir, "..");
   const supportRoot = resolve(process.env.TALLY_SUPPORT_ROOT ?? join(homedir(), "Library/Application Support/Tally"));
-  const publicUrls = resolvePublicReleaseUrls(process.env);
+  const releaseConfigPath = process.env.TALLY_RELEASE_CONFIG?.trim();
+  const privateReleaseEnvironment = releaseConfigPath
+    ? parsePrivateReleaseEnvironment(readFileSync(resolve(releaseConfigPath), "utf8"))
+    : {};
+  const publicUrls = resolvePublicReleaseUrls({ ...privateReleaseEnvironment, ...process.env });
   return {
     repositoryRoot,
     supportRoot,

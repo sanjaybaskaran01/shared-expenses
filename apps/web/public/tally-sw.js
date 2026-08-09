@@ -1,6 +1,6 @@
 // Bump this name whenever a release must invalidate an installed app shell.
 // Cache cleanup intentionally leaves IndexedDB (the offline ledger) untouched.
-const CACHE_NAME = "tallied-shell-v7";
+const CACHE_NAME = "tallied-shell-v8";
 const workerUrl = new URL(self.location.href || "/tally-sw.js", self.location.origin);
 const configuredApiUrl = workerUrl.searchParams.get("api");
 const API_BASE_URL = (() => {
@@ -22,6 +22,16 @@ const APP_SHELL = [
   "/icon-512.png",
   "/maskable-512.png",
 ];
+const STATIC_SHELL_PATHS = new Set(APP_SHELL.filter((path) => path !== "/"));
+
+function isCacheableStaticAsset(url) {
+  const hashedBuildAsset = /^\/assets\/[^/]+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$/.test(url.pathname);
+  return hashedBuildAsset || STATIC_SHELL_PATHS.has(url.pathname);
+}
+
+function isPrivateOrReleasePath(pathname) {
+  return pathname === "/health" || pathname === "/release.json" || pathname.startsWith("/api/");
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -36,7 +46,9 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((names) => Promise.all(names.filter((name) => name !== CACHE_NAME).map((name) => caches.delete(name))))
+      .then((names) => Promise.all(names
+        .filter((name) => name !== CACHE_NAME && (name.startsWith("tally-shell-") || name.startsWith("tallied-shell-")))
+        .map((name) => caches.delete(name))))
       .then(() => self.clients.claim()),
   );
 });
@@ -47,19 +59,28 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  if (isPrivateOrReleasePath(url.pathname)) return;
 
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          void caches.open(CACHE_NAME).then((cache) => cache.put("/", copy));
+          const contentType = response.headers.get("content-type") || "";
+          if (response.ok && url.pathname === "/" && contentType.toLowerCase().startsWith("text/html")) {
+            const copy = response.clone();
+            void caches.open(CACHE_NAME).then((cache) => cache.put("/", copy));
+          }
           return response;
         })
         .catch(async () => (await caches.match("/")) || Response.error()),
     );
     return;
   }
+
+  // Authentication, ledger, sync, health, and release responses are deliberately
+  // left to the browser. Their server-provided no-store policy must never be
+  // overridden by an explicit CacheStorage write.
+  if (!isCacheableStaticAsset(url)) return;
 
   event.respondWith(
     caches.match(request).then((cached) => {

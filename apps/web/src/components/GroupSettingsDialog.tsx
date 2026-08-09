@@ -8,6 +8,7 @@ import UsersRound from "lucide-solid/icons/users-round";
 import X from "lucide-solid/icons/x";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { inviteGroupMember } from "../lib/api";
+import { shareInvitation } from "../lib/contact-invites";
 import { money } from "../lib/format-money";
 import { groupMemberStatus, IMPORT_IDENTITY_LINK_EXPLANATION } from "../lib/group-settings";
 import { computeBalances } from "../lib/ledger-view";
@@ -84,10 +85,23 @@ export function GroupSettingsDialog(props: {
     setMessage("");
     setMessageTone("status");
     try {
-      await inviteGroupMember(activeGroup.id, { email: address });
+      const invitation = await inviteGroupMember(activeGroup.id, { email: address });
       setEmail("");
-      setMessage(`Invitation sent to ${address}. The link verifies their email and adds them to ${activeGroup.name}.`);
-      props.onNotify("Group invitation sent");
+      if (invitation.delivery === "share") {
+        const shared = await shareInvitation(invitation.joinUrl, {
+          title: `Join ${activeGroup.name} on Tallied`,
+          text: `You’ve been added to ${activeGroup.name} on Tallied. Sign in with ${address} to join the group.`,
+        }).catch(() => "cancelled" as const);
+        setMessage(shared === "copied"
+          ? `Invite copied. Send it to ${address}; they must use that address with Google.`
+          : shared === "cancelled"
+            ? `${address} is pending. Share ${invitation.joinUrl} when you’re ready.`
+            : `${address} is pending. They can join with the Google account for that address.`);
+        props.onNotify("Pending member added");
+      } else {
+        setMessage(`Invitation sent to ${address}. Opening the email link verifies their address and signs them in.`);
+        props.onNotify("Group invitation sent");
+      }
       void appStore.sync();
     } catch (error) {
       setMessageTone("error");
@@ -143,7 +157,7 @@ export function GroupSettingsDialog(props: {
               <section class="group-settings-section" aria-labelledby="add-group-member-title">
                 <div class="group-settings-section-heading">
                   <span class="group-settings-section-icon" aria-hidden="true"><UserPlus size={17} /></span>
-                  <div><h3 id="add-group-member-title">Add someone</h3><p>They can join with one email link.</p></div>
+                  <div><h3 id="add-group-member-title">Add someone</h3><p>Add them now; they can join with email or Google.</p></div>
                 </div>
                 <form class="group-invite-form" onSubmit={(event) => void invite(event)}>
                   <label for="group-invite-email">Email address</label>
@@ -163,10 +177,10 @@ export function GroupSettingsDialog(props: {
                       placeholder="friend@example.com"
                     />
                     <Button type="submit" disabled={busy()}>
-                      <Show when={busy()} fallback="Send invite"><LoaderCircle class="animate-spin" size={16} /> Sending…</Show>
+                      <Show when={busy()} fallback="Add & invite"><LoaderCircle class="animate-spin" size={16} /> Adding…</Show>
                     </Button>
                   </div>
-                  <p>The link verifies their email, signs them in, and adds them to this group.</p>
+                  <p>You can add expenses for them immediately. Their invited email securely connects the history when they join.</p>
                 </form>
                 <Show when={message()}><p class="group-settings-message" role={messageTone() === "error" ? "alert" : "status"} aria-live={messageTone() === "error" ? "assertive" : "polite"} classList={{ error: messageTone() === "error" }}>{message()}</p></Show>
               </section>

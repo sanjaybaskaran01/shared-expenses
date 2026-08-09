@@ -28,4 +28,4 @@ The experimental v2 path separates:
 
 ## Availability
 
-The PWA can open and queue work when the API is down. New-device authentication, invitations, key distribution, and cross-device synchronization require the API. Self-hosters are responsible for database backups, TLS, email delivery, and recovery testing.
+After a device has signed in, the PWA can open and queue work when the API is down. New-device authentication, invitations, key distribution, and cross-device synchronization require the API. Self-hosters are responsible for database backups, TLS, configured email or Google delivery, and recovery testing.
