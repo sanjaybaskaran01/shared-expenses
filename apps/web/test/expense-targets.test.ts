@@ -12,15 +12,28 @@ const members: LocalMember[] = [
   { id: "3", groupId: "home", userId: "me", displayName: "Me", status: "active" },
   { id: "4", groupId: "home", userId: "sam", displayName: "Sam", status: "invited" },
   { id: "5", groupId: "home", userId: "ana", displayName: "Maya", status: "active" },
+  {
+    id: "6",
+    groupId: "trip",
+    userId: "import:mira",
+    displayName: "Mira",
+    status: "placeholder",
+    importClaim: { identityId: "mira", batchId: "batch", status: "unclaimed" },
+  },
 ];
 
 describe("expense targets", () => {
-  test("offers every group and only active people", () => {
+  test("offers every group and people who can be used before account setup", () => {
     const targets = buildExpenseTargets(groups, members, "me");
-    expect(targets.map((target) => target.key)).toEqual(["group:home", "group:trip", "person:ana"]);
+    expect(targets.map((target) => target.key)).toEqual(["group:home", "group:trip", "person:ana", "person:import:mira"]);
     expect(targets[2]?.participantIds).toEqual(["me", "ana"]);
     expect(targets[2]?.groupId).toBe("home");
     expect(targets[2]?.detail).toBe("Home · 2 shared groups");
+    expect(targets[3]).toEqual(expect.objectContaining({
+      label: "Mira",
+      groupId: "trip",
+      pendingLabel: "Account not linked yet · you can still add expenses",
+    }));
   });
 
   test("puts the current group first without preselecting it", () => {

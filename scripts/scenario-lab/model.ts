@@ -45,7 +45,7 @@ export interface ScenarioServerSnapshot {
 export interface ScenarioClientSnapshot {
   actorId: string;
   connection: string;
-  groups: Array<{ id: string; name: string }>;
+  groups: Array<{ id: string; name: string; settlementCurrency: string }>;
   expenses: Array<{
     id: string;
     groupId: string;

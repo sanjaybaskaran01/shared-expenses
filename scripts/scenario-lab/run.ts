@@ -21,6 +21,7 @@ import {
 import { startScenarioRuntime, type ScenarioRuntime } from "./runtime";
 import {
   IMPORT_CLAIM_SCENARIO,
+  readScenarioMagicLink,
   readScenarioImportClaimEvidence,
   readScenarioServerSnapshot,
 } from "./sandbox";
@@ -453,6 +454,44 @@ async function run(): Promise<void> {
         ],
       });
 
+      await owner.page.getByRole("button", { name: "Groups", exact: true }).last().click();
+      await owner.page.getByRole("button", { name: new RegExp(imported.groupName, "i") }).click();
+      await owner.page.getByRole("button", { name: "Add expense", exact: true }).click();
+      const pendingComposer = owner.page.getByRole("dialog", { name: "Add an expense" });
+      await pendingComposer.getByLabel("Total in USD").fill("24.00");
+      await pendingComposer.getByPlaceholder("What was it for?").fill("Coffee before Dev joins");
+      await pendingComposer.getByRole("button", { name: /Split/ }).click();
+      const pendingSplit = pendingComposer.getByLabel("Choose how to split");
+      const pendingPersonVisible = await pendingSplit.getByText("Dev", { exact: true }).isVisible();
+      const pendingStatusVisible = await pendingSplit.getByText("Account not linked", { exact: true }).isVisible();
+      await pendingSplit.getByRole("button", { name: "Done" }).click();
+      await pendingComposer.getByRole("button", { name: /^Add / }).click();
+      await pendingComposer.waitFor({ state: "hidden" });
+      await forceSync(owner);
+
+      let pendingExpenseId = "";
+      await waitUntil("pre-claim expense to reach the canonical ledger", async () => {
+        const server = readScenarioServerSnapshot(runtime!.databasePath, imported.groupId);
+        pendingExpenseId = server.expenses.find(({ description }) => description === "Coffee before Dev joins")?.id ?? "";
+        return Boolean(pendingExpenseId);
+      });
+      const beforeClaimServer = readScenarioServerSnapshot(runtime!.databasePath, imported.groupId);
+      const pendingExpense = beforeClaimServer.expenses.find(({ id }) => id === pendingExpenseId);
+      const claimantStillIsolated = await bridgeSnapshot(claimant.page);
+      await recordStep(report, importedClaim, outputDirectory, {
+        id: "expense-before-account-link",
+        title: "Expenses work before the other person sets up their account",
+        sessions: [owner],
+        server: beforeClaimServer,
+        note: "The pending person is selectable and clearly labeled. The expense remains private to current group members until the secure account link is approved.",
+        checks: [
+          makeCheck("pending-person-visible", "The split includes the pending person by name", pendingPersonVisible, "Dev"),
+          makeCheck("pending-state-explicit", "The split explains that the account is not linked", pendingStatusVisible, "Account not linked"),
+          makeCheck("pending-expense-accepted", "The canonical ledger accepts an expense involving the pending person", pendingExpense?.allocations.some(({ participantId }) => participantId === imported.placeholderUserId) === true, pendingExpenseId),
+          makeCheck("claimant-still-isolated", "The real account cannot read the group before approval", !claimantStillIsolated.groups.some(({ id }) => id === imported.groupId), `${claimantStillIsolated.groups.length} claimant groups`),
+        ],
+      });
+
       const link = await scenarioApi<{ url: string }>(
         runtime!.apiUrl,
         owner.actor.id,
@@ -481,17 +520,23 @@ async function run(): Promise<void> {
         after = await Promise.all([bridgeSnapshot(owner.page), bridgeSnapshot(claimant.page), bridgeSnapshot(observer.page)]);
         const ownerExpense = after[0]!.expenses.find(({ id }) => id === imported.expenseId);
         const claimantExpense = after[1]!.expenses.find(({ id }) => id === imported.expenseId);
+        const ownerPendingExpense = after[0]!.expenses.find(({ id }) => id === pendingExpenseId);
+        const claimantPendingExpense = after[1]!.expenses.find(({ id }) => id === pendingExpenseId);
         return after[0]!.groups.some(({ id }) => id === imported.groupId)
           && after[1]!.groups.some(({ id }) => id === imported.groupId)
           && !after[2]!.groups.some(({ id }) => id === imported.groupId)
           && ownerExpense?.yourNetMinor === imported.amountMinor
-          && claimantExpense?.yourNetMinor === -imported.amountMinor;
+          && claimantExpense?.yourNetMinor === -imported.amountMinor
+          && ownerPendingExpense?.yourNetMinor === 1_200
+          && claimantPendingExpense?.yourNetMinor === -1_200;
       });
       const server = readScenarioServerSnapshot(runtime!.databasePath, imported.groupId);
       const evidence = readScenarioImportClaimEvidence(runtime!.databasePath);
       const observerSnapshot = await scenarioApi<{ participantAliases?: unknown[] }>(runtime!.apiUrl, observer.actor.id, "/api/v1/snapshot");
       const ownerExpense = after[0]!.expenses.find(({ id }) => id === imported.expenseId);
       const claimantExpense = after[1]!.expenses.find(({ id }) => id === imported.expenseId);
+      const ownerPendingExpense = after[0]!.expenses.find(({ id }) => id === pendingExpenseId);
+      const claimantPendingExpense = after[1]!.expenses.find(({ id }) => id === pendingExpenseId);
       await recordStep(report, importedClaim, outputDirectory, {
         id: "approved-and-converged",
         title: "Both devices agree after verified owner approval",
@@ -505,6 +550,7 @@ async function run(): Promise<void> {
           makeCheck("group-parity", "Owner and claimant now see the same imported group", after.slice(0, 2).every((client) => client.groups.some(({ id }) => id === imported.groupId)), `${after[0]!.groups.length}/${after[1]!.groups.length} groups`),
           makeCheck("history-parity", "Both devices received the same imported expense", ownerExpense?.amountMinor === imported.amountMinor && claimantExpense?.amountMinor === imported.amountMinor, `${ownerExpense?.amountMinor}/${claimantExpense?.amountMinor}`),
           makeCheck("balance-parity", "The imported balance has equal and opposite device projections", ownerExpense?.yourNetMinor === imported.amountMinor && claimantExpense?.yourNetMinor === -imported.amountMinor, `${ownerExpense?.yourNetMinor}/${claimantExpense?.yourNetMinor}`),
+          makeCheck("pre-claim-expense-parity", "The expense added before account setup follows the verified account", ownerPendingExpense?.yourNetMinor === 1_200 && claimantPendingExpense?.yourNetMinor === -1_200, `${ownerPendingExpense?.yourNetMinor}/${claimantPendingExpense?.yourNetMinor}`),
           makeCheck("signed-history-immutable", "Claiming did not rewrite the accepted signed operation", evidence.signedAllocationParticipantId === imported.placeholderUserId && evidence.materializedAllocationParticipantId === claimant.actor.id, JSON.stringify(evidence)),
           makeCheck("observer-isolated-from-alias", "An unrelated group member receives neither the group nor its identity alias", !after[2]!.groups.some(({ id }) => id === imported.groupId) && (observerSnapshot.participantAliases?.length ?? 0) === 0, `${after[2]!.groups.length} groups · ${observerSnapshot.participantAliases?.length ?? 0} aliases`),
         ],
@@ -513,6 +559,101 @@ async function run(): Promise<void> {
 
     const concurrent = findScenario("four-way-create");
     if (concurrent) await runCase(report, concurrent, outputDirectory, async () => {
+      const settingsSession = sessions[0]!;
+      await settingsSession.page.getByRole("button", { name: "Groups" }).last().click();
+      await settingsSession.page.getByRole("button", { name: /Goa trip/ }).click();
+      await settingsSession.page.waitForTimeout(350);
+      const groupHeaderChecks = [
+        makeCheck("group-settings-action", "The group header exposes a labeled settings action", await settingsSession.page.getByRole("button", { name: "Open settings for Goa trip" }).isVisible(), "Open settings for Goa trip"),
+        makeCheck("group-people-action", "The people count opens group management", await settingsSession.page.getByRole("button", { name: /4 people/ }).isVisible(), "4 people"),
+        makeCheck("group-primary-views", "Activity, Balances, and Insights remain visible as group views", (await Promise.all(["Activity", "Balances", "Insights"].map((name) => settingsSession.page.getByRole("tab", { name }).isVisible()))).every(Boolean), "3 visible tabs"),
+      ];
+      await recordStep(report, concurrent, outputDirectory, {
+        id: "group-navigation",
+        title: "Group navigation separates viewing from management",
+        sessions: [settingsSession],
+        note: "Activity stays primary; people and settings are visible in the group header instead of being hidden inside a content tab.",
+        checks: groupHeaderChecks,
+      });
+      await settingsSession.page.getByRole("button", { name: "Open settings for Goa trip" }).click();
+      const groupSettings = settingsSession.page.getByRole("dialog", { name: "Group settings" });
+      await groupSettings.waitFor({ state: "visible" });
+      await settingsSession.page.waitForTimeout(350);
+      const settingsBox = await groupSettings.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom, width: rect.width, viewport: window.innerHeight };
+      });
+      const emailFields = await groupSettings.locator('input[type="email"]').count();
+      const settingsChecks = [
+        makeCheck("group-settings-visible", "Group settings is reachable from the group header", settingsBox.top >= 0 && settingsBox.bottom <= settingsBox.viewport + 1, JSON.stringify(settingsBox)),
+        makeCheck("group-invite-one-field", "Adding someone asks for one email and no name", emailFields === 1 && await groupSettings.getByText("One email is enough.").isVisible(), `${emailFields} email fields`),
+        makeCheck("group-members-visible", "The group member list is visible in the same destination", await groupSettings.getByRole("heading", { name: "People" }).isVisible(), "People section"),
+        makeCheck("group-currency-visible", "Default currency and its change rule are explained in context", await groupSettings.getByRole("heading", { name: "Default currency" }).isVisible(), "Default currency section"),
+      ];
+      await recordStep(report, concurrent, outputDirectory, {
+        id: "group-settings-cuj",
+        title: "Group management is visible and uses one-field invitations",
+        sessions: [settingsSession],
+        note: "The group header opens a bounded settings sheet containing Add someone, People, and Default currency. No expense or invitation is created.",
+        checks: settingsChecks,
+      });
+      await groupSettings.getByRole("button", { name: "Close group settings" }).click();
+
+      await settingsSession.page.getByRole("button", { name: "All groups" }).click();
+      await settingsSession.page.getByRole("button", { name: "Create group", exact: true }).first().click();
+      const newGroup = settingsSession.page.getByRole("dialog", { name: "Create a group" });
+      await newGroup.getByLabel("Group name").fill("Synthetic invite trip");
+      await newGroup.getByRole("button", { name: "Create group", exact: true }).click();
+      await newGroup.waitFor({ state: "hidden" });
+      await settingsSession.page.getByRole("button", { name: "Open settings for Synthetic invite trip" }).click();
+      const newGroupSettings = settingsSession.page.getByRole("dialog", { name: "Group settings" });
+      await newGroupSettings.getByRole("combobox", { name: "Currency" }).selectOption("CAD");
+      await waitUntil("new group currency to persist", async () => {
+        const snapshot = await bridgeSnapshot(settingsSession.page);
+        return snapshot.groups.some(({ name, settlementCurrency }) => name === "Synthetic invite trip" && settlementCurrency === "CAD");
+      });
+      await newGroupSettings.getByLabel("Email address").fill("mira@example.com");
+      await newGroupSettings.getByRole("button", { name: "Send invite" }).click();
+      await waitUntil("one-field group invitation to be queued", async () => (
+        await newGroupSettings.getByLabel("Email address").inputValue()
+      ) === "");
+      await forceSync(settingsSession);
+      const ownerAfterInvite = await bridgeSnapshot(settingsSession.page);
+      const invitedGroup = ownerAfterInvite.groups.find(({ name }) => name === "Synthetic invite trip");
+      if (!invitedGroup) throw new Error("The invited scenario group was not created");
+      const invitedSession = sessions.find(({ actor }) => actor.id === "mira");
+      if (!invitedSession) throw new Error("The invited scenario session is unavailable");
+      let invitationLink: string | undefined;
+      await waitUntil("synthetic invitation email to reach the loopback outbox", async () => {
+        invitationLink = readScenarioMagicLink(runtime!.databasePath, "mira@example.com");
+        return Boolean(invitationLink);
+      });
+      if (!invitationLink) throw new Error("The synthetic group invitation email was not captured");
+      await invitedSession.page.goto(invitationLink, { waitUntil: "domcontentloaded", timeout: 60_000 });
+      await invitedSession.page.waitForURL((url) => url.origin === runtime!.webUrl, { timeout: 60_000 });
+      await invitedSession.page.goto(`${runtime!.webUrl}/?scenarioActor=mira`, { waitUntil: "domcontentloaded", timeout: 60_000 });
+      await invitedSession.page.waitForFunction(() => Boolean((window as ScenarioWindow).__TALLY_SCENARIO__));
+      await Promise.all([forceSync(settingsSession), forceSync(invitedSession)]);
+      let inviteeSnapshot = await bridgeSnapshot(invitedSession.page);
+      await waitUntil("accepted group invitation to sync", async () => {
+        inviteeSnapshot = await bridgeSnapshot(invitedSession.page);
+        return inviteeSnapshot.groups.some(({ id, settlementCurrency }) => id === invitedGroup.id && settlementCurrency === "CAD");
+      });
+      await recordStep(report, concurrent, outputDirectory, {
+        id: "group-invite-and-currency",
+        title: "One email joins an existing account with the chosen currency",
+        sessions: [settingsSession, invitedSession],
+        clients: [await bridgeSnapshot(settingsSession.page), inviteeSnapshot],
+        note: "An empty group changes from USD to CAD. Mira opens the captured loopback-only magic link in her isolated browser; the real session hook then joins her existing account without another verification step.",
+        checks: [
+          makeCheck("group-currency-persisted", "The empty group's currency persists after sync", inviteeSnapshot.groups.some(({ id, settlementCurrency }) => id === invitedGroup.id && settlementCurrency === "CAD"), invitedGroup.id),
+          makeCheck("existing-account-joined", "The accepted invitation adds the existing Tallied account", inviteeSnapshot.groups.some(({ id }) => id === invitedGroup.id), "mira@example.com"),
+          makeCheck("one-field-invite-completed", "The one-email invitation completed without a name field or second verification", await newGroupSettings.locator('input[type="email"]').count() === 1, "1 email field"),
+        ],
+      });
+      await newGroupSettings.getByRole("button", { name: "Close group settings" }).click();
+      await settingsSession.page.getByRole("button", { name: "Home" }).last().click();
+
       const inputs = [
         { description: "Ramen dinner", amount: "55.50" },
         { description: "Train tickets", amount: "74.00" },

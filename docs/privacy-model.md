@@ -11,6 +11,18 @@ Tallied has two data paths:
 
 Authentication and group authorization protect both paths from anonymous and unrelated-account reads. That is different from end-to-end encryption: an operator with database or process access can read v1 projections and operation payloads.
 
+## Pending people and verified account handoff
+
+A person may participate in a group ledger before they have accepted an invitation or linked imported history. Tallied represents that person as a non-readable placeholder:
+
+- Only an active group member can create or amend an expense involving the placeholder.
+- The placeholder cannot authenticate, receive group snapshots, or read balances.
+- A matching display name is never enough to attach the placeholder to an account. Imported email metadata is client-controlled, and membership in another group does not prove that an account owns this imported identity.
+- Email invitations bind to the verified email that accepts the magic link. Imported identities use a single-use claim link and, for untrusted identities, explicit migration-owner approval.
+- On successful handoff, one database transaction moves payer/allocation projections and group membership to the verified account. Accepted signed operations remain immutable, so Tallied also records a group-scoped participant alias that lets authorized clients reproject the old placeholder id onto the verified account.
+
+The handoff fails closed. A forwarded untrusted import claim grants no data before owner approval; a rejected claim leaves the placeholder and its balances private. A failed invitation email removes the unused placeholder. If projection reassignment or alias creation fails, the transaction rolls back instead of leaving membership and balances attached to different identities. Existing accounts claim pending email invitations whenever a new authenticated session is created; new accounts do the same immediately after account creation.
+
 ## v2 design
 
 - Each browser has separate P-256 signing and ECDH agreement key pairs.

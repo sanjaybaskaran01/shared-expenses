@@ -48,11 +48,13 @@ describe("Splitwise migration ledger", () => {
   beforeEach(async () => {
     db = openDatabase(":memory:");
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/001_domain.sql"), "utf8"));
+    db.exec(readFileSync(resolve(import.meta.dir, "../migrations/002_invitations.sql"), "utf8"));
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/004_confidential_sync.sql"), "utf8"));
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/005_imports.sql"), "utf8"));
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/006_import_hardening.sql"), "utf8"));
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/007_import_preparation_binding.sql"), "utf8"));
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/009_import_participant_aliases.sql"), "utf8"));
+    db.exec(readFileSync(resolve(import.meta.dir, "../migrations/010_invitation_participant_aliases.sql"), "utf8"));
     db.exec(`
       CREATE TABLE "user" (
         id TEXT PRIMARY KEY,
@@ -586,6 +588,30 @@ describe("Splitwise migration ledger", () => {
   test("claim links expose no financial context and untrusted identities require owner approval", async () => {
     const body = await request();
     await store.activateImport("user-1", body);
+    const expenseBeforeClaim = await sign(privateKey, {
+      id: "expense-before-claim-operation",
+      groupId: "import-group-1",
+      actorId: "user-1",
+      deviceId: "device-1",
+      type: "ExpenseCreated",
+      targetId: "expense-before-claim",
+      baseVersion: 0,
+      clientTimestamp: "2026-08-05T12:00:00.000Z",
+      payload: {
+        description: "Dinner before account setup",
+        category: "Dining out",
+        amountMinor: 2400,
+        currency: "USD",
+        expenseDate: "2026-08-05",
+        notes: "",
+        payers: [{ participantId: "user-1", amountMinor: 2400 }],
+        allocations: [
+          { participantId: "user-1", amountMinor: 1200 },
+          { participantId: "import:identity-friend", amountMinor: 1200 },
+        ],
+      },
+    });
+    expect((await store.push("user-1", [expenseBeforeClaim])).accepted).toHaveLength(1);
     db.query('INSERT INTO "user"(id, name, email) VALUES (?, ?, ?)').run("user-2", "Mira", "mira@example.com");
     const link = store.createImportClaimLink("user-1", body.id, "identity-friend");
     const preview = store.previewImportClaim(link.token);
@@ -613,6 +639,14 @@ describe("Splitwise migration ledger", () => {
     expect(db.query<{ participant_id: string }, [string]>(
       "SELECT participant_id FROM imported_transaction_effects WHERE amount_minor < 0 AND transaction_id = ?",
     ).get("import-record-1")?.participant_id).toBe("user-2");
+    expect(db.query<{ amount_minor: number }, [string, string]>(
+      "SELECT amount_minor FROM expense_allocations WHERE expense_id = ? AND participant_id = ?",
+    ).get("expense-before-claim", "user-2")?.amount_minor).toBe(1200);
+    expect(db.query<{ count: number }, [string, string]>(
+      `SELECT
+         (SELECT COUNT(*) FROM expense_payers WHERE participant_id = ?) +
+         (SELECT COUNT(*) FROM expense_allocations WHERE participant_id = ?) AS count`,
+    ).get("import:identity-friend", "import:identity-friend")?.count).toBe(0);
     expect((store.snapshot("user-2") as { participantAliases?: unknown }).participantAliases).toEqual([
       { groupId: "import-group-1", fromUserId: "import:identity-friend", toUserId: "user-2" },
     ]);

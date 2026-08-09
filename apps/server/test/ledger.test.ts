@@ -58,9 +58,11 @@ describe("ledger ingestion", () => {
   beforeEach(async () => {
     db = openDatabase(":memory:");
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/001_domain.sql"), "utf8"));
+    db.exec(readFileSync(resolve(import.meta.dir, "../migrations/002_invitations.sql"), "utf8"));
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/004_confidential_sync.sql"), "utf8"));
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/005_imports.sql"), "utf8"));
     db.exec(readFileSync(resolve(import.meta.dir, "../migrations/009_import_participant_aliases.sql"), "utf8"));
+    db.exec(readFileSync(resolve(import.meta.dir, "../migrations/010_invitation_participant_aliases.sql"), "utf8"));
     db.query("INSERT INTO app_meta(key, value) VALUES ('generation', 'test-generation')").run();
     store = new LedgerStore(db);
     store.bootstrapGroup({
@@ -92,6 +94,18 @@ describe("ledger ingestion", () => {
     expect(store.snapshot("user-1").expenses).toEqual([
       expect.objectContaining({ description: "Dinner", amountMinor: 1001, version: 1 }),
     ]);
+  });
+
+  test("accepts an expense involving a member whose account is still pending", async () => {
+    db.query("UPDATE group_members SET status = 'placeholder' WHERE group_id = ? AND user_id = ?")
+      .run("group-1", "user-2");
+
+    const result = await store.push("user-1", [await signedOperation(privateKey)]);
+
+    expect(result.accepted).toHaveLength(1);
+    expect(db.query<{ amountMinor: number }, [string, string]>(
+      "SELECT amount_minor AS amountMinor FROM expense_allocations WHERE expense_id = ? AND participant_id = ?",
+    ).get("expense-1", "user-2")).toEqual({ amountMinor: 500 });
   });
 
   test("identifies every active group member for realtime fan-out", () => {

@@ -173,6 +173,28 @@ export function seedScenarioAuthUsers(databasePath: string, actors: readonly Sce
   }
 }
 
+export function readScenarioMagicLink(databasePath: string, recipient: string): string | undefined {
+  const database = new Database(resolve(databasePath), { readonly: true, strict: true });
+  try {
+    const email = database.query<{ textBody: string }, [string]>(
+      `SELECT text_body AS textBody
+       FROM email_outbox
+       WHERE lower(recipient) = lower(?)
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    ).get(recipient);
+    const match = email?.textBody.match(/https?:\/\/\S+/);
+    if (!match) return undefined;
+    const link = new URL(match[0]);
+    if (link.hostname !== "127.0.0.1" || !link.pathname.includes("/api/auth/magic-link/verify")) {
+      throw new Error("Scenario email contained a non-loopback or unexpected link");
+    }
+    return link.toString();
+  } finally {
+    database.close();
+  }
+}
+
 export function readScenarioImportClaimEvidence(databasePath: string): {
   identityStatus: string;
   claimedByUserId: string | null;

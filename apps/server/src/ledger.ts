@@ -2499,8 +2499,12 @@ export class LedgerStore {
     if (operation.type === "ExpenseCreated" || operation.type === "ExpenseAmended") {
       const payload = parseExpensePayload(operation.payload);
       const importMetadata = parseImportMetadata(jsonObject(operation.payload));
-      this.assertFinancialParticipants(operation.groupId, "payers", payload.payers, Boolean(importMetadata));
-      this.assertFinancialParticipants(operation.groupId, "allocations", payload.allocations, Boolean(importMetadata));
+      // A placeholder is a real group ledger participant whose account has not
+      // been linked yet. Active members may keep recording expenses with that
+      // person; the explicit claim flow later moves those rows to the verified
+      // account without rewriting the signed operation history.
+      this.assertFinancialParticipants(operation.groupId, "payers", payload.payers, true);
+      this.assertFinancialParticipants(operation.groupId, "allocations", payload.allocations, true);
 
       const settlementCurrency = this.db
         .query<{ settlement_currency: string }, [string]>("SELECT settlement_currency FROM groups WHERE id = ?")
@@ -2851,7 +2855,7 @@ export class LedgerStore {
         ? { importClaim: { identityId: importIdentityId, batchId: importBatchId, status: importClaimStatus } }
         : {}),
     }));
-    const participantAliases = this.db.query<{ groupId: string; fromUserId: string; toUserId: string }, [string]>(
+    const importedParticipantAliases = this.db.query<{ groupId: string; fromUserId: string; toUserId: string }, [string]>(
       `SELECT aliases.group_id AS groupId,
               aliases.placeholder_user_id AS fromUserId,
               aliases.claimed_user_id AS toUserId
@@ -2866,6 +2870,23 @@ export class LedgerStore {
        WHERE viewer.user_id = ? AND viewer.status = 'active'
        ORDER BY aliases.group_id, aliases.placeholder_user_id`,
     ).all(actorId);
+    const invitationParticipantAliases = this.db.query<{ groupId: string; fromUserId: string; toUserId: string }, [string]>(
+      `SELECT aliases.group_id AS groupId,
+              aliases.placeholder_user_id AS fromUserId,
+              aliases.claimed_user_id AS toUserId
+       FROM invitation_participant_aliases aliases
+       JOIN group_invitations invitation
+         ON invitation.id = aliases.invitation_id AND invitation.status = 'accepted'
+       JOIN group_members viewer ON viewer.group_id = aliases.group_id
+       JOIN group_members claimed_member
+         ON claimed_member.group_id = viewer.group_id
+        AND claimed_member.user_id = aliases.claimed_user_id
+        AND claimed_member.status = 'active'
+       WHERE viewer.user_id = ? AND viewer.status = 'active'
+       ORDER BY aliases.group_id, aliases.placeholder_user_id`,
+    ).all(actorId);
+    const participantAliases = [...importedParticipantAliases, ...invitationParticipantAliases]
+      .sort((left, right) => left.groupId.localeCompare(right.groupId) || left.fromUserId.localeCompare(right.fromUserId));
     return { groups, expenses, members, participantAliases };
   }
 }

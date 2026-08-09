@@ -89,7 +89,7 @@ export function ExpenseTargetPicker(props: ExpenseTargetPickerProps) {
               <p class="target-section-label mt-3">People</p>
               <For each={people()}>{(target) => <button class="target-row" type="button" data-testid={`expense-target-${target.key}`} onClick={() => choose(target)}>
                 <Avatar name={target.label} class="size-9 text-xs" />
-                <span class="min-w-0 flex-1"><strong>{target.label}</strong><small>Shared in {target.detail}</small></span>
+                <span class="min-w-0 flex-1"><strong>{target.label}</strong><small>Shared in {target.detail}</small><Show when={target.pendingLabel}><small class="target-pending-label">{target.pendingLabel}</small></Show></span>
                 <ChevronRight size={16} class="text-muted-foreground" />
               </button>}</For>
             </Show>

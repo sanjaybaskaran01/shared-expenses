@@ -10,8 +10,9 @@ import Plus from "lucide-solid/icons/plus";
 import ReceiptText from "lucide-solid/icons/receipt-text";
 import RefreshCw from "lucide-solid/icons/refresh-cw";
 import Scale from "lucide-solid/icons/scale";
+import Settings2 from "lucide-solid/icons/settings-2";
+import ShieldCheck from "lucide-solid/icons/shield-check";
 import UsersRound from "lucide-solid/icons/users-round";
-import UserPlus from "lucide-solid/icons/user-plus";
 import X from "lucide-solid/icons/x";
 import {
   For,
@@ -40,7 +41,7 @@ import { ExpenseDetail } from "./components/ExpenseDetail";
 import { ExpenseTargetPicker } from "./components/ExpenseTargetPicker";
 import { FeedbackButton } from "./components/FeedbackDialog";
 import { GroupComposer } from "./components/GroupComposer";
-import { ImportedMemberClaim } from "./components/ImportedMemberClaim";
+import { GroupSettingsDialog } from "./components/GroupSettingsDialog";
 import { PaymentComposer } from "./components/PaymentComposer";
 import { NotificationSettings } from "./components/NotificationSettings";
 import { RelationshipDetail } from "./components/RelationshipDetail";
@@ -64,6 +65,7 @@ import {
 } from "./lib/auth";
 import { clearInviteToken, inviteTokenFromHash } from "./lib/contact-invites";
 import { money } from "./lib/format-money";
+import { groupConnectionCallout, memberBalanceContextPrefix, memberConnectionActionLabel } from "./lib/group-settings";
 import { isVisibleGroupMember, memberName } from "./lib/member-label";
 import { accountSyncCopy } from "./lib/connection-status";
 import { groupTimelineItems, type GroupTimelineItem } from "./lib/activity-view";
@@ -87,7 +89,7 @@ import {
   activePayments,
   type Settlement,
 } from "./lib/ledger-view";
-import { appStore, changeGroupCurrency, initializeStore } from "./lib/store";
+import { appStore, initializeStore } from "./lib/store";
 import { applyTheme, type Theme } from "./lib/theme";
 
 const MigrationDialog = lazy(() =>
@@ -170,7 +172,6 @@ function ExpenseList(props: {
   groupId: string;
   actorId: string;
   onOpen(expense: LocalExpense): void;
-  onAdd?(): void;
 }) {
   const timeline = createMemo(() => groupTimelineItems(appStore.expenses(), appStore.operations(), props.groupId));
   const activeCount = createMemo(
@@ -201,11 +202,6 @@ function ExpenseList(props: {
     <Card class="expense-ledger">
       <div class="expense-list-toolbar">
         <span>{activeCount()} {activeCount() === 1 ? "expense" : "expenses"}{paymentCount() ? ` · ${paymentCount()} ${paymentCount() === 1 ? "payment" : "payments"}` : ""}</span>
-        <Show when={props.onAdd}>
-          <button class="list-add-action" type="button" onClick={() => props.onAdd?.()}>
-            <Plus size={14} /> Add expense
-          </button>
-        </Show>
       </div>
       <Show
         when={timeline().length}
@@ -344,7 +340,6 @@ function GroupsView(props: {
   actorId: string;
   activeGroupId?: string | undefined;
   onShowOverview(): void;
-  onAddExpense(groupId?: string): void;
   onOpenExpense(expense: LocalExpense): void;
   onCreateGroup(): void;
   onSettle(settlement: Settlement | undefined, currency: string): void;
@@ -365,36 +360,10 @@ function GroupsView(props: {
     "category",
   );
   const [groupSection, setGroupSection] = createSignal<"expenses" | "balances" | "insights">("expenses");
-  const [changingCurrency, setChangingCurrency] = createSignal(false);
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
   createEffect(() => {
     setCurrency(group()?.settlementCurrency ?? "USD");
   });
-  const hasLedgerEntries = createMemo(() => {
-    const groupId = group()?.id;
-    if (!groupId) return false;
-    return appStore.expenses().some((expense) => expense.groupId === groupId) ||
-      appStore.operations().some((operation) =>
-        operation.groupId === groupId &&
-        operation.type === "PaymentRecorded" &&
-        operation.syncStatus !== "rejected" &&
-        operation.syncStatus !== "conflicted",
-      );
-  });
-  async function updateCurrency(value: string): Promise<void> {
-    const activeGroup = group();
-    if (!activeGroup || value === activeGroup.settlementCurrency) return;
-    setChangingCurrency(true);
-    try {
-      await changeGroupCurrency(activeGroup.id, value);
-      setCurrency(value);
-      props.onToast(`Group currency changed to ${value}`);
-    } catch (error) {
-      setCurrency(activeGroup.settlementCurrency);
-      props.onToast(error instanceof Error ? error.message : "Could not change currency");
-    } finally {
-      setChangingCurrency(false);
-    }
-  }
   const balances = createMemo(() =>
     group()
       ? computeBalances(
@@ -427,6 +396,7 @@ function GroupsView(props: {
       ),
   );
   const claimablePeople = createMemo(() => people().filter((member) => member.importClaim));
+  const connectionCallout = createMemo(() => groupConnectionCallout(claimablePeople()));
   const insights = createMemo(() => buildGroupInsights(activeExpenses(), currency(), props.actorId));
   const reconciliation = createMemo(() => buildGroupReconciliation(
     activeExpenses(),
@@ -454,19 +424,18 @@ function GroupsView(props: {
           </button>
           <div class="group-title-line">
             <h1 class="page-title">{group()?.name ?? "Groups"}</h1>
-            <Show when={group() && hasLedgerEntries()}>
-              <span class="group-currency-badge" aria-label={`Group currency ${group()?.settlementCurrency}, locked after the first entry`} title="Group currency is locked after the first entry">{group()?.settlementCurrency}</span>
-            </Show>
+            <div class="group-title-actions">
+              <Show when={group()}><button class="group-settings-action" type="button" aria-label={`Open settings for ${group()?.name}`} onClick={() => setSettingsOpen(true)}><Settings2 size={18} aria-hidden="true" /></button></Show>
+            </div>
           </div>
           <Show when={group()} fallback={<p class="mt-1 text-sm text-muted-foreground">No groups yet</p>}>
-            <p class="mt-1 text-sm text-muted-foreground">
-              {people().length + 1} {people().length === 0 ? "person" : "people"} · {activeExpenses().length} {activeExpenses().length === 1 ? "expense" : "expenses"}{payments().length ? ` · ${payments().length} ${payments().length === 1 ? "payment" : "payments"}` : ""}
-            </p>
+            <div class="group-meta-line">
+              <button type="button" onClick={() => setSettingsOpen(true)}><UsersRound size={14} aria-hidden="true" /> {people().length + 1} {people().length === 0 ? "person" : "people"} <ChevronRight size={13} aria-hidden="true" /></button>
+              <span aria-hidden="true">·</span>
+              <span>{activeExpenses().length} {activeExpenses().length === 1 ? "expense" : "expenses"}{payments().length ? ` · ${payments().length} ${payments().length === 1 ? "payment" : "payments"}` : ""}</span>
+            </div>
           </Show>
         </div>
-        <Show when={group() && !hasLedgerEntries()}>
-          <label class="group-currency-setting"><span>Group currency</span><select value={group()?.settlementCurrency} disabled={changingCurrency()} onChange={(event) => void updateCurrency(event.currentTarget.value)} aria-describedby="group-currency-note"><option value="USD">USD</option><option value="CAD">CAD</option><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="INR">INR</option></select><small id="group-currency-note">Editable until the first entry</small></label>
-        </Show>
       </header>
       <Show
         when={group()}
@@ -488,9 +457,13 @@ function GroupsView(props: {
       >
         {(activeGroup) => (
           <>
-            <For each={claimablePeople()}>{(member) => (
-              <ImportedMemberClaim member={member} onNotify={props.onToast} />
-            )}</For>
+            <Show when={connectionCallout()}>{(callout) => (
+              <button class="group-connection-callout" type="button" onClick={() => setSettingsOpen(true)}>
+                <span class="group-connection-icon"><ShieldCheck size={17} aria-hidden="true" /></span>
+                <span><strong>{callout().title}</strong><small>{callout().detail}</small></span>
+                <ChevronRight size={16} />
+              </button>
+            )}</Show>
             <AccessibleTabs
               class="group-view-tabs"
               items={[
@@ -510,7 +483,6 @@ function GroupsView(props: {
                   groupId={activeGroup.id}
                   actorId={props.actorId}
                   onOpen={props.onOpenExpense}
-                  onAdd={() => props.onAddExpense(activeGroup.id)}
                 />
               </div>
             </Show>
@@ -535,9 +507,9 @@ function GroupsView(props: {
                       return (
                         <article class="person-balance-block" classList={{ "tone-mint": balance() < 0, "tone-coral": balance() > 0, "tone-butter": balance() === 0 }}>
                           <Avatar name={member.displayName} class="person-avatar" />
-                          <div class="min-w-0 flex-1"><strong class="block truncate">{member.displayName}</strong><span class="micro-label block truncate">{member.status === "placeholder" ? "Not claimed · " : ""}{related() || activeGroup.name}</span></div>
+                          <div class="min-w-0 flex-1"><strong class="block truncate">{member.displayName}</strong><span class="micro-label block truncate">{memberBalanceContextPrefix(member)}{related() || activeGroup.name}</span></div>
                           <div class="shrink-0 text-right"><strong class="money-type block" classList={{ "money-in": balance() < 0, "money-out": balance() > 0 }}>{balance() === 0 ? money(0, currency()) : `${balance() < 0 ? "+" : "−"}${money(Math.abs(balance()), currency())}`}</strong><span class="micro-label" classList={{ "money-in": balance() < 0, "money-out": balance() > 0 }}>{balance() < 0 ? "owes you" : balance() > 0 ? "you owe" : "settled"}</span></div>
-                          <Show when={member.status !== "placeholder"} fallback={<span class="member-link-status">Not connected</span>}>
+                          <Show when={member.status !== "placeholder"} fallback={<button class="member-link-status" type="button" onClick={() => setSettingsOpen(true)}>{memberConnectionActionLabel(member)}</button>}>
                             <button class="ink-action" type="button" disabled={!settlement() || settlementBlockers() > 0} onClick={() => props.onSettle(settlement(), currency())}>{balance() > 0 ? "Pay" : "Settle"}</button>
                           </Show>
                         </article>
@@ -600,6 +572,14 @@ function GroupsView(props: {
                 </div>
               </Card>
             </Show>
+
+            <GroupSettingsDialog
+              open={settingsOpen()}
+              groupId={activeGroup.id}
+              actorId={props.actorId}
+              onOpenChange={setSettingsOpen}
+              onNotify={props.onToast}
+            />
           </>
         )}
       </Show>
@@ -1020,7 +1000,6 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
                     actorId={props.actorId}
                     activeGroupId={selectedGroupId()}
                     onShowOverview={showGroupsOverview}
-                    onAddExpense={addExpense}
                     onOpenExpense={openDetail}
                     onCreateGroup={() => openGroupComposer("groups")}
                     onSettle={settle}

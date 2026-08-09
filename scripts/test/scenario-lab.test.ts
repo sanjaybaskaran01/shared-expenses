@@ -47,7 +47,7 @@ function convergedClient(actorId: string): ScenarioClientSnapshot {
   return {
     actorId,
     connection: "online",
-    groups: [{ id: "goa-trip", name: "Goa trip" }],
+    groups: [{ id: "goa-trip", name: "Goa trip", settlementCurrency: "USD" }],
     expenses: [{
       id: "dinner",
       groupId: "goa-trip",

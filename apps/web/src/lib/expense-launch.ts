@@ -1,5 +1,6 @@
 import type { LocalGroup, LocalMember } from "./db";
 import type { ExpenseTarget } from "./expense-targets";
+import { isVisibleGroupMember } from "./member-label";
 
 export type GroupComposerOrigin = "groups" | "expense";
 
@@ -24,7 +25,7 @@ function groupTarget(
 ): ExpenseTarget | undefined {
   const group = groups.find((item) => item.id === groupId);
   if (!group) return undefined;
-  const count = members.filter((member) => member.groupId === groupId && member.status === "active").length;
+  const count = members.filter((member) => member.groupId === groupId && isVisibleGroupMember(member.status)).length;
   return {
     key: `group:${group.id}`,
     kind: "group",

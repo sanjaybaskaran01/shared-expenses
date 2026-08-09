@@ -6,6 +6,7 @@ import type { AppConfig } from "./config";
 import type { ContactInviteStore } from "./contact-invites";
 import { enqueueEmail } from "./email";
 import { keyedDigest } from "./security-keys";
+import { reassignFinancialParticipant } from "./participant-aliases";
 
 function emailKey(kind: string, recipient: string, token: string): string {
   return createHash("sha256").update(`${kind}:${recipient}:${token}`).digest("hex");
@@ -54,7 +55,7 @@ export function canCreateTalliedAccount(
   );
 }
 
-function claimPendingInvitations(
+export function claimPendingInvitations(
   db: Database,
   contactInvites: ContactInviteStore,
   userId: string,
@@ -63,16 +64,38 @@ function claimPendingInvitations(
   const normalized = email.trim().toLowerCase();
   const now = new Date().toISOString();
   db.transaction(() => {
-    const placeholders = db.query<{ group_id: string; display_name: string }, [string]>(
-      "SELECT group_id, display_name FROM group_members WHERE lower(email) = ? AND status = 'placeholder'",
+    const placeholders = db.query<{
+      groupId: string;
+      userId: string;
+      displayName: string;
+      invitationId: string | null;
+    }, [string]>(
+      `SELECT gm.group_id AS groupId, gm.user_id AS userId, gm.display_name AS displayName,
+              gi.id AS invitationId
+       FROM group_members gm
+       LEFT JOIN group_invitations gi
+         ON gi.group_id = gm.group_id AND lower(gi.email) = lower(gm.email) AND gi.status = 'pending'
+       WHERE lower(gm.email) = ? AND gm.status = 'placeholder'`,
     ).all(normalized);
     for (const placeholder of placeholders) {
-      db.query("DELETE FROM group_members WHERE group_id = ? AND lower(email) = ? AND status = 'placeholder'")
-        .run(placeholder.group_id, normalized);
+      reassignFinancialParticipant(db, placeholder.userId, userId);
+      if (placeholder.invitationId) {
+        db.query(
+          `INSERT INTO invitation_participant_aliases(
+             group_id, placeholder_user_id, claimed_user_id, invitation_id, created_at
+           ) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(group_id, placeholder_user_id) DO UPDATE SET
+             claimed_user_id = excluded.claimed_user_id,
+             invitation_id = excluded.invitation_id,
+             created_at = excluded.created_at`,
+        ).run(placeholder.groupId, placeholder.userId, userId, placeholder.invitationId, now);
+      }
+      db.query("DELETE FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'placeholder'")
+        .run(placeholder.groupId, placeholder.userId);
       db.query(
         `INSERT OR IGNORE INTO group_members(group_id, user_id, display_name, email, status, joined_at)
          VALUES (?, ?, ?, ?, 'active', ?)`,
-      ).run(placeholder.group_id, userId, placeholder.display_name, normalized, now);
+      ).run(placeholder.groupId, userId, placeholder.displayName, normalized, now);
     }
     db.query(
       "UPDATE group_invitations SET status = 'accepted', accepted_at = ? WHERE lower(email) = ? AND status = 'pending'",

@@ -30,7 +30,7 @@ export function ImportedMemberClaim(props: ImportedMemberClaimProps) {
     try {
       const link = await createImportClaimLink(current.batchId, current.identityId);
       const share = {
-        title: `Connect ${props.member.displayName} on Tallied`,
+        title: `Link ${props.member.displayName}’s imported history on Tallied`,
         text: `Open this secure Tallied link to connect your imported Splitwise history.`,
         url: link.url,
       };
@@ -74,7 +74,7 @@ export function ImportedMemberClaim(props: ImportedMemberClaimProps) {
       else await rejectImportIdentityClaim(current.identityId);
       setReview(undefined);
       await appStore.sync();
-      props.onNotify(approved ? `${props.member.displayName} is now connected` : "Claim rejected; the imported history remains private");
+      props.onNotify(approved ? `${props.member.displayName}’s imported history is now linked` : "Request rejected; the imported history remains private");
     } catch (error) {
       props.onNotify(error instanceof Error ? error.message : "Could not resolve the claim");
     } finally {
@@ -86,9 +86,11 @@ export function ImportedMemberClaim(props: ImportedMemberClaimProps) {
     <section class="import-member-claim" aria-labelledby={`claim-${props.member.userId}`}>
       <span class="import-member-claim-icon"><ShieldCheck size={18} /></span>
       <div class="min-w-0 flex-1">
-        <strong id={`claim-${props.member.userId}`}>Connect {props.member.displayName}</strong>
+        <strong id={`claim-${props.member.userId}`}>
+          {claim()?.status === "awaiting_owner" ? `Review ${props.member.displayName}’s account link` : `Link ${props.member.displayName}’s imported history`}
+        </strong>
         <p>
-          <Show when={claim()?.status === "awaiting_owner"} fallback="Their imported history is safe, but it is not linked to their Tallied account yet.">
+          <Show when={claim()?.status === "awaiting_owner"} fallback="Their imported expenses are safe. You can keep adding expenses now; send this link to the Tallied account they already use.">
             A signed-in account asked to claim this imported history. Confirm it is the right person.
           </Show>
         </p>
@@ -102,7 +104,7 @@ export function ImportedMemberClaim(props: ImportedMemberClaimProps) {
       </div>
       <Show when={!review()}>
         <button class="import-claim-action" type="button" disabled={busy()} onClick={() => void (claim()?.status === "awaiting_owner" ? loadReview() : sendLink())}>
-          <Show when={busy()} fallback={<><Link2 size={15} /> {claim()?.status === "awaiting_owner" ? "Review" : "Send link"}</>}>
+          <Show when={busy()} fallback={<><Link2 size={15} /> {claim()?.status === "awaiting_owner" ? "Review request" : "Send secure link"}</>}>
             <LoaderCircle class="animate-spin" size={15} />
           </Show>
         </button>

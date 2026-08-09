@@ -17,6 +17,8 @@ import { validateExpenseForm, type ExpenseFormIssue } from "../lib/expense-form"
 import { EXPENSE_CATEGORIES, suggestExpenseCategory } from "../lib/expense-categories";
 import { parseExpenseLanguage, type ExpenseLanguageChip, type ExpenseLanguageIssue, type ParsedExpenseLanguage } from "../lib/expense-language";
 import { describeExpenseOutcome } from "../lib/group-insights";
+import { pendingExpenseMemberLabel } from "../lib/group-settings";
+import { isVisibleGroupMember } from "../lib/member-label";
 import { appStore, calculateExpenseAllocations, calculateExpensePayers, createExpense, updateExpense, type SplitMethod } from "../lib/store";
 import { CategoryMark } from "./CategoryMark";
 import { Avatar, Button } from "./ui";
@@ -109,7 +111,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   let categorySelectRef: HTMLSelectElement | undefined;
 
   const currentGroup = createMemo(() => appStore.groups().find((group) => group.id === groupId()));
-  const groupMembers = createMemo(() => appStore.members().filter((member) => member.groupId === groupId() && member.status === "active"));
+  const groupMembers = createMemo(() => appStore.members().filter((member) => member.groupId === groupId() && isVisibleGroupMember(member.status)));
   const languageDraft = createMemo(() => {
     const text = languageText().trim();
     if (!text) return undefined;
@@ -194,7 +196,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       } else {
         setSplitMethod("equal");
         setSplitValues({});
-        const memberIds = appStore.members().filter((member) => member.groupId === nextGroupId && member.status === "active").map((member) => member.userId);
+        const memberIds = appStore.members().filter((member) => member.groupId === nextGroupId && isVisibleGroupMember(member.status)).map((member) => member.userId);
         const requested = props.initialParticipantIds?.filter((id) => memberIds.includes(id));
         setParticipants(requested?.length ? requested : memberIds);
         setPayerIds([memberIds.includes(props.actorId) ? props.actorId : memberIds[0] ?? props.actorId]);
@@ -766,9 +768,9 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                 <section id="payer-panel" class="composer-option-panel disclosure-panel split-panel grid gap-3 border border-border p-4" aria-label="Choose who paid">
                   <div class="disclosure-heading"><div><p>Who paid?</p><small>Choose one person, or use multiple payers.</small></div><button type="button" onClick={closePanel}>Done</button></div>
                   <div class="flex items-center justify-end"><Show when={groupMembers().length > 1}><button type="button" class="flex min-h-11 items-center gap-1.5 px-2 text-xs font-semibold text-primary" onClick={enableMultiplePayers}><UsersRound size={14} />{payerIds().length > 1 ? "Use one payer" : "Multiple payers"}</button></Show></div>
-                  <Show when={payerIds().length > 1} fallback={<div class="payer-avatar-rail"><For each={groupMembers()}>{(member) => <button type="button" class="payer-avatar-choice" classList={{ active: payerIds()[0] === member.userId }} aria-pressed={payerIds()[0] === member.userId} onClick={() => { setPayerIds([member.userId]); setPayerValues({}); closePanel(); }}><Avatar name={member.displayName} class="size-9 text-xs" /><span>{member.userId === props.actorId ? "You" : member.displayName}</span></button>}</For></div>}>
+                  <Show when={payerIds().length > 1} fallback={<div class="payer-avatar-rail"><For each={groupMembers()}>{(member) => <button type="button" class="payer-avatar-choice" classList={{ active: payerIds()[0] === member.userId }} aria-pressed={payerIds()[0] === member.userId} onClick={() => { setPayerIds([member.userId]); setPayerValues({}); closePanel(); }}><Avatar name={member.displayName} class="size-9 text-xs" /><span>{member.userId === props.actorId ? "You" : member.displayName}</span><Show when={pendingExpenseMemberLabel(member)}>{(label) => <small class="expense-member-state">{label()}</small>}</Show></button>}</For></div>}>
                     <div class="divide-y divide-border rounded-xl border border-border bg-background/55">
-                      <For each={groupMembers()}>{(member) => <div class="flex min-h-14 items-center gap-2 px-2"><button type="button" role="checkbox" class="participant-toggle grid size-11 place-items-center rounded-md border border-border" classList={{ "border-primary bg-primary text-primary-foreground": payerIds().includes(member.userId) }} onClick={() => togglePayer(member.userId)} aria-label={`${member.displayName} paid`} aria-checked={payerIds().includes(member.userId)}><Show when={payerIds().includes(member.userId)}><Check size={14} /></Show></button><Avatar name={member.displayName} class="size-7 text-xs" /><span class="min-w-0 flex-1 truncate text-sm font-medium">{member.userId === props.actorId ? "You" : member.displayName}</span><div class="relative w-24"><input class="form-control h-11 text-right text-sm tabular-nums" disabled={!payerIds().includes(member.userId)} inputmode="decimal" value={payerValues()[member.userId] ?? ""} onInput={(event) => setPayerValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={`Amount paid by ${member.displayName}`} /></div></div>}</For>
+                      <For each={groupMembers()}>{(member) => <div class="flex min-h-14 items-center gap-2 px-2"><button type="button" role="checkbox" class="participant-toggle grid size-11 place-items-center rounded-md border border-border" classList={{ "border-primary bg-primary text-primary-foreground": payerIds().includes(member.userId) }} onClick={() => togglePayer(member.userId)} aria-label={`${member.displayName} paid`} aria-checked={payerIds().includes(member.userId)}><Show when={payerIds().includes(member.userId)}><Check size={14} /></Show></button><Avatar name={member.displayName} class="size-7 text-xs" /><span class="expense-member-copy min-w-0 flex-1"><strong>{member.userId === props.actorId ? "You" : member.displayName}</strong><Show when={pendingExpenseMemberLabel(member)}>{(label) => <small>{label()}</small>}</Show></span><div class="relative w-24"><input class="form-control h-11 text-right text-sm tabular-nums" disabled={!payerIds().includes(member.userId)} inputmode="decimal" value={payerValues()[member.userId] ?? ""} onInput={(event) => setPayerValues((values) => ({ ...values, [member.userId]: event.currentTarget.value }))} aria-label={`Amount paid by ${member.displayName}`} /></div></div>}</For>
                     </div>
                   </Show>
                 </section>
@@ -791,7 +793,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                         <div class="split-person-row flex min-h-14 items-center gap-3 px-3" classList={{ active: activeSplitParticipantId() === member.userId }} onClick={() => selected() && (splitMethod() === "exact" || splitMethod() === "percentage") && setActiveSplitParticipantId(member.userId)}>
                           <button type="button" role="checkbox" class="participant-toggle grid size-11 shrink-0 place-items-center rounded-md border border-border transition-colors" classList={{ "border-primary bg-primary text-primary-foreground": selected() }} disabled={selected() && participants().length === 1} onClick={() => toggleParticipant(member.userId)} aria-label={`Include ${member.displayName}`} aria-checked={selected()}><Show when={selected()}><Check size={14} /></Show></button>
                           <Avatar name={member.displayName} class="size-7 text-xs" />
-                          <span class="min-w-0 flex-1 truncate text-sm font-medium">{member.userId === props.actorId ? "You" : member.displayName}</span>
+                          <span class="expense-member-copy min-w-0 flex-1"><strong>{member.userId === props.actorId ? "You" : member.displayName}</strong><Show when={pendingExpenseMemberLabel(member)}>{(label) => <small>{label()}</small>}</Show></span>
                           <Show when={splitMethod() === "equal"} fallback={<Show when={splitMethod() === "shares"} fallback={
                             <div class="relative w-24">
                               <Show when={splitMethod() === "exact" || splitMethod() === "adjustment"}><span class="absolute left-2.5 top-2 text-xs text-muted-foreground">{splitMethod() === "adjustment" ? "±" : currency()}</span></Show>

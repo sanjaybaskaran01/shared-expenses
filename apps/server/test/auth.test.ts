@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { canCreateTalliedAccount, createAuth, deriveDisplayNameFromEmail } from "../src/auth";
+import { resolve } from "node:path";
+import { canCreateTalliedAccount, claimPendingInvitations, createAuth, deriveDisplayNameFromEmail } from "../src/auth";
 import {
   resolveGoogleAuthConfig,
   resolvePublicRateKey,
@@ -9,6 +10,8 @@ import {
   type AppConfig,
 } from "../src/config";
 import { ContactInviteStore } from "../src/contact-invites";
+import { runDomainMigrations } from "../src/database";
+import { LedgerStore } from "../src/ledger";
 import { keyedDigest } from "../src/security-keys";
 
 function testConfig(googleAuth?: AppConfig["googleAuth"]): AppConfig {
@@ -44,6 +47,66 @@ describe("invitation display names", () => {
 
   test("uses a safe fallback", () => {
     expect(deriveDisplayNameFromEmail("@example.com")).toBe("Friend");
+  });
+});
+
+describe("group invitation account handoff", () => {
+  test("moves pre-acceptance expenses to an existing verified account and keeps signed history immutable", () => {
+    const database = new Database(":memory:", { strict: true });
+    database.exec("PRAGMA foreign_keys = ON;");
+    runDomainMigrations(database, resolve(import.meta.dir, "../migrations"));
+    const now = "2026-08-09T12:00:00.000Z";
+    const placeholderId = "invite:synthetic-invitation";
+    database.exec(`
+      INSERT INTO groups(id, name, settlement_currency, created_by, created_at)
+      VALUES ('group-1', 'Synthetic trip', 'USD', 'owner', '${now}');
+      INSERT INTO group_members(group_id, user_id, display_name, email, status, joined_at) VALUES
+        ('group-1', 'owner', 'Owner Example', 'owner@example.com', 'active', '${now}'),
+        ('group-1', '${placeholderId}', 'Friend Example', 'friend@example.com', 'placeholder', '${now}');
+      INSERT INTO group_invitations(id, group_id, email, display_name, invited_by, status, created_at)
+      VALUES ('synthetic-invitation', 'group-1', 'friend@example.com', 'Friend Example', 'owner', 'pending', '${now}');
+      INSERT INTO expenses(
+        id, group_id, description, category, amount_minor, currency, expense_date,
+        notes, status, version, created_by, created_at, updated_at
+      ) VALUES (
+        'expense-1', 'group-1', 'Coffee', 'Dining out', 2400, 'USD', '2026-08-09',
+        '', 'active', 1, 'owner', '${now}', '${now}'
+      );
+      INSERT INTO expense_payers(expense_id, participant_id, amount_minor)
+      VALUES ('expense-1', 'owner', 2400);
+      INSERT INTO expense_allocations(expense_id, participant_id, amount_minor) VALUES
+        ('expense-1', 'owner', 1200),
+        ('expense-1', '${placeholderId}', 1200);
+      INSERT INTO operations(
+        id, group_id, actor_id, device_id, type, target_id, base_version,
+        client_timestamp, payload_json, content_hash, signature, received_at, status
+      ) VALUES (
+        'operation-1', 'group-1', 'owner', 'device-1', 'ExpenseCreated', 'expense-1', 0,
+        '${now}', '{"allocations":[{"participantId":"${placeholderId}","amountMinor":1200}]}',
+        '${"a".repeat(64)}', 'synthetic-signature', '${now}', 'accepted'
+      );
+    `);
+    const config = testConfig();
+    const contactInvites = new ContactInviteStore(database, { emailHashSecret: config.authSecret });
+
+    claimPendingInvitations(database, contactInvites, "verified-friend", "friend@example.com");
+
+    expect(database.query<{ status: string }, [string, string]>(
+      "SELECT status FROM group_members WHERE group_id = ? AND user_id = ?",
+    ).get("group-1", "verified-friend")).toEqual({ status: "active" });
+    expect(database.query<{ amount: number }, [string, string]>(
+      "SELECT amount_minor AS amount FROM expense_allocations WHERE expense_id = ? AND participant_id = ?",
+    ).get("expense-1", "verified-friend")).toEqual({ amount: 1200 });
+    expect(database.query<{ payload: string }, [string]>(
+      "SELECT payload_json AS payload FROM operations WHERE id = ?",
+    ).get("operation-1")?.payload).toContain(placeholderId);
+    expect(new LedgerStore(database).snapshot("verified-friend").participantAliases).toEqual([
+      { groupId: "group-1", fromUserId: placeholderId, toUserId: "verified-friend" },
+    ]);
+    expect(database.query<{ status: string }, [string]>(
+      "SELECT status FROM group_invitations WHERE id = ?",
+    ).get("synthetic-invitation")).toEqual({ status: "accepted" });
+    database.close();
   });
 });
 

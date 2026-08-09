@@ -67,7 +67,7 @@ Failed runs exit nonzero and preserve their evidence. Successful and failed arti
 - The API and web app bind only to `127.0.0.1` on dynamically allocated ports.
 - Scenario identities are accepted only by the existing development-auth bypass. Production configuration rejects that bypass.
 - The browser scenario bridge is loaded only when Vite is in development mode and a validated `scenarioActor` query is present.
-- SMTP and Google credentials are explicitly blanked for the sandbox. No email, invite, OAuth, Cloudflare, deployment, or production API is used.
+- Google credentials are explicitly blanked. Synthetic SMTP points only to a closed loopback port; invitation messages remain in the disposable outbox so the lab can open their real single-use magic links without sending external email. No OAuth, Cloudflare, deployment, or production API is used.
 - The current API source is bundled into the disposable run directory, alongside copied migrations, before execution.
 
 ## Adding a scenario
