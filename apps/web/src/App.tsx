@@ -76,6 +76,7 @@ import {
   decideGroupCreationDestination,
   dialogHandoffDelay,
   groupComposerOriginAfterOpenChange,
+  mobileExpenseActionVariant,
   type GroupComposerOrigin,
 } from "./lib/expense-launch";
 import { mostRecentExpenseGroupId, type ExpenseTarget } from "./lib/expense-targets";
@@ -791,6 +792,7 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
       appStore.groups().find((group) => group.id === selectedGroupId()) ??
       appStore.groups()[0],
   );
+  const mobileActionVariant = createMemo(() => mobileExpenseActionVariant(tab(), groupsMode()));
   const tabs = [
     { id: "overview" as const, label: "Home", icon: House },
     { id: "groups" as const, label: "Groups", icon: UsersRound },
@@ -1024,7 +1026,19 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
           </Switch>
         </main>
       </div>
-      <div class="mobile-bottom-dock md:hidden">
+      <div class="mobile-bottom-chrome md:hidden">
+        <button
+          class="mobile-primary-action"
+          classList={{ compact: mobileActionVariant() === "compact" }}
+          type="button"
+          aria-label={mobileActionVariant() === "compact" && activeGroup()
+            ? `Add expense to ${activeGroup()!.name}`
+            : "Add expense"}
+          onClick={addFromCurrentContext}
+        >
+          <ReceiptText size={18} stroke-width={2.15} aria-hidden="true" />
+          <Show when={mobileActionVariant() === "expanded"}><span>Add expense</span></Show>
+        </button>
         <nav
           class="mobile-tabbar glass-nav"
           aria-label="Primary navigation"
@@ -1043,14 +1057,6 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
             )}
           </For>
         </nav>
-        <button
-          class="mobile-primary-action"
-          type="button"
-          onClick={addFromCurrentContext}
-        >
-          <Plus size={18} stroke-width={2.25} />
-          <span>Add expense</span>
-        </button>
       </div>
       <Show when={toast()}>
         <div class="toast-enter toast-pill" role="status" aria-live="polite" aria-atomic="true">

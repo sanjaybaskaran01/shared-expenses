@@ -3,6 +3,7 @@ import type { ExpenseTarget } from "./expense-targets";
 import { isVisibleGroupMember } from "./member-label";
 
 export type GroupComposerOrigin = "groups" | "expense";
+export type MobileExpenseActionVariant = "compact" | "expanded";
 
 export type ExpenseLaunchDecision =
   | { kind: "pick-target" }
@@ -80,4 +81,11 @@ export function groupComposerOriginAfterOpenChange(
  */
 export function dialogHandoffDelay(coarsePointer: boolean): number {
   return coarsePointer ? 180 : 0;
+}
+
+export function mobileExpenseActionVariant(
+  tab: string,
+  groupsMode: "overview" | "detail",
+): MobileExpenseActionVariant {
+  return tab === "groups" && groupsMode === "detail" ? "compact" : "expanded";
 }

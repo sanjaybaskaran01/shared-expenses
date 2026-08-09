@@ -5,6 +5,7 @@ import {
   decideGroupCreationDestination,
   dialogHandoffDelay,
   groupComposerOriginAfterOpenChange,
+  mobileExpenseActionVariant,
 } from "../src/lib/expense-launch";
 
 const groups: LocalGroup[] = [
@@ -78,5 +79,11 @@ describe("expense launch routing", () => {
   test("waits for an iPhone sheet to finish closing before opening the next sheet", () => {
     expect(dialogHandoffDelay(true)).toBeGreaterThanOrEqual(150);
     expect(dialogHandoffDelay(false)).toBe(0);
+  });
+
+  test("uses a compact floating action only inside a group", () => {
+    expect(mobileExpenseActionVariant("groups", "detail")).toBe("compact");
+    expect(mobileExpenseActionVariant("groups", "overview")).toBe("expanded");
+    expect(mobileExpenseActionVariant("activity", "detail")).toBe("expanded");
   });
 });

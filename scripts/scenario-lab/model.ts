@@ -114,7 +114,13 @@ export function evaluateMobilePrimaryAction(
       centerY >= viewport.height * 0.62 &&
         centerY <= navigation.bottom &&
         centerX >= viewport.width * 0.2 &&
-        centerX <= viewport.width * 0.85,
+        centerX <= viewport.width * 0.9,
+      detail,
+    ),
+    check(
+      "primary-navigation-span",
+      "The mobile navigation keeps the full usable width",
+      navigation.width >= viewport.width - 32,
       detail,
     ),
     check(

@@ -118,9 +118,9 @@ describe("scenario lab model", () => {
 
   test("keeps the mobile primary action in the thumb zone without covering navigation", () => {
     const viewport = { width: 390, height: 844 };
-    const navigation = { left: 16, top: 766, right: 242, bottom: 832, width: 226, height: 66 };
+    const navigation = { left: 16, top: 766, right: 374, bottom: 832, width: 358, height: 66 };
     const reachable = evaluateMobilePrimaryAction(
-      { left: 250, top: 766, right: 374, bottom: 832, width: 124, height: 66 },
+      { left: 318, top: 698, right: 374, bottom: 754, width: 56, height: 56 },
       navigation,
       viewport,
     );
@@ -134,7 +134,7 @@ describe("scenario lab model", () => {
     expect(topRight.find(({ id }) => id === "primary-action-thumb-zone")?.status).toBe("failed");
 
     const overlapping = evaluateMobilePrimaryAction(
-      { left: 180, top: 766, right: 304, bottom: 832, width: 124, height: 66 },
+      { left: 318, top: 740, right: 374, bottom: 796, width: 56, height: 56 },
       navigation,
       viewport,
     );

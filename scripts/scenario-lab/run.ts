@@ -469,13 +469,30 @@ async function run(): Promise<void> {
           height: window.innerHeight,
           scrollWidth: document.documentElement.scrollWidth,
         }));
+        const compactActionIsExpanded = await compactPage.locator(".mobile-primary-action").evaluate((element) =>
+          !element.classList.contains("compact") && element.textContent?.includes("Add expense") === true,
+        );
+        await compactPage.getByRole("button", { name: "Add expense", exact: true }).click();
+        const compactTargetDialog = compactPage.getByRole("dialog", { name: "Who is this with?" });
+        await compactTargetDialog.getByTestId("expense-target-group:scenario-goa-trip").click();
+        const compactComposer = compactPage.getByRole("dialog", { name: "Add an expense" });
+        const compactAmount = compactComposer.getByLabel("Total in USD");
+        const compactDescription = compactComposer.getByPlaceholder("What was it for?");
+        await compactAmount.waitFor({ state: "visible" });
+        const amountStartsFocused = await compactAmount.evaluate((element) => document.activeElement === element);
+        await compactAmount.press("Enter");
+        const nextMovesToDescription = await compactDescription.evaluate((element) => document.activeElement === element);
+        await compactComposer.getByRole("button", { name: "Cancel expense form" }).click();
         await recordStep(report, responsive, outputDirectory, {
           id: "compact-mobile-action",
           title: "Primary action remains reachable on a narrow phone",
           sessions: [compactSession],
-          note: "The labeled action shares the lower dock with navigation without clipping, covering content, or causing horizontal overflow at 320×800.",
+          note: "The labeled action floats above a full-width tab bar without clipping, compressing navigation, or causing horizontal overflow at 320×800.",
           checks: [
             ...evaluateMobilePrimaryAction(compactAction, compactNavigation, compactViewport),
+            makeCheck("compact-action-labeled", "Overview screens keep the primary action labeled", compactActionIsExpanded, "Add expense"),
+            makeCheck("new-expense-amount-focus", "A new mobile expense starts on the numeric amount field", amountStartsFocused, "amount focused"),
+            makeCheck("new-expense-next-focus", "The numeric keyboard Next action moves to description", nextMovesToDescription, "description focused"),
             makeCheck("compact-no-overflow", "The 320 pixel layout has no horizontal overflow", compactViewport.scrollWidth <= compactViewport.width, `${compactViewport.scrollWidth}/${compactViewport.width}`),
           ],
         });
@@ -506,7 +523,7 @@ async function run(): Promise<void> {
 
       await owner.page.getByRole("button", { name: "Groups", exact: true }).last().click();
       await owner.page.getByRole("button", { name: new RegExp(imported.groupName, "i") }).click();
-      await owner.page.getByRole("button", { name: "Add expense", exact: true }).click();
+      await owner.page.locator(".mobile-primary-action").click();
       const pendingComposer = owner.page.getByRole("dialog", { name: "Add an expense" });
       await pendingComposer.getByLabel("Total in USD").fill("24.00");
       await pendingComposer.getByPlaceholder("What was it for?").fill("Coffee before Dev joins");
@@ -622,8 +639,12 @@ async function run(): Promise<void> {
         return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
       });
       const viewport = await settingsSession.page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+      const groupActionIsCompact = await settingsSession.page.locator(".mobile-primary-action").evaluate((element) =>
+        element.classList.contains("compact") && element.getAttribute("aria-label")?.startsWith("Add expense to ") === true,
+      );
       const groupHeaderChecks = [
         ...evaluateMobilePrimaryAction(primaryActionBox, primaryNavigationBox, viewport),
+        makeCheck("group-action-compact", "A group uses the compact context-aware expense action", groupActionIsCompact, "compact group action"),
         makeCheck("header-action-removed", "The mobile header no longer duplicates the primary expense action", await settingsSession.page.locator(".mobile-header").getByRole("button", { name: "Add expense" }).count() === 0, "0 header actions"),
         makeCheck("group-settings-action", "The group header exposes a labeled settings action", await settingsSession.page.getByRole("button", { name: "Open settings for Goa trip" }).isVisible(), "Open settings for Goa trip"),
         makeCheck("group-people-action", "The people count opens group management", await settingsSession.page.getByRole("button", { name: /4 people/ }).isVisible(), "4 people"),
@@ -633,7 +654,7 @@ async function run(): Promise<void> {
         id: "group-navigation",
         title: "Group navigation separates viewing from management",
         sessions: [settingsSession],
-        note: "Activity stays primary; people and settings remain visible in the group header, while Add expense stays in the lower thumb dock beside navigation.",
+        note: "Activity stays primary; people and settings remain visible in the group header, while a compact Add expense action floats above the full-width tab bar.",
         checks: groupHeaderChecks,
       });
       await settingsSession.page.getByRole("button", { name: "Open settings for Goa trip" }).click();
@@ -673,22 +694,22 @@ async function run(): Promise<void> {
         const snapshot = await bridgeSnapshot(settingsSession.page);
         return snapshot.groups.some(({ name, settlementCurrency }) => name === "Synthetic invite trip" && settlementCurrency === "CAD");
       });
+      await waitUntil("currency update to finish before inviting", async () =>
+        newGroupSettings.getByRole("combobox", { name: "Currency" }).isEnabled(),
+      );
       await newGroupSettings.getByLabel("Email address").fill("mira@example.com");
       await newGroupSettings.getByRole("button", { name: "Send invite" }).click();
-      await waitUntil("one-field group invitation to be queued", async () => (
-        await newGroupSettings.getByLabel("Email address").inputValue()
-      ) === "");
+      let invitationLink: string | undefined;
+      await waitUntil("synthetic invitation email to reach the loopback outbox", async () => {
+        invitationLink = readScenarioMagicLink(runtime!.databasePath, "mira@example.com");
+        return Boolean(invitationLink);
+      });
       await forceSync(settingsSession);
       const ownerAfterInvite = await bridgeSnapshot(settingsSession.page);
       const invitedGroup = ownerAfterInvite.groups.find(({ name }) => name === "Synthetic invite trip");
       if (!invitedGroup) throw new Error("The invited scenario group was not created");
       const invitedSession = sessions.find(({ actor }) => actor.id === "mira");
       if (!invitedSession) throw new Error("The invited scenario session is unavailable");
-      let invitationLink: string | undefined;
-      await waitUntil("synthetic invitation email to reach the loopback outbox", async () => {
-        invitationLink = readScenarioMagicLink(runtime!.databasePath, "mira@example.com");
-        return Boolean(invitationLink);
-      });
       if (!invitationLink) throw new Error("The synthetic group invitation email was not captured");
       await invitedSession.page.goto(invitationLink, { waitUntil: "domcontentloaded", timeout: 60_000 });
       await invitedSession.page.waitForURL((url) => url.origin === runtime!.webUrl, { timeout: 60_000 });

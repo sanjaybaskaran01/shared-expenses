@@ -12,7 +12,7 @@ import UsersRound from "lucide-solid/icons/users-round";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import type { LocalExpense } from "../lib/db";
 import { isLocalToday, localDateValue } from "../lib/dates";
-import { initialExpenseEntryMode, shouldDismissKeyboardForPanel, type ExpenseEntryMode } from "../lib/expense-composer-state";
+import { initialExpenseEntryMode, initialExpenseFocusTarget, shouldDismissKeyboardForPanel, type ExpenseEntryMode } from "../lib/expense-composer-state";
 import { validateExpenseForm, type ExpenseFormIssue } from "../lib/expense-form";
 import { EXPENSE_CATEGORIES, suggestExpenseCategory } from "../lib/expense-categories";
 import { parseExpenseLanguage, type ExpenseLanguageChip, type ExpenseLanguageIssue, type ParsedExpenseLanguage } from "../lib/expense-language";
@@ -564,7 +564,10 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
             class="composer-dialog max-h-[100dvh] w-full overflow-y-auto border border-border bg-card outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:max-h-[94dvh] sm:max-w-xl"
             onOpenAutoFocus={(event) => {
               event.preventDefault();
-              queueMicrotask(() => dialogRef?.focus());
+              queueMicrotask(() => {
+                if (initialExpenseFocusTarget(Boolean(props.expense)) === "amount") amountInputRef?.focus();
+                else dialogRef?.focus();
+              });
             }}
           >
             <header class="composer-header sticky top-0 z-20 grid min-h-14 grid-cols-[1fr_auto_1fr] items-center border-b border-border bg-card px-4">
@@ -700,11 +703,16 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                     aria-label={`Total in ${currency()}`}
                     aria-invalid={formIssue()?.field === "amount"}
                     aria-describedby={formIssue()?.field === "amount" ? "expense-form-error" : undefined}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      event.preventDefault();
+                      descriptionInputRef?.focus();
+                    }}
                   />
                 </span>
               </label>
 
-              <label class="description-field"><span class="sr-only">What was it for?</span><input ref={descriptionInputRef} value={description()} onInput={(event) => { setDescription(event.currentTarget.value); if (formIssue()?.field === "description") { setFormIssue(undefined); setError(""); } }} placeholder="What was it for?" maxlength={200} autocomplete="off" aria-invalid={formIssue()?.field === "description"} aria-describedby={formIssue()?.field === "description" ? "expense-form-error" : undefined} /></label>
+              <label class="description-field"><span class="sr-only">What was it for?</span><input ref={descriptionInputRef} value={description()} onInput={(event) => { setDescription(event.currentTarget.value); if (formIssue()?.field === "description") { setFormIssue(undefined); setError(""); } }} placeholder="What was it for?" maxlength={200} autocomplete="off" enterkeyhint="done" aria-invalid={formIssue()?.field === "description"} aria-describedby={formIssue()?.field === "description" ? "expense-form-error" : undefined} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} /></label>
 
               <Show when={props.smartCategoriesEnabled && description().trim()}>
                 <button type="button" class="expense-category-control" onClick={useOrEditCategory} aria-label={`${pendingCategorySuggestion() ? "Suggested" : "Category"} ${visibleCategory()}. ${pendingCategorySuggestion() ? "Use suggestion" : "Change category"}`}>

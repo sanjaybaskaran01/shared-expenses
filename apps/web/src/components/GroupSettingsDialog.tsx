@@ -85,10 +85,10 @@ export function GroupSettingsDialog(props: {
     setMessageTone("status");
     try {
       await inviteGroupMember(activeGroup.id, { email: address });
-      await appStore.sync();
       setEmail("");
       setMessage(`Invite sent to ${address}. Their link verifies the email and joins ${activeGroup.name}.`);
       props.onNotify("Group invitation sent");
+      void appStore.sync();
     } catch (error) {
       setMessageTone("error");
       setMessage(error instanceof Error ? error.message : "Could not send this invitation");

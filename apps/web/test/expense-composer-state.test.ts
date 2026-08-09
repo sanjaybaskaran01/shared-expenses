@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  initialExpenseFocusTarget,
   initialExpenseEntryMode,
   shouldDismissKeyboardForPanel,
 } from "../src/lib/expense-composer-state";
@@ -8,6 +9,11 @@ describe("expense composer interaction state", () => {
   test("opens new and existing expenses in the structured form", () => {
     expect(initialExpenseEntryMode(false)).toBe("form");
     expect(initialExpenseEntryMode(true)).toBe("form");
+  });
+
+  test("starts a new expense at the amount but preserves existing text while editing", () => {
+    expect(initialExpenseFocusTarget(false)).toBe("amount");
+    expect(initialExpenseFocusTarget(true)).toBe("dialog");
   });
 
   test("dismisses the software keyboard before showing a picker", () => {
