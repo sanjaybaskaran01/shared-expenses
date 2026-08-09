@@ -38,7 +38,7 @@ export function GroupComposer(props: GroupComposerProps) {
       props.onCreated(groupId, name().trim());
       props.onOpenChange(false);
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Could not create this group");
+      setError(submitError instanceof Error ? submitError.message : "Unable to create this group. Try again.");
     } finally {
       setSaving(false);
     }
@@ -62,13 +62,13 @@ export function GroupComposer(props: GroupComposerProps) {
               <Dialog.CloseButton class="icon-button" aria-label="Close group form"><X size={17} /></Dialog.CloseButton>
             </header>
             <form class="grid gap-5 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] sm:p-6" onSubmit={(event) => void submit(event)}>
-              <label class="grid gap-2 text-sm font-medium">Group name<input ref={nameInputRef} class="form-control h-12" required maxlength={100} placeholder="Apartment, Japan trip…" value={name()} onInput={(event) => setName(event.currentTarget.value)} /></label>
-              <label class="grid gap-2 text-sm font-medium">Group currency<select class="form-control" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)}><option value="USD">USD — US dollar</option><option value="CAD">CAD — Canadian dollar</option><option value="EUR">EUR — Euro</option><option value="GBP">GBP — British pound</option><option value="INR">INR — Indian rupee</option></select><small class="font-normal text-muted-foreground">You can change this until the first expense or payment.</small></label>
+              <label class="grid gap-2 text-sm font-medium">Group name<input ref={nameInputRef} class="form-control h-12" required maxlength={100} placeholder="e.g. Japan trip" value={name()} onInput={(event) => setName(event.currentTarget.value)} /></label>
+              <label class="grid gap-2 text-sm font-medium">Default currency<select class="form-control" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)}><option value="USD">USD — US dollar</option><option value="CAD">CAD — Canadian dollar</option><option value="EUR">EUR — Euro</option><option value="GBP">GBP — British pound</option><option value="INR">INR — Indian rupee</option></select><small class="font-normal text-muted-foreground">You can change this until the first expense or payment.</small></label>
               <Show when={error()}><p class="error-callout" role="alert">{error()}</p></Show>
               <Button class="h-11 w-full" type="submit" disabled={!name().trim() || saving()}>
                 <Show when={saving()} fallback={<><Plus size={16} /> Create group</>}><LoaderCircle class="animate-spin" size={16} /> Creating…</Show>
               </Button>
-              <p class="text-center text-xs text-muted-foreground">Available on this device immediately; syncs when online.</p>
+              <p class="text-center text-xs text-muted-foreground">Saves on this device, then syncs automatically.</p>
             </form>
           </Dialog.Content>
         </div>

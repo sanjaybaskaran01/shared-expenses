@@ -101,6 +101,22 @@ function formatSignedMinor(amountMinor: number, currency: string): string {
   return `${amountMinor > 0 ? "+" : "−"}${formatMinor(Math.abs(amountMinor), currency)}`;
 }
 
+function importStatusLabel(status: string): string {
+  if (status === "completed") return "Imported";
+  if (status === "undone") return "Undone";
+  if (status === "cancelled") return "Cancelled";
+  return "In progress";
+}
+
+function identityStatusLabel(status: string): string {
+  if (status === "claimed") return "Connected";
+  if (status === "awaiting_owner") return "Waiting for your approval";
+  if (status === "reserved") return "Waiting for email verification";
+  if (status === "rejected") return "Request declined";
+  if (status === "expired") return "Link expired";
+  return "Not connected";
+}
+
 export function MigrationDialog(props: {
   open: boolean;
   onOpenChange(open: boolean): void;
@@ -139,8 +155,8 @@ export function MigrationDialog(props: {
 
   function rowLimitError(): string {
     return deviceRowLimit < 100_000
-      ? `This phone supports up to ${deviceRowLimit.toLocaleString()} entries in one migration. Use Tallied on a desktop for exports up to 100,000.`
-      : `A migration can contain at most ${deviceRowLimit.toLocaleString()} financial entries in total`;
+      ? `This phone can import up to ${deviceRowLimit.toLocaleString()} entries at a time. Use Tallied on a desktop for exports with up to 100,000 entries.`
+      : `You can import up to ${deviceRowLimit.toLocaleString()} financial entries at a time.`;
   }
 
   const [capabilities] = createResource(() => props.open, async (open) => open ? getImportCapabilities() : undefined);
@@ -149,7 +165,6 @@ export function MigrationDialog(props: {
   const currentGroups = createMemo(() => draft()?.groups.filter((group) => group.status === "current") ?? []);
   const olderGroups = createMemo(() => draft()?.groups.filter((group) => group.status !== "current") ?? []);
   const currencyCount = createMemo(() => new Set(draft()?.groups.map(({ currency }) => currency) ?? []).size);
-  const sourceBytes = createMemo(() => Object.values(draft()?.sourceByteSizes ?? {}).reduce((sum, bytes) => sum + bytes, 0));
   const selectedEntryCount = createMemo(() => {
     const selected = new Set(selectedGroupIds());
     return draft()?.records.filter(({ externalGroupId }) => selected.has(externalGroupId)).length ?? 0;
@@ -200,7 +215,7 @@ export function MigrationDialog(props: {
       setStep(saved.draft.mode === "balances" ? "balances" : "select");
     }
     if (saved.commit) void persistDraft(saved.draft, saved.prepared);
-    setMessage("Your migration draft was restored on this device.");
+    setMessage("Your import draft was restored on this device.");
   }
 
   async function restoreOpeningRows(): Promise<void> {
@@ -273,7 +288,7 @@ export function MigrationDialog(props: {
         maxRows: deviceRowLimit,
       }));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Splitwise could not be read");
+      setMessage(error instanceof Error ? error.message : "Unable to read this Splitwise data. Try again.");
     } finally {
       // The provider token is single-use and erased server-side even when
       // normalization fails. Clearing the callback session avoids offering a
@@ -308,7 +323,7 @@ export function MigrationDialog(props: {
       const chosen = [...files];
       if (chosen.length > IMPORT_FILE_LIMIT) throw new RangeError(`Choose at most ${IMPORT_FILE_LIMIT} files at once`);
       const total = chosen.reduce((sum, file) => sum + file.size, 0);
-      if (total > IMPORT_TOTAL_BYTES_LIMIT) throw new RangeError("Choose files totalling less than 50 MiB");
+      if (total > IMPORT_TOTAL_BYTES_LIMIT) throw new RangeError("Choose files that total less than 50 MiB.");
       const drafts: NormalizedImportDraft[] = [];
       const skipped: string[] = [];
       for (const file of chosen) {
@@ -327,14 +342,14 @@ export function MigrationDialog(props: {
       if (drafts.length === 0) throw new Error(skipped[0] ?? "No supported exports were selected");
       const previous = draft();
       const combined = combineImportDrafts(previous ? [previous, ...drafts] : drafts);
-      if (combined.sourceHashes.length > IMPORT_FILE_LIMIT) throw new RangeError(`A migration can contain at most ${IMPORT_FILE_LIMIT} unique exports`);
+      if (combined.sourceHashes.length > IMPORT_FILE_LIMIT) throw new RangeError(`Choose no more than ${IMPORT_FILE_LIMIT} export files at a time.`);
       if (combined.records.length > deviceRowLimit) throw new RangeError(rowLimitError());
       const combinedBytes = Object.values(combined.sourceByteSizes ?? {}).reduce((sum, bytes) => sum + bytes, 0);
-      if (combinedBytes > IMPORT_TOTAL_BYTES_LIMIT) throw new RangeError("A migration can contain at most 50 MiB of exports in total");
+      if (combinedBytes > IMPORT_TOTAL_BYTES_LIMIT) throw new RangeError("Choose files that total no more than 50 MiB.");
       applyDraft(combined, Boolean(previous));
       if (skipped.length > 0) setMessage(`${drafts.length} file${drafts.length === 1 ? "" : "s"} read. Skipped ${skipped.join(" · ")}`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "These files could not be read");
+      setMessage(error instanceof Error ? error.message : "Unable to read these files. Check the format and try again.");
     } finally {
       setBusy(false);
       if (fileInputRef) fileInputRef.value = "";
@@ -445,7 +460,7 @@ export function MigrationDialog(props: {
     if (!value) return;
     const mode = value.mode;
     setBusy(true);
-    setMessage("Preparing and signing this migration on your device…");
+    setMessage("Preparing this import on your device…");
     try {
       const device = await ensureDevice(props.actorId);
       await persistDraft(value);
@@ -459,7 +474,7 @@ export function MigrationDialog(props: {
         privateKey: device.privateKey,
         onProgress: (phase, completed, total) => {
           if (completed === total || completed % 1_000 === 0) {
-            setMessage(`${phase === "planning" ? "Preparing" : "Securing"} migration… ${completed.toLocaleString()} of ${total.toLocaleString()} entries`);
+            setMessage(`${phase === "planning" ? "Preparing" : "Securing"} import… ${completed.toLocaleString()} of ${total.toLocaleString()} entries`);
           }
         },
       });
@@ -474,7 +489,7 @@ export function MigrationDialog(props: {
         updatedAt: new Date().toISOString(),
         prepared: planned,
       });
-      setMessage("Encrypted staging is ready. Nothing changes until you finish.");
+      setMessage("Your review is ready. Nothing changes until you finish.");
       setReviewed(false);
       setStep("review");
     } catch (error) {
@@ -482,7 +497,7 @@ export function MigrationDialog(props: {
       if (saved) setDraft(saved);
       setStep(mode === "balances" ? "balances" : "select");
       queueMicrotask(() => contentRef?.querySelector<HTMLElement>(`[data-migration-step="${mode === "balances" ? "balances" : "select"}"]`)?.focus());
-      setMessage(error instanceof Error ? error.message : "This migration is not ready to review");
+      setMessage(error instanceof Error ? error.message : "This import isn’t ready to review. Check the highlighted details.");
     } finally {
       setBusy(false);
     }
@@ -504,8 +519,8 @@ export function MigrationDialog(props: {
       if (recovered) {
         result = { batch: recovered, duplicate: true, accepted: [] };
       } else {
-        const cause = error instanceof Error ? error.message : "The connection ended before Tallied confirmed the migration";
-        if (/upload is unavailable|expired|prepared migration details do not match/i.test(cause)) {
+        const cause = error instanceof Error ? error.message : "The connection ended before Tallied confirmed the import.";
+        if (/upload is unavailable|expired|prepared (?:migration|import)(?: details)? (?:do not match|does not match)/i.test(cause)) {
           await cancelImportUpload(planned.id).catch(() => undefined);
           const saved = await localDb.importDrafts.get(migrationDraftId);
           if (saved?.draft) {
@@ -513,12 +528,12 @@ export function MigrationDialog(props: {
             setCommit(undefined);
             await persistDraft(saved.draft);
             setStep(saved.draft.mode === "balances" ? "balances" : "select");
-            setMessage("Encrypted staging needs to be refreshed. Review the saved draft again to prepare a fresh retry-safe upload.");
+            setMessage("This upload expired. Review the saved draft again to prepare a new one.");
             setBusy(false);
             return;
           }
         }
-        const detail = `${cause}. Retry Finish migration: Tallied will resume the same batch and will not create duplicates.`;
+        const detail = `${cause} Try Finish import again. Tallied will resume without creating duplicates.`;
         setMessage(detail);
         await localDb.importDrafts.update(migrationDraftId, { status: "failed", error: detail });
         setBusy(false);
@@ -530,12 +545,12 @@ export function MigrationDialog(props: {
     // recoverable and must never make a completed migration look failed.
     setCompletedBatch(result.batch);
     setStep("complete");
-    props.onComplete?.(result.duplicate ? "This migration was already safely completed" : "Splitwise history moved to Tallied");
+    props.onComplete?.(result.duplicate ? "This import was already completed" : "Splitwise history imported to Tallied");
     try {
       await localDb.importDrafts.delete(migrationDraftId);
       await localDb.settings.delete(openingRowsStorageKey);
     } catch {
-      setMessage("Migration completed safely. Its local draft will be cleared the next time this screen opens.");
+      setMessage("Import complete. Tallied will clear the saved draft the next time you open this screen.");
     }
     const followUps = await Promise.allSettled([
       getImportIdentities(result.batch.id),
@@ -545,7 +560,7 @@ export function MigrationDialog(props: {
     const identityResult = followUps[0];
     if (identityResult?.status === "fulfilled") setIdentities(identityResult.value.identities);
     if (followUps.some(({ status }) => status === "rejected")) {
-      setMessage("Migration completed safely. Reconnect or reopen this screen to refresh people and balances.");
+      setMessage("Import complete. Go online or reopen this screen to refresh people and balances.");
     }
     setBusy(false);
   }
@@ -557,7 +572,7 @@ export function MigrationDialog(props: {
       const started = await startSplitwiseImport();
       window.location.assign(started.authorizationUrl);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Direct connection is unavailable");
+      setMessage(error instanceof Error ? error.message : "Unable to connect to Splitwise. Try exported files instead.");
       setBusy(false);
     }
   }
@@ -567,11 +582,11 @@ export function MigrationDialog(props: {
     try {
       const link = await createImportClaimLink(batchId, identityId);
       const canShare = typeof navigator.share === "function";
-      if (canShare) await navigator.share({ title: "Claim your Tallied history", text: "I moved our Splitwise history to Tallied. Claim your side here:", url: link.url });
+      if (canShare) await navigator.share({ title: "Connect your Tallied history", text: "I imported our Splitwise history to Tallied. Connect your account here:", url: link.url });
       else await navigator.clipboard.writeText(link.url);
-      setMessage(canShare ? "Claim link ready to share." : "Claim link copied.");
+      setMessage(canShare ? "Connection link ready to share." : "Connection link copied.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Claim link could not be created");
+      setMessage(error instanceof Error ? error.message : "Unable to create the connection link. Try again.");
     } finally {
       setBusy(false);
     }
@@ -587,7 +602,7 @@ export function MigrationDialog(props: {
       setManagedIdentities((await getImportIdentities(batchId)).identities);
       setExpandedPeopleBatch(batchId);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Imported people could not be loaded");
+      setMessage(error instanceof Error ? error.message : "Unable to load imported people. Try again.");
     } finally {
       setBusy(false);
     }
@@ -601,7 +616,7 @@ export function MigrationDialog(props: {
       setManagedIdentities((await getImportIdentities(batchId)).identities);
       setClaimDecision(undefined);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "The claim could not be approved");
+      setMessage(error instanceof Error ? error.message : "Unable to connect this account. Try again.");
     } finally {
       setBusy(false);
     }
@@ -611,11 +626,11 @@ export function MigrationDialog(props: {
     setBusy(true);
     try {
       await rejectImportIdentityClaim(identityId);
-      setMessage("Claim rejected. Share a new link only with the intended person.");
+      setMessage("Request declined. Share a new link only with the intended person.");
       setManagedIdentities((await getImportIdentities(batchId)).identities);
       setClaimDecision(undefined);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "The claim could not be rejected");
+      setMessage(error instanceof Error ? error.message : "Unable to decline this request. Try again.");
     } finally {
       setBusy(false);
     }
@@ -626,22 +641,22 @@ export function MigrationDialog(props: {
     setMessage("");
     try {
       const device = await ensureDevice(props.actorId);
-      setMessage("Preparing a signed, exact undo. This can take a moment for a large migration.");
+      setMessage("Preparing to undo this import. A large import may take a moment.");
       await undoImportOffMainThread(batch.id, appStore.operations(), {
         actorId: device.actorId,
         deviceId: device.deviceId,
         timestamp: new Date().toISOString(),
         privateKey: device.privateKey,
         onProgress: (phase, completed, total) => setMessage(
-          `${phase === "planning" ? "Preparing" : "Safely undoing"} migration… ${completed.toLocaleString()} of ${total.toLocaleString()} entries`,
+          `${phase === "planning" ? "Preparing" : "Undoing"} import… ${completed.toLocaleString()} of ${total.toLocaleString()} entries`,
         ),
       });
       await appStore.sync();
       await refetchImports();
       setDestructiveAction(undefined);
-      setMessage("Migration undone. Later Tallied entries were left intact.");
+      setMessage("Import undone. Later Tallied entries were left intact.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "The migration could not be undone");
+      setMessage(error instanceof Error ? error.message : "Unable to undo this import. Try again.");
     } finally {
       setBusy(false);
     }
@@ -653,9 +668,9 @@ export function MigrationDialog(props: {
       await deleteImportSourceData(batch.id);
       await refetchImports();
       setDestructiveAction(undefined);
-      setMessage("Raw source identifiers, file fingerprints, and provider details deleted. A one-way duplicate marker and Tallied balances remain.");
+      setMessage("Private source details deleted. Tallied kept the imported balances and a one-way marker that prevents duplicate imports.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Source data could not be deleted");
+      setMessage(error instanceof Error ? error.message : "Unable to delete the source data. Try again.");
     } finally {
       setBusy(false);
     }
@@ -676,14 +691,14 @@ export function MigrationDialog(props: {
     setDraft(undefined);
     setCommit(undefined);
     setMessage(remoteCleanupFailed
-      ? "Draft removed from this device. An interrupted server upload could not be cleared now and will expire automatically within 24 hours."
+      ? "Draft removed from this device. An unfinished upload could not be cleared and will expire automatically within 24 hours."
       : "");
     setStep("choose");
   }
 
   async function startFresh(): Promise<void> {
     await discardDraft();
-    props.onComplete?.("Starting fresh—nothing was imported");
+    props.onComplete?.("Starting fresh. Nothing was imported.");
   }
 
   async function back(): Promise<void> {
@@ -696,7 +711,7 @@ export function MigrationDialog(props: {
         cleanupFailed = true;
       });
       setMessage(cleanupFailed
-        ? "Changes are available, but the previous encrypted upload could not be cleared and will expire automatically."
+        ? "Your changes are saved, but the previous upload could not be cleared and will expire automatically."
         : "");
       setCommit(undefined);
       setReviewed(false);
@@ -736,18 +751,18 @@ export function MigrationDialog(props: {
                   {step() === "review" ? "Check the numbers before anything changes" : "Private, reversible, and currency-safe"}
                 </Dialog.Description>
               </div>
-              <Dialog.CloseButton class="icon-button" aria-label="Close migration"><X size={18} /></Dialog.CloseButton>
+              <Dialog.CloseButton class="icon-button" aria-label="Close import"><X size={18} /></Dialog.CloseButton>
             </header>
 
             <div class="migration-scroll min-h-0 flex-1 overflow-y-auto p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:p-6">
-              <span class="sr-only" role="status" aria-live="polite">Migration step: {step()}</span>
+              <span class="sr-only" role="status" aria-live="polite">Import step: {step()}</span>
               <Show when={message()}>
                 <p class="mb-4 rounded-lg border border-border bg-muted/45 px-3 py-2.5 text-sm leading-5" role={messageIsError() ? "alert" : "status"} aria-live={messageIsError() ? "assertive" : "polite"}>{message()}</p>
               </Show>
 
               <Show when={busy() && step() !== "review"}>
                 <div class="grid min-h-56 place-items-center text-center" role="status" aria-live="polite">
-                  <div><LoaderCircle class="mx-auto mb-3 animate-spin" size={24} /><strong class="text-sm">Preparing your migration…</strong><p class="mt-1 text-xs text-muted-foreground">Keep this window open.</p></div>
+                  <div><LoaderCircle class="mx-auto mb-3 animate-spin" size={24} /><strong class="text-sm">Preparing your import…</strong><p class="mt-1 text-xs text-muted-foreground">Keep this window open.</p></div>
                 </div>
               </Show>
 
@@ -757,14 +772,14 @@ export function MigrationDialog(props: {
                     <div>
                       <p class="eyebrow">Choose a route</p>
                       <h2 class="mt-1 text-xl font-semibold tracking-tight">Bring over what matters.</h2>
-                      <p class="mt-1.5 max-w-lg text-sm leading-6 text-muted-foreground">Tallied checks every balance before it writes to your shared ledger. Nothing is converted between currencies.</p>
+                      <p class="mt-1.5 max-w-lg text-sm leading-6 text-muted-foreground">Tallied checks every balance before adding anything. Currencies are never converted.</p>
                     </div>
                     <div class="grid gap-2">
                       <button class="migration-route" type="button" disabled={!capabilities()?.splitwiseOAuth.available} onClick={() => void connectSplitwise()}>
-                        <span class="migration-route-icon"><Link size={19} /></span><span><strong>Connect Splitwise</strong><small>{capabilities()?.splitwiseOAuth.available ? "Read once, then disconnect automatically" : "Requires written Splitwise API approval"}</small></span><ExternalLink size={16} />
+                        <span class="migration-route-icon"><Link size={19} /></span><span><strong>Connect Splitwise</strong><small>{capabilities()?.splitwiseOAuth.available ? "Read once, then disconnect automatically" : "Not available yet—use exported files instead"}</small></span><ExternalLink size={16} />
                       </button>
                       <button class="migration-route" type="button" onClick={() => fileInputRef?.click()}>
-                        <span class="migration-route-icon"><Upload size={19} /></span><span><strong>Choose CSV or JSON files</strong><small>Best for complete, self-service migration</small></span><ChevronRight size={16} />
+                        <span class="migration-route-icon"><Upload size={19} /></span><span><strong>Choose CSV or JSON files</strong><small>Import complete history from your exported files</small></span><ChevronRight size={16} />
                       </button>
                       <input ref={fileInputRef} class="sr-only" type="file" name="splitwise-import-files" aria-label="Choose Splitwise CSV or JSON files" accept=".csv,.json,text/csv,application/json" multiple onChange={(event) => void handleFiles(event.currentTarget.files)} />
                       <button class="migration-route" type="button" onClick={() => setStep("balances")}>
@@ -774,16 +789,16 @@ export function MigrationDialog(props: {
                         <span class="migration-route-icon"><WalletCards size={19} /></span><span><strong>Start fresh</strong><small>Use Tallied without bringing anything over</small></span><ChevronRight size={16} />
                       </Dialog.CloseButton>
                     </div>
-                    <div class="migration-privacy-note"><ShieldCheck size={17} /><p><strong>Your files stay on this device while they’re read.</strong><br />Only the signed ledger prepared for your final review and owner-only identifiers needed for undo and duplicate protection are sent. Temporary staging is encrypted, changes no balances, and expires within 24 hours.</p></div>
+                    <div class="migration-privacy-note"><ShieldCheck size={17} /><p><strong>Your files are read on this device.</strong><br />Tallied uploads only the encrypted data needed to create and undo the import. Nothing affects balances until you approve the final review. Unfinished uploads expire within 24 hours.</p></div>
                     <Show when={(imports()?.imports.length ?? 0) > 0}>
-                      <Button variant="secondary" class="w-full" onClick={() => setStep("manage")}><Database size={16} /> Manage previous migrations</Button>
+                      <Button variant="secondary" class="w-full" onClick={() => setStep("manage")}><Database size={16} /> Manage previous imports</Button>
                     </Show>
                   </div>
                 </Show>
 
                 <Show when={step() === "balances"}>
                   <div class="space-y-5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" data-migration-step="balances" tabindex="-1">
-                    <div><p class="eyebrow">Balances only</p><h2 class="mt-1 text-xl font-semibold tracking-tight">Who owes whom today?</h2><p class="mt-1 text-sm text-muted-foreground">These entries affect balances, never spending charts.</p></div>
+                    <div><p class="eyebrow">Balances only</p><h2 class="mt-1 text-xl font-semibold tracking-tight">Who owes whom today?</h2><p class="mt-1 text-sm text-muted-foreground">These entries change balances but do not appear in spending charts.</p></div>
                     <For each={openingRows()}>{(row, index) => {
                       const rowError = () => openingError()?.row === index() + 1 ? openingError() : undefined;
                       const invalid = (field: OpeningField) => rowError()?.field === field;
@@ -796,26 +811,26 @@ export function MigrationDialog(props: {
                       const reusesPreviousPerson = () => previousPeople().some(({ personKey }) => personKey === row.personKey);
                       return <Card class="grid gap-3 p-4">
                         <Show when={previousPeople().length > 0}>
-                          <label class="grid gap-1 text-xs font-medium">Person identity<select class="field-input min-h-11 text-base" value={reusesPreviousPerson() ? row.personKey : "new"} onChange={(event) => {
+                          <label class="grid gap-1 text-xs font-medium">Same person as<select class="field-input min-h-11 text-base" value={reusesPreviousPerson() ? row.personKey : "new"} onChange={(event) => {
                             const selected = previousPeople().find(({ personKey }) => personKey === event.currentTarget.value);
                             updateOpeningRow(index(), selected
                               ? { personKey: selected.personKey, personName: selected.personName }
                               : { personKey: row.rowId });
-                          }}><option value="new">Different person</option><For each={previousPeople()}>{(person) => <option value={person.personKey}>Same person as {person.personName}</option>}</For></select></label>
+                          }}><option value="new">Add a different person</option><For each={previousPeople()}>{(person) => <option value={person.personKey}>Use {person.personName}</option>}</For></select></label>
                         </Show>
                         <div class="grid grid-cols-[1fr_auto] gap-2">
                           <label class="grid gap-1 text-xs font-medium">Person<input data-opening-field={`${index() + 1}:personName`} class="field-input min-h-11 text-base" name={`opening-balance-${row.rowId}-person`} autocomplete="off" aria-invalid={invalid("personName")} aria-describedby={invalid("personName") ? errorId() : undefined} value={row.personName} placeholder="Mira" readOnly={reusesPreviousPerson()} onInput={(event) => updateOpeningRow(index(), { personName: event.currentTarget.value })} /></label>
                           <Show when={openingRows().length > 1}><button class="icon-button self-end" aria-label={`Remove ${row.personName || "balance"}`} onClick={() => updateOpeningRows((rows) => rows.filter((_, rowIndex) => rowIndex !== index()))}><Trash2 size={16} /></button></Show>
                         </div>
                         <div class="migration-balance-grid">
-                          <label class="grid gap-1 text-xs font-medium">Direction<select data-opening-field={`${index() + 1}:direction`} class="field-input min-h-11 text-base" name={`opening-balance-${row.rowId}-direction`} autocomplete="off" aria-invalid={invalid("direction")} aria-describedby={invalid("direction") ? errorId() : undefined} value={row.direction} onChange={(event) => updateOpeningRow(index(), { direction: event.currentTarget.value as OpeningRow["direction"] })}><option value="owes_me">They owe me</option><option value="i_owe">I owe them</option></select></label>
+                          <label class="grid gap-1 text-xs font-medium">Who owes<select data-opening-field={`${index() + 1}:direction`} class="field-input min-h-11 text-base" name={`opening-balance-${row.rowId}-direction`} autocomplete="off" aria-invalid={invalid("direction")} aria-describedby={invalid("direction") ? errorId() : undefined} value={row.direction} onChange={(event) => updateOpeningRow(index(), { direction: event.currentTarget.value as OpeningRow["direction"] })}><option value="owes_me">They owe me</option><option value="i_owe">I owe them</option></select></label>
                           <label class="grid gap-1 text-xs font-medium">Amount<input data-opening-field={`${index() + 1}:amount`} class="field-input min-h-11 text-base" name={`opening-balance-${row.rowId}-amount`} autocomplete="off" aria-invalid={invalid("amount")} aria-describedby={invalid("amount") ? errorId() : undefined} inputmode="decimal" value={row.amount} placeholder="0.00" onInput={(event) => updateOpeningRow(index(), { amount: event.currentTarget.value })} /></label>
                         </div>
                         <div class="migration-balance-grid">
-                          <label class="grid gap-1 text-xs font-medium">Currency (2-decimal)<input data-opening-field={`${index() + 1}:currency`} class="field-input min-h-11 text-base uppercase" name={`opening-balance-${row.rowId}-currency`} autocomplete="off" aria-invalid={invalid("currency")} aria-describedby={invalid("currency") ? errorId() : undefined} maxlength={3} value={row.currency} onInput={(event) => updateOpeningRow(index(), { currency: event.currentTarget.value.toUpperCase() })} /></label>
-                          <label class="grid gap-1 text-xs font-medium">As of<input data-opening-field={`${index() + 1}:effectiveDate`} class="field-input min-h-11 text-base" name={`opening-balance-${row.rowId}-effective-date`} autocomplete="off" aria-invalid={invalid("effectiveDate")} aria-describedby={invalid("effectiveDate") ? errorId() : undefined} type="date" value={row.effectiveDate} onInput={(event) => updateOpeningRow(index(), { effectiveDate: event.currentTarget.value })} /></label>
+                          <label class="grid gap-1 text-xs font-medium">Currency<input data-opening-field={`${index() + 1}:currency`} class="field-input min-h-11 text-base uppercase" name={`opening-balance-${row.rowId}-currency`} autocomplete="off" aria-invalid={invalid("currency")} aria-describedby={invalid("currency") ? errorId() : undefined} maxlength={3} value={row.currency} onInput={(event) => updateOpeningRow(index(), { currency: event.currentTarget.value.toUpperCase() })} /></label>
+                          <label class="grid gap-1 text-xs font-medium">Balance date<input data-opening-field={`${index() + 1}:effectiveDate`} class="field-input min-h-11 text-base" name={`opening-balance-${row.rowId}-effective-date`} autocomplete="off" aria-invalid={invalid("effectiveDate")} aria-describedby={invalid("effectiveDate") ? errorId() : undefined} type="date" value={row.effectiveDate} onInput={(event) => updateOpeningRow(index(), { effectiveDate: event.currentTarget.value })} /></label>
                         </div>
-                        <label class="grid gap-1 text-xs font-medium">Group name (optional)<input data-opening-field={`${index() + 1}:groupName`} class="field-input min-h-11 text-base" name={`opening-balance-${row.rowId}-group`} autocomplete="off" aria-invalid={invalid("groupName")} aria-describedby={invalid("groupName") ? errorId() : undefined} value={row.groupName} placeholder="Opening balances" onInput={(event) => updateOpeningRow(index(), { groupName: event.currentTarget.value })} /></label>
+                        <label class="grid gap-1 text-xs font-medium">Group <span class="font-normal text-muted-foreground">(optional)</span><input data-opening-field={`${index() + 1}:groupName`} class="field-input min-h-11 text-base" name={`opening-balance-${row.rowId}-group`} autocomplete="off" aria-invalid={invalid("groupName")} aria-describedby={invalid("groupName") ? errorId() : undefined} value={row.groupName} placeholder="e.g. Opening balances" onInput={(event) => updateOpeningRow(index(), { groupName: event.currentTarget.value })} /></label>
                         <Show when={rowError()}>{(error) => <p id={errorId()} role="alert" class="text-xs leading-5 text-destructive">{error().message}</p>}</Show>
                       </Card>
                     }}</For>
@@ -833,9 +848,9 @@ export function MigrationDialog(props: {
                       <div class="migration-stat"><strong>{draft()!.people.length}</strong><span>people</span></div>
                       <div class="migration-stat"><strong>{draft()!.records.length}</strong><span>entries</span></div>
                     </div>
-                    <div class="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/35 px-3 py-2.5"><p class="text-xs leading-5 text-muted-foreground"><strong class="text-foreground">{selectedGroupIds().length}</strong> groups · <strong class="text-foreground">{selectedEntryCount()}</strong> entries selected<br />{currencyCount()} {currencyCount() === 1 ? "currency" : "currencies"} · {sourceBytes() < 1024 * 1024 ? `${Math.max(1, Math.ceil(sourceBytes() / 1024))} KiB` : `${(sourceBytes() / (1024 * 1024)).toFixed(1)} MiB`} source</p><Button size="sm" variant="secondary" onClick={() => fileInputRef?.click()}><Upload size={15} /> Add files</Button></div>
+                    <div class="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/35 px-3 py-2.5"><p class="text-xs leading-5 text-muted-foreground"><strong class="text-foreground">{selectedGroupIds().length}</strong> groups · <strong class="text-foreground">{selectedEntryCount()}</strong> entries selected<br />{currencyCount()} {currencyCount() === 1 ? "currency" : "currencies"}</p><Button size="sm" variant="secondary" onClick={() => fileInputRef?.click()}><Upload size={15} /> Add files</Button></div>
                     <section>
-                      <div class="mb-2"><p class="eyebrow">Identity check</p><h2 class="mt-1 font-semibold">Which names are you?</h2><p class="mt-1 text-xs leading-5 text-muted-foreground">Select every version of your name across exports. Everyone else remains an unclaimed placeholder until they verify a claim link.</p></div>
+                      <div class="mb-2"><p class="eyebrow">About you</p><h2 class="mt-1 font-semibold">Which names are yours?</h2><p class="mt-1 text-xs leading-5 text-muted-foreground">Select every version of your name. Everyone else can connect their account later with a secure link.</p></div>
                       <div class="divide-y divide-border/60 overflow-hidden rounded-xl border border-border">
                         <For each={draft()!.people}>{(person) => {
                           const occurrences = () => draft()!.groups.filter(({ memberExternalIds }) => memberExternalIds.includes(person.externalId)).length;
@@ -848,7 +863,7 @@ export function MigrationDialog(props: {
                       </div>
                     </section>
                     <section>
-                      <div class="mb-2 flex items-end justify-between gap-3"><div><p class="eyebrow">Current groups</p><h2 class="mt-1 font-semibold">Choose what to bring</h2></div><div class="flex flex-wrap justify-end"><button class="migration-text-action min-h-11 px-2 text-xs font-medium text-primary" onClick={() => updateGroupSelection(currentGroups().map(({ externalId }) => externalId))}>Current</button><button class="migration-text-action min-h-11 px-2 text-xs font-medium text-primary" onClick={() => updateGroupSelection(draft()!.groups.map(({ externalId }) => externalId))}>All history</button><button class="migration-text-action min-h-11 px-2 text-xs font-medium text-muted-foreground" onClick={() => updateGroupSelection([])}>Clear</button></div></div>
+                      <div class="mb-2 flex items-end justify-between gap-3"><div><p class="eyebrow">Current groups</p><h2 class="mt-1 font-semibold">Choose what to bring</h2></div><div class="flex flex-wrap justify-end"><button class="migration-text-action min-h-11 px-2 text-xs font-medium text-primary" onClick={() => updateGroupSelection(currentGroups().map(({ externalId }) => externalId))}>Select current</button><button class="migration-text-action min-h-11 px-2 text-xs font-medium text-primary" onClick={() => updateGroupSelection(draft()!.groups.map(({ externalId }) => externalId))}>Select all</button><button class="migration-text-action min-h-11 px-2 text-xs font-medium text-muted-foreground" onClick={() => updateGroupSelection([])}>Clear selection</button></div></div>
                       <div class="divide-y divide-border/60 overflow-hidden rounded-xl border border-border">
                         <For each={currentGroups()}>{(group) => <label class="migration-check-row"><input type="checkbox" checked={selectedGroupIds().includes(group.externalId)} onChange={() => toggleGroup(group.externalId)} /><span><strong>{group.name}</strong><small>{group.currency} · {group.memberExternalIds.length} people</small></span></label>}</For>
                         <Show when={currentGroups().length === 0}><p class="p-4 text-sm text-muted-foreground">No active groups were identified. Older groups are below.</p></Show>
@@ -858,13 +873,13 @@ export function MigrationDialog(props: {
                       <details class="rounded-xl border border-border"><summary class="min-h-12 cursor-pointer px-4 py-3 text-sm font-medium">Older or settled groups <span class="text-muted-foreground">({olderGroups().length})</span></summary><div class="divide-y divide-border/60 border-t border-border"><For each={olderGroups()}>{(group) => <label class="migration-check-row"><input type="checkbox" checked={selectedGroupIds().includes(group.externalId)} onChange={() => toggleGroup(group.externalId)} /><span><strong>{group.name}</strong><small>{group.currency}</small></span></label>}</For></div></details>
                     </Show>
                     <Show when={draft()!.warnings.length}><section><p class="eyebrow mb-2">Needs attention</p><div class="space-y-2"><For each={draft()!.warnings}>{(warning) => <div class={`rounded-lg border px-3 py-2 text-xs leading-5 ${warning.blocking ? "border-destructive/35 text-destructive" : "border-border text-muted-foreground"}`}><p>{warning.sourceName ? `${warning.sourceName}${warning.row ? ` · row ${warning.row}` : ""}: ` : ""}{warning.message}</p><Show when={warning.blocking && warning.sourceHash}><button type="button" class="migration-text-action mt-1 min-h-11 font-semibold underline underline-offset-4" onClick={() => removeSource(warning.sourceHash!)}>Remove this file</button></Show></div>}</For></div></section></Show>
-                    <div class="grid grid-cols-[1fr_auto] gap-2"><Button disabled={selectedGroupIds().length === 0 || importerExternalIds().length === 0 || busy()} onClick={() => void prepareReview()}>Review migration <ChevronRight size={16} /></Button><Button variant="ghost" onClick={() => setDestructiveAction({ kind: "discard" })}>Discard</Button></div>
+                    <div class="grid grid-cols-[1fr_auto] gap-2"><Button disabled={selectedGroupIds().length === 0 || importerExternalIds().length === 0 || busy()} onClick={() => void prepareReview()}>Review import <ChevronRight size={16} /></Button><Button variant="ghost" onClick={() => setDestructiveAction({ kind: "discard" })}>Discard</Button></div>
                   </div>
                 </Show>
 
                 <Show when={step() === "review" && commit()}>
                   <div class="space-y-5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" data-migration-step="review" tabindex="-1">
-                    <div><p class="eyebrow">Final check</p><h2 class="mt-1 text-xl font-semibold tracking-tight">Do these balances look right?</h2><p class="mt-1 text-sm leading-6 text-muted-foreground">Tallied will create {commit()!.reconciliation.groupCount} groups and {commit()!.reconciliation.recordCount} ledger entries. Nothing changes until you finish; imported records stay read-only.</p></div>
+                    <div><p class="eyebrow">Final check</p><h2 class="mt-1 text-xl font-semibold tracking-tight">Do these balances look right?</h2><p class="mt-1 text-sm leading-6 text-muted-foreground">Tallied will create {commit()!.reconciliation.groupCount} groups and {commit()!.reconciliation.recordCount} imported entries. Nothing changes until you finish. Imported entries cannot be edited.</p></div>
                     <Card class="overflow-hidden">
                       <Show when={commit()!.mode === "balances"} fallback={
                         <>
@@ -873,7 +888,7 @@ export function MigrationDialog(props: {
                             const group = () => commit()!.groups.find(({ externalId }) => externalId === line.externalGroupId)?.name;
                             return <div class="grid min-h-16 grid-cols-[auto_1fr_auto] items-center gap-3 border-b border-border/60 px-4 py-3 last:border-0"><Avatar name={person()} /><div class="min-w-0"><strong class="block truncate text-sm">{person()}</strong><span class="block truncate text-xs text-muted-foreground">{group() ?? "Across selected groups"}</span></div><div class="text-right text-xs"><span class="block text-muted-foreground">Splitwise {line.sourceMinor === undefined ? "not provided" : formatSignedMinor(line.sourceMinor, line.currency)}</span><strong class="mt-0.5 block">Tallied {formatSignedMinor(line.computedMinor, line.currency)}</strong><span class="sr-only">{line.differenceMinor === undefined ? "Not independently compared." : `Difference ${formatSignedMinor(line.differenceMinor, line.currency)}. Matches.`}</span></div></div>;
                           }}</For>
-                          <Show when={commit()!.reconciliation.lines.length === 0}><p class="p-4 text-sm leading-6 text-muted-foreground"><strong class="text-foreground">Closing-balance comparison unavailable.</strong><br />Splitwise CSV exports do not include an independent balance summary. Tallied verified every included row, but you should compare the final balances with Splitwise before finishing.</p></Show>
+                          <Show when={commit()!.reconciliation.lines.length === 0}><p class="p-4 text-sm leading-6 text-muted-foreground"><strong class="text-foreground">No closing balance to compare.</strong><br />Splitwise CSV exports do not include a separate balance summary. Tallied checked every included row, but compare the final balances with Splitwise before finishing.</p></Show>
                         </>
                       }>
                         <For each={balanceReviewRows()}>{(row) => <div class="grid min-h-16 grid-cols-[auto_1fr_auto] items-center gap-3 border-b border-border/60 px-4 py-3 last:border-0"><Avatar name={row.personName} /><div class="min-w-0"><strong class="block truncate text-sm">{row.personName}</strong><span class="block truncate text-xs text-muted-foreground">{row.groupName} · as of {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(`${row.effectiveDate}T12:00:00`))}</span></div><div class="text-right"><span class="block text-xs text-muted-foreground">{row.direction === "owes_me" ? "owes you" : "you owe"}</span><strong class={`mt-0.5 block text-sm ${row.direction === "owes_me" ? "text-positive" : "text-negative"}`}>{formatMinor(row.amountMinor, row.currency)}</strong></div></div>}</For>
@@ -888,57 +903,57 @@ export function MigrationDialog(props: {
                         }}</For>
                       </div>
                     </details></Show>
-                    <div class="migration-reconcile"><span><Check size={16} /></span><div><strong>{commit()!.mode === "balances" ? "Balance entries validated" : commit()!.reconciliation.lines.length > 0 ? "Reconciliation passed" : "Integrity checks passed"}</strong><p>{commit()!.mode === "balances" ? "Every balance above is zero-sum and will stay outside spending charts." : commit()!.reconciliation.lines.length > 0 ? "Every currency adds to zero and every available Splitwise balance matches Tallied exactly." : "Every included financial row is valid and zero-sum. An independent closing-balance comparison was not available."}</p></div></div>
+                    <div class="migration-reconcile"><span><Check size={16} /></span><div><strong>{commit()!.mode === "balances" ? "Balances checked" : commit()!.reconciliation.lines.length > 0 ? "Balances match" : "Entries checked"}</strong><p>{commit()!.mode === "balances" ? "Every balance above adds to zero and will stay outside spending charts." : commit()!.reconciliation.lines.length > 0 ? "Every currency adds to zero and every available Splitwise balance matches Tallied exactly." : "Every included entry is valid and adds to zero. Splitwise did not provide a separate closing balance to compare."}</p></div></div>
                     <Show when={commit()!.mode === "balances"}><Button variant="secondary" class="w-full" onClick={() => void editOpeningBalances()}>Edit balances</Button></Show>
-                    <label class="flex min-h-12 items-start gap-3 rounded-lg border border-border p-3 text-sm"><input class="mt-1 size-4" type="checkbox" checked={reviewed()} onChange={(event) => setReviewed(event.currentTarget.checked)} /><span>I reviewed the people, groups, currencies, and totals above.</span></label>
-                    <Button class="w-full" disabled={!reviewed() || busy()} onClick={() => void finishImport()}>{busy() ? <><LoaderCircle class="animate-spin" size={16} /> Finishing safely…</> : <>Finish migration</>}</Button>
-                    <p class="text-center text-xs leading-5 text-muted-foreground">If the connection drops, reopen this screen. The same signed batch will resume without duplicates.</p>
+                    <label class="flex min-h-12 items-start gap-3 rounded-lg border border-border p-3 text-sm"><input class="mt-1 size-4" type="checkbox" checked={reviewed()} onChange={(event) => setReviewed(event.currentTarget.checked)} /><span>I checked the people, groups, currencies, and totals above.</span></label>
+                    <Button class="w-full" disabled={!reviewed() || busy()} onClick={() => void finishImport()}>{busy() ? <><LoaderCircle class="animate-spin" size={16} /> Finishing import…</> : <>Finish import</>}</Button>
+                    <p class="text-center text-xs leading-5 text-muted-foreground">If the connection drops, reopen this screen. Tallied resumes this import without creating duplicates.</p>
                   </div>
                 </Show>
 
                 <Show when={step() === "complete" && completedBatch()}>
                   <div class="space-y-5 text-center focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" data-migration-step="complete" tabindex="-1">
                     <div class="mx-auto grid size-14 place-items-center rounded-full bg-positive/10 text-positive"><Check size={26} stroke-width={2.5} /></div>
-                    <div><p class="eyebrow">Migration complete</p><h2 class="mt-1 text-2xl font-semibold tracking-tight">Your balances are tallied.</h2><p class="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">{completedBatch()!.recordCount} entries across {completedBatch()!.groupCount} groups are ready. Your original Splitwise data was not changed.</p></div>
+                    <div><p class="eyebrow">Import complete</p><h2 class="mt-1 text-2xl font-semibold tracking-tight">Your balances are ready.</h2><p class="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">{completedBatch()!.recordCount} entries across {completedBatch()!.groupCount} groups are ready. Your original Splitwise data was not changed.</p></div>
                     <Show when={identities().length}>
                       <Card class="overflow-hidden text-left">
                         <div class="border-b border-border px-4 py-3">
-                          <strong class="text-sm">Let people claim their history</strong>
-                          <p class="mt-0.5 text-xs text-muted-foreground">Each single-use link reveals no identity or balance before sign-in.</p>
+                          <strong class="text-sm">Connect people to their history</strong>
+                          <p class="mt-0.5 text-xs text-muted-foreground">The link shows no names or balances until the person signs in.</p>
                         </div>
                         <For each={identities()}>{(identity) => (
                           <div class="flex min-h-14 items-center gap-3 border-b border-border/60 px-4 py-3 last:border-0">
                             <Avatar name={identity.displayName} />
-                            <div class="min-w-0 flex-1"><strong class="block truncate text-sm">{identity.displayName}</strong><span class="text-xs text-muted-foreground">{identity.status === "claimed" ? "Claimed" : identity.status === "awaiting_owner" ? "Waiting for your approval" : "Not claimed"}</span></div>
-                            <Show when={identity.status === "unclaimed" || identity.status === "reserved"}><Button size="sm" variant="secondary" onClick={() => void shareClaim(completedBatch()!.id, identity.id)}>Share</Button></Show>
+                            <div class="min-w-0 flex-1"><strong class="block truncate text-sm">{identity.displayName}</strong><span class="text-xs text-muted-foreground">{identityStatusLabel(identity.status)}</span></div>
+                            <Show when={identity.status === "unclaimed" || identity.status === "reserved"}><Button size="sm" variant="secondary" onClick={() => void shareClaim(completedBatch()!.id, identity.id)}>Share link</Button></Show>
                           </div>
                         )}</For>
                       </Card>
                     </Show>
-                    <div class="grid grid-cols-2 gap-2"><Dialog.CloseButton class="ui-button min-h-11 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Done</Dialog.CloseButton><Button variant="secondary" onClick={() => setStep("manage")}>Manage</Button></div>
+                    <div class="grid grid-cols-2 gap-2"><Dialog.CloseButton class="ui-button min-h-11 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Done</Dialog.CloseButton><Button variant="secondary" onClick={() => setStep("manage")}>Manage imports</Button></div>
                   </div>
                 </Show>
 
                 <Show when={step() === "manage"}>
                   <div class="space-y-5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" data-migration-step="manage" tabindex="-1">
-                    <div><p class="eyebrow">Migration history</p><h2 class="mt-1 text-xl font-semibold tracking-tight">Imported into Tallied</h2><p class="mt-1 text-sm text-muted-foreground">Undo affects only records created by that migration.</p></div>
-                    <Show when={imports.error}><div role="alert" class="rounded-xl border border-destructive/35 p-4 text-sm leading-6 text-destructive"><p>Migration history could not be loaded. Your imported ledger is unchanged.</p><Button class="mt-3" size="sm" variant="secondary" onClick={() => void refetchImports()}>Try again</Button></div></Show>
+                    <div><p class="eyebrow">Import history</p><h2 class="mt-1 text-xl font-semibold tracking-tight">Imported into Tallied</h2><p class="mt-1 text-sm text-muted-foreground">Undo removes only the entries created by that import.</p></div>
+                    <Show when={imports.error}><div role="alert" class="rounded-xl border border-destructive/35 p-4 text-sm leading-6 text-destructive"><p>Unable to load import history. Your imported balances are unchanged.</p><Button class="mt-3" size="sm" variant="secondary" onClick={() => void refetchImports()}>Try again</Button></div></Show>
                     <Show when={!imports.error}>
-                      <Show when={!imports.loading} fallback={<p class="text-sm text-muted-foreground" role="status" aria-live="polite">Loading migrations…</p>}>
-                        <Show when={imports()?.imports.length} fallback={<p class="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No completed migrations yet.</p>}>
+                      <Show when={!imports.loading} fallback={<p class="text-sm text-muted-foreground" role="status" aria-live="polite">Loading imports…</p>}>
+                        <Show when={imports()?.imports.length} fallback={<p class="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No completed imports yet.</p>}>
                         <div class="space-y-3">
                           <For each={imports()?.imports}>{(batch) => (
                             <Card class="p-4">
-                              <div class="flex items-start justify-between gap-3"><div><div class="flex items-center gap-2"><strong class="text-sm">Splitwise migration</strong><Badge>{batch.status}</Badge></div><p class="mt-1 text-xs text-muted-foreground">{batch.groupCount} groups · {batch.recordCount} entries · {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(batch.completedAt ?? batch.startedAt))}</p></div><Database size={18} class="text-muted-foreground" /></div>
-                              <div class="mt-3 flex flex-wrap gap-2"><Button variant="secondary" size="sm" disabled={busy()} onClick={() => void showImportedPeople(batch.id)}>People</Button><Show when={batch.status === "completed" && batch.rollbackStatus === "available"}><Button variant="destructive" size="sm" disabled={busy()} onClick={() => setDestructiveAction({ kind: "undo", batch })}><RotateCcw size={15} /> Undo migration</Button></Show><Show when={!batch.sourceDataDeletedAt}><Button variant="secondary" size="sm" disabled={busy()} onClick={() => setDestructiveAction({ kind: "delete", batch })}><Trash2 size={15} /> Delete source data</Button></Show></div>
+                              <div class="flex items-start justify-between gap-3"><div><div class="flex items-center gap-2"><strong class="text-sm">Splitwise import</strong><Badge>{importStatusLabel(batch.status)}</Badge></div><p class="mt-1 text-xs text-muted-foreground">{batch.groupCount} groups · {batch.recordCount} entries · {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(batch.completedAt ?? batch.startedAt))}</p></div><Database size={18} class="text-muted-foreground" /></div>
+                              <div class="mt-3 flex flex-wrap gap-2"><Button variant="secondary" size="sm" disabled={busy()} onClick={() => void showImportedPeople(batch.id)}>View people</Button><Show when={batch.status === "completed" && batch.rollbackStatus === "available"}><Button variant="destructive" size="sm" disabled={busy()} onClick={() => setDestructiveAction({ kind: "undo", batch })}><RotateCcw size={15} /> Undo import</Button></Show><Show when={!batch.sourceDataDeletedAt}><Button variant="secondary" size="sm" disabled={busy()} onClick={() => setDestructiveAction({ kind: "delete", batch })}><Trash2 size={15} /> Delete source data</Button></Show></div>
                               <Show when={expandedPeopleBatch() === batch.id}>
                                 <div class="mt-3 divide-y divide-border/60 rounded-lg border border-border">
-                                  <For each={managedIdentities()} fallback={<p class="p-3 text-xs text-muted-foreground">No unclaimed people in this migration.</p>}>{(identity) => (
+                                  <For each={managedIdentities()} fallback={<p class="p-3 text-xs text-muted-foreground">Everyone in this import is connected.</p>}>{(identity) => (
                                     <div class="flex min-h-14 items-center gap-3 px-3 py-2">
                                       <Avatar name={identity.displayName} />
-                                      <div class="min-w-0 flex-1"><strong class="block truncate text-sm">{identity.displayName}</strong><span class="block truncate text-xs text-muted-foreground">{identity.status === "awaiting_owner" ? identity.claimant ? `${identity.claimant.displayName} · ${identity.claimant.email}` : "Waiting for your approval" : identity.status}</span></div>
-                                      <Show when={identity.status === "awaiting_owner"} fallback={<Show when={identity.status === "unclaimed" || identity.status === "reserved"}><Button size="sm" variant="secondary" onClick={() => void shareClaim(batch.id, identity.id)}>Share</Button></Show>}>
-                                        <Button size="sm" onClick={() => setClaimDecision({ identity, batchId: batch.id })}>Review claim</Button>
+                                      <div class="min-w-0 flex-1"><strong class="block truncate text-sm">{identity.displayName}</strong><span class="block truncate text-xs text-muted-foreground">{identity.status === "awaiting_owner" && identity.claimant ? `${identity.claimant.displayName} · ${identity.claimant.email}` : identityStatusLabel(identity.status)}</span></div>
+                                      <Show when={identity.status === "awaiting_owner"} fallback={<Show when={identity.status === "unclaimed" || identity.status === "reserved"}><Button size="sm" variant="secondary" onClick={() => void shareClaim(batch.id, identity.id)}>Share link</Button></Show>}>
+                                        <Button size="sm" onClick={() => setClaimDecision({ identity, batchId: batch.id })}>Review connection</Button>
                                       </Show>
                                     </div>
                                   )}</For>
@@ -950,7 +965,7 @@ export function MigrationDialog(props: {
                         </Show>
                       </Show>
                     </Show>
-                    <Button variant="secondary" class="w-full" onClick={() => setStep("choose")}>Start another migration</Button>
+                    <Button variant="secondary" class="w-full" onClick={() => setStep("choose")}>Start another import</Button>
                   </div>
                 </Show>
               </Show>
@@ -964,16 +979,16 @@ export function MigrationDialog(props: {
           <div class="fixed inset-0 z-[70] grid place-items-center p-5">
             <AlertDialog.Content class="confirm-dialog w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-2xl outline-none">
               <div class="mx-auto grid size-11 place-items-center rounded-full bg-primary/10 text-primary"><ShieldCheck size={19} /></div>
-              <AlertDialog.Title class="mt-4 text-center text-lg font-semibold tracking-tight">Confirm who is claiming this history</AlertDialog.Title>
+              <AlertDialog.Title class="mt-4 text-center text-lg font-semibold tracking-tight">Confirm this account</AlertDialog.Title>
               <AlertDialog.Description class="mt-2 text-center text-sm leading-6 text-muted-foreground">
-                <Show when={claimDecision()?.identity.claimant} fallback={<>Claimant details are unavailable. Reject this request and share a new link.</>}>
-                  {(claimant) => <><strong class="text-foreground">{claimant().displayName}</strong> verified <strong class="break-all text-foreground">{claimant().email}</strong>. Approving connects that account as imported <strong class="text-foreground">{claimDecision()!.identity.displayName}</strong> and gives it access to the shared imported groups.</>}
+                <Show when={claimDecision()?.identity.claimant} fallback={<>Account details are unavailable. Decline this request and share a new link.</>}>
+                  {(claimant) => <><strong class="text-foreground">{claimant().displayName}</strong> verified <strong class="break-all text-foreground">{claimant().email}</strong>. Connecting this account as <strong class="text-foreground">{claimDecision()!.identity.displayName}</strong> gives it access to the imported groups they share.</>}
                 </Show>
               </AlertDialog.Description>
               <Show when={claimDecision()?.identity.claimant}>{(claimant) => <p class="mt-3 text-center text-xs text-muted-foreground">Requested {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(claimant().requestedAt))} · expires {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(claimant().expiresAt))}</p>}</Show>
               <div class="mt-5 grid grid-cols-2 gap-2">
-                <Button variant="destructive" disabled={busy()} onClick={() => void rejectClaim(claimDecision()!.identity.id, claimDecision()!.batchId)}>Reject</Button>
-                <Button disabled={busy() || !claimDecision()?.identity.claimant} onClick={() => void approveClaim(claimDecision()!.identity.id, claimDecision()!.batchId)}>Approve claim</Button>
+                <Button variant="destructive" disabled={busy()} onClick={() => void rejectClaim(claimDecision()!.identity.id, claimDecision()!.batchId)}>Decline request</Button>
+                <Button disabled={busy() || !claimDecision()?.identity.claimant} onClick={() => void approveClaim(claimDecision()!.identity.id, claimDecision()!.batchId)}>Connect account</Button>
               </div>
               <Button class="mt-2 w-full" variant="ghost" disabled={busy()} onClick={() => setClaimDecision(undefined)}>Cancel</Button>
             </AlertDialog.Content>
@@ -987,14 +1002,14 @@ export function MigrationDialog(props: {
             <AlertDialog.Content class="confirm-dialog w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-2xl outline-none">
               <div class="mx-auto grid size-11 place-items-center rounded-full bg-destructive/10 text-destructive"><Trash2 size={19} /></div>
               <AlertDialog.Title class="mt-4 text-center text-lg font-semibold tracking-tight">
-                {destructiveAction()?.kind === "discard" ? "Discard this migration draft?" : destructiveAction()?.kind === "undo" ? "Undo this migration?" : "Delete source data?"}
+                {destructiveAction()?.kind === "discard" ? "Discard this import draft?" : destructiveAction()?.kind === "undo" ? "Undo this import?" : "Delete source data?"}
               </AlertDialog.Title>
               <AlertDialog.Description class="mt-2 text-center text-sm leading-6 text-muted-foreground">
                 {destructiveAction()?.kind === "discard"
                   ? "The files you selected and your review progress will be removed from this device. Nothing has been added to Tallied yet."
                   : destructiveAction()?.kind === "undo"
-                    ? "Only entries created by this migration will be reversed. Tallied entries added later will stay."
-                    : "Raw provider IDs, file fingerprints, and retained source details will be erased. A one-way duplicate marker, migrated balances, and descriptions will stay."}
+                    ? "Only entries created by this import will be reversed. Tallied entries added later will stay."
+                    : "Raw provider IDs, file fingerprints, and retained source details will be erased. A one-way duplicate marker, imported balances, and descriptions will stay."}
               </AlertDialog.Description>
               <div class="mt-5 grid grid-cols-2 gap-2">
                 <Button variant="secondary" disabled={busy()} onClick={() => setDestructiveAction(undefined)}>Cancel</Button>
@@ -1004,7 +1019,7 @@ export function MigrationDialog(props: {
                   if (action.kind === "discard") void discardDraft().then(() => setDestructiveAction(undefined));
                   else if (action.kind === "undo" && action.batch) void performUndo(action.batch);
                   else if (action.kind === "delete" && action.batch) void performSourceDelete(action.batch);
-                }}>{busy() ? "Working…" : destructiveAction()?.kind === "discard" ? "Discard draft" : destructiveAction()?.kind === "undo" ? "Undo migration" : "Delete source data"}</Button>
+                }}>{busy() ? "Working…" : destructiveAction()?.kind === "discard" ? "Discard draft" : destructiveAction()?.kind === "undo" ? "Undo import" : "Delete source data"}</Button>
               </div>
             </AlertDialog.Content>
           </div>

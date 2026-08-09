@@ -29,7 +29,7 @@ async function undoOnCurrentThread(
     sign: (operation) => signOperation(operation, options.privateKey),
     onProgress: (completed, total) => options.onProgress?.("planning", completed, total),
   });
-  if (request.operations.length === 0) throw new Error("Sync this device before undoing the migration");
+  if (request.operations.length === 0) throw new Error("Sync this device before undoing the import.");
   return undoImport(batchId, request, (completed, total) => options.onProgress?.("uploading", completed, total));
 }
 
@@ -44,7 +44,7 @@ export function undoImportOffMainThread(
     const worker = new Worker(new URL("./import-undo.worker.ts", import.meta.url), { type: "module" });
     const timeout = globalThis.setTimeout(() => {
       worker.terminate();
-      reject(new Error("This migration undo took too long"));
+      reject(new Error("Undoing this import took too long. Try again."));
     }, 10 * 60_000);
     const finish = (): void => {
       globalThis.clearTimeout(timeout);
@@ -61,7 +61,7 @@ export function undoImportOffMainThread(
     });
     worker.addEventListener("error", () => {
       finish();
-      reject(new Error("This migration could not be undone on this device"));
+      reject(new Error("This device could not undo the import. Try again here or use another device."));
     }, { once: true });
     try {
       worker.postMessage({

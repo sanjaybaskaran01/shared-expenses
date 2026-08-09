@@ -8,7 +8,7 @@ export interface GroupConnectionMember {
 
 type MemberConnectionState = "active" | "invitation-pending" | "import-unlinked" | "import-awaiting-review";
 
-export const IMPORT_IDENTITY_LINK_EXPLANATION = "Names are not unique, and sharing another group does not prove who owns imported history. The secure link confirms the right Tallied account before access is granted.";
+export const IMPORT_IDENTITY_LINK_EXPLANATION = "A shared group does not prove who owns imported history. The secure link verifies the right account before it receives access.";
 
 function memberConnectionState(member: {
   status: string;
@@ -25,7 +25,7 @@ export function pendingExpenseMemberLabel(member: {
   importClaim?: GroupConnectionMember["importClaim"];
 }): string | undefined {
   const state = memberConnectionState(member);
-  if (state === "import-unlinked" || state === "import-awaiting-review") return "Account not linked";
+  if (state === "import-unlinked" || state === "import-awaiting-review") return "Account not connected";
   return state === "invitation-pending" ? "Invite pending" : undefined;
 }
 
@@ -42,7 +42,7 @@ export function memberBalanceContextPrefix(member: {
   importClaim?: GroupConnectionMember["importClaim"];
 }): string {
   const state = memberConnectionState(member);
-  if (state === "import-unlinked" || state === "import-awaiting-review") return "Account not linked · ";
+  if (state === "import-unlinked" || state === "import-awaiting-review") return "Account not connected · ";
   return state === "invitation-pending" ? "Invitation pending · " : "";
 }
 
@@ -50,7 +50,7 @@ export function memberConnectionActionLabel(member: {
   status: string;
   importClaim?: GroupConnectionMember["importClaim"];
 }): string {
-  return memberConnectionState(member) === "invitation-pending" ? "Invite pending" : "Link account";
+  return memberConnectionState(member) === "invitation-pending" ? "Invite pending" : "Connect account";
 }
 
 export interface GroupConnectionCallout {
@@ -72,18 +72,18 @@ export function groupConnectionCallout(
     return {
       count: pending.length,
       title: awaitingReview.length === 1
-        ? `Review ${awaitingReview[0]!.displayName}’s account link`
-        : `Review ${awaitingReview.length} account links`,
-      detail: "Confirm the right account before sharing imported balances.",
+        ? `Review ${awaitingReview[0]!.displayName}’s connection`
+        : `Review ${awaitingReview.length} account connections`,
+      detail: "Confirm each account before sharing imported balances.",
     };
   }
 
   return {
     count: pending.length,
     title: pending.length === 1
-      ? `Link ${pending[0]!.displayName}’s imported history`
-      : `Link ${pending.length} imported histories`,
-    detail: "Expenses work now. Link them to the right Tallied account when ready.",
+      ? `Connect ${pending[0]!.displayName}’s imported history`
+      : `Connect ${pending.length} imported histories`,
+    detail: "You can add expenses now. Connect each person to their Tallied account when ready.",
   };
 }
 
@@ -93,8 +93,8 @@ export function groupMemberStatus(
 ): string {
   if (isCurrentUser) return "You";
   const state = memberConnectionState(member);
-  if (state === "import-awaiting-review") return "Account link awaiting review";
-  if (state === "import-unlinked") return "Account not linked · you can still add expenses";
+  if (state === "import-awaiting-review") return "Account connection awaiting review";
+  if (state === "import-unlinked") return "Account not connected · you can still add expenses";
   if (state === "invitation-pending") return "Invitation pending · you can still add expenses";
   return "Member";
 }

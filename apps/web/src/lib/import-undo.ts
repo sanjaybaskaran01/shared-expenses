@@ -75,7 +75,7 @@ export async function buildImportUndo(
       targetId: operation.targetId,
       baseVersion: operation.baseVersion + 1,
       clientTimestamp: options.timestamp,
-      payload: { undoImportBatchId: batchId, reason: "Undo migration" },
+      payload: { undoImportBatchId: batchId, reason: "Undo import" },
       });
       completed += 1;
       if (completed === creations.length || completed - lastReported >= 250) {

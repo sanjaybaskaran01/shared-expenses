@@ -86,12 +86,12 @@ export function GroupSettingsDialog(props: {
     try {
       await inviteGroupMember(activeGroup.id, { email: address });
       setEmail("");
-      setMessage(`Invite sent to ${address}. Their link verifies the email and joins ${activeGroup.name}.`);
+      setMessage(`Invitation sent to ${address}. The link verifies their email and adds them to ${activeGroup.name}.`);
       props.onNotify("Group invitation sent");
       void appStore.sync();
     } catch (error) {
       setMessageTone("error");
-      setMessage(error instanceof Error ? error.message : "Could not send this invitation");
+      setMessage(error instanceof Error ? error.message : "Unable to send this invitation. Try again.");
     } finally {
       setBusy(false);
     }
@@ -109,7 +109,7 @@ export function GroupSettingsDialog(props: {
       props.onNotify(`Group currency changed to ${value}`);
     } catch (error) {
       setMessageTone("error");
-      setMessage(error instanceof Error ? error.message : "Could not change the group currency");
+      setMessage(error instanceof Error ? error.message : "Unable to change the group currency. Try again.");
     } finally {
       setCurrencyBusy(false);
     }
@@ -143,7 +143,7 @@ export function GroupSettingsDialog(props: {
               <section class="group-settings-section" aria-labelledby="add-group-member-title">
                 <div class="group-settings-section-heading">
                   <span class="group-settings-section-icon" aria-hidden="true"><UserPlus size={17} /></span>
-                  <div><h3 id="add-group-member-title">Add someone</h3><p>One email is enough.</p></div>
+                  <div><h3 id="add-group-member-title">Add someone</h3><p>They can join with one email link.</p></div>
                 </div>
                 <form class="group-invite-form" onSubmit={(event) => void invite(event)}>
                   <label for="group-invite-email">Email address</label>
@@ -160,13 +160,13 @@ export function GroupSettingsDialog(props: {
                       required
                       value={email()}
                       onInput={(event) => setEmail(event.currentTarget.value)}
-                      placeholder="friend@example.com…"
+                      placeholder="friend@example.com"
                     />
                     <Button type="submit" disabled={busy()}>
                       <Show when={busy()} fallback="Send invite"><LoaderCircle class="animate-spin" size={16} /> Sending…</Show>
                     </Button>
                   </div>
-                  <p>The magic link verifies their email and joins this group. They won’t need to verify it twice.</p>
+                  <p>The link verifies their email, signs them in, and adds them to this group.</p>
                 </form>
                 <Show when={message()}><p class="group-settings-message" role={messageTone() === "error" ? "alert" : "status"} aria-live={messageTone() === "error" ? "assertive" : "polite"} classList={{ error: messageTone() === "error" }}>{message()}</p></Show>
               </section>
@@ -175,7 +175,7 @@ export function GroupSettingsDialog(props: {
                 <section class="group-settings-section" aria-labelledby="imported-history-title">
                   <div class="group-settings-section-heading">
                     <span class="group-settings-section-icon" aria-hidden="true"><ChevronRight size={17} /></span>
-                    <div><h3 id="imported-history-title">Imported history</h3><p>Already on Tallied? Send the secure link to that account.</p></div>
+                    <div><h3 id="imported-history-title">Connect imported history</h3><p>Send each person a secure link to connect their Tallied account.</p></div>
                   </div>
                   <div class="group-settings-claims">
                     <For each={claimableMembers()}>{(member) => <ImportedMemberClaim member={member} onNotify={props.onNotify} />}</For>

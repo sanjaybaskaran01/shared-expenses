@@ -57,9 +57,9 @@ export function ExpenseTargetPicker(props: ExpenseTargetPickerProps) {
           <header class="flex min-h-16 items-center justify-between border-b border-border px-5">
             <div>
               <Dialog.Title class="text-base font-semibold tracking-[-.015em]">Who is this with?</Dialog.Title>
-              <Dialog.Description class="mt-0.5 text-xs text-muted-foreground">Choose a person or a group before adding details.</Dialog.Description>
+              <Dialog.Description class="mt-0.5 text-xs text-muted-foreground">Choose a person or group for this expense.</Dialog.Description>
             </div>
-            <Dialog.CloseButton class="icon-button" aria-label="Close"><X size={18} /></Dialog.CloseButton>
+            <Dialog.CloseButton class="icon-button" aria-label="Close expense group picker"><X size={18} /></Dialog.CloseButton>
           </header>
           <div class="border-b border-border p-4">
             <label class="relative block">
@@ -70,10 +70,10 @@ export function ExpenseTargetPicker(props: ExpenseTargetPickerProps) {
           </div>
           <div class="max-h-[62dvh] overflow-y-auto px-2 py-2">
             <Show when={recentGroup()}>{(target) => <>
-              <p class="target-section-label">Recent</p>
+              <p class="target-section-label">Recently used</p>
               <button class="target-row" type="button" data-testid={`expense-target-${target().key}`} onClick={() => choose(target())}>
                 <span class="target-icon"><UsersRound size={17} /></span>
-                <span class="min-w-0 flex-1"><strong>{target().label}</strong><small>{target().detail} · last used</small></span>
+                <span class="min-w-0 flex-1"><strong>{target().label}</strong><small>{target().detail}</small></span>
                 <ChevronRight size={16} class="text-muted-foreground" />
               </button>
             </>}</Show>
@@ -89,16 +89,16 @@ export function ExpenseTargetPicker(props: ExpenseTargetPickerProps) {
               <p class="target-section-label mt-3">People</p>
               <For each={people()}>{(target) => <button class="target-row" type="button" data-testid={`expense-target-${target.key}`} onClick={() => choose(target)}>
                 <Avatar name={target.label} class="size-9 text-xs" />
-                <span class="min-w-0 flex-1"><strong>{target.label}</strong><small>Shared in {target.detail}</small><Show when={target.pendingLabel}><small class="target-pending-label">{target.pendingLabel}</small></Show></span>
+                <span class="min-w-0 flex-1"><strong>{target.label}</strong><small>{target.detail}</small><Show when={target.pendingLabel}><small class="target-pending-label">{target.pendingLabel}</small></Show></span>
                 <ChevronRight size={16} class="text-muted-foreground" />
               </button>}</For>
             </Show>
             <Show when={!visible().length}>
-              <div class="px-5 py-10 text-center"><UserRound class="mx-auto text-muted-foreground" size={25} /><p class="mt-3 text-sm font-medium">No matches</p><p class="mt-1 text-xs text-muted-foreground">Try another name or group.</p></div>
+              <div class="px-5 py-10 text-center"><UserRound class="mx-auto text-muted-foreground" size={25} /><p class="mt-3 text-sm font-medium">No results for “{query().trim()}”</p><button type="button" class="mt-2 min-h-11 px-3 text-sm font-medium text-primary" onClick={() => { setQuery(""); searchRef?.focus(); }}>Clear search</button></div>
             </Show>
           </div>
           <footer class="border-t border-border p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-            <Button variant="secondary" class="w-full" onClick={() => { props.onOpenChange(false); props.onCreateGroup(); }}><Plus size={16} /> Create a new group</Button>
+            <Button variant="secondary" class="w-full" onClick={() => { props.onOpenChange(false); props.onCreateGroup(); }}><Plus size={16} /> Create group</Button>
           </footer>
         </Dialog.Content>
       </div>

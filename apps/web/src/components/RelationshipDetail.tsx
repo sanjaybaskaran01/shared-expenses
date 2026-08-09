@@ -49,6 +49,12 @@ export function RelationshipDetail(props: {
     const relationship = props.relationship;
     return Boolean(settlement() && relationship && settlementBlockerCount(appStore.expenses(), relationship.groupIds[0]!, relationship.currency) === 0);
   });
+  const balanceSummary = createMemo(() => {
+    const amount = props.relationship?.amountMinor ?? 0;
+    if (amount > 0) return `${personName()} owes you`;
+    if (amount < 0) return `You owe ${personName()}`;
+    return `You and ${personName()} are settled`;
+  });
 
   return <Dialog open={props.open} onOpenChange={props.onOpenChange}>
     <Dialog.Portal>
@@ -64,9 +70,9 @@ export function RelationshipDetail(props: {
           </header>
           <div class="grid gap-5 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
             <section class="relationship-detail-summary">
-              <span classList={{ "money-in": (props.relationship?.amountMinor ?? 0) > 0, "money-out": (props.relationship?.amountMinor ?? 0) < 0 }}>{props.relationship?.amountMinor && props.relationship.amountMinor > 0 ? `${personName()} owes you` : "You owe"}</span>
+              <span classList={{ "money-in": (props.relationship?.amountMinor ?? 0) > 0, "money-out": (props.relationship?.amountMinor ?? 0) < 0 }}>{balanceSummary()}</span>
               <strong classList={{ "money-in": (props.relationship?.amountMinor ?? 0) > 0, "money-out": (props.relationship?.amountMinor ?? 0) < 0 }}>{money(Math.abs(props.relationship?.amountMinor ?? 0), props.relationship?.currency ?? "USD")}</strong>
-              <p>{contributions().length} contributing {contributions().length === 1 ? "group" : "groups"}</p>
+              <p>Across {contributions().length} shared {contributions().length === 1 ? "group" : "groups"}</p>
             </section>
             <section aria-labelledby="relationship-groups-heading">
               <h3 id="relationship-groups-heading" class="micro-label mb-2">Where this balance comes from</h3>
@@ -78,7 +84,7 @@ export function RelationshipDetail(props: {
                 </button>}</For>
               </div>
             </section>
-            <Show when={canSettle() && settlement()} fallback={<Show when={contributions().length > 1}><p class="text-xs leading-5 text-muted-foreground">Open a group to settle its part separately. This keeps every shared record explainable.</p></Show>}>
+            <Show when={canSettle() && settlement()} fallback={<Show when={contributions().length > 1}><p class="text-xs leading-5 text-muted-foreground">Open a group to settle that balance separately.</p></Show>}>
               {(value) => <Button onClick={() => { const relationship = props.relationship!; props.onOpenChange(false); props.onSettle(value(), relationship.currency, relationship.groupIds[0]!); }}><Scale size={16} /> Settle with {personName()}</Button>}
             </Show>
           </div>

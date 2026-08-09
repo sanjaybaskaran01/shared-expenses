@@ -74,7 +74,7 @@ describe("standalone contact invitations", () => {
     expect(store.reserve(invite.token, "bob@example.com").invitationId).toBe(invite.id);
     expect(store.canCreateAccount("bob@example.com")).toBe(true);
     expect(() => store.reserve(invite.token, "carol@example.com")).toThrow(
-      "This invitation is already reserved",
+      "This invitation was opened with another email address. Use that email or ask the sender for a new link.",
     );
     expect(store.canCreateAccount("carol@example.com")).toBe(false);
   });
@@ -115,7 +115,7 @@ describe("standalone contact invitations", () => {
 
     expect(store.list("alice").creditsRemaining).toBe(5);
     expect(() => store.reserve(invite.token, "bob@example.com")).toThrow(
-      "This invitation is no longer available",
+      "This invitation has expired or is no longer available. Ask the sender for a new one.",
     );
   });
 

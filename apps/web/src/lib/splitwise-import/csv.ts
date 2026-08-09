@@ -139,7 +139,7 @@ export function parseSplitwiseCsv(text: string, options: SourceOptions): Normali
       const description = cleanText(row[descriptionIndex], 200, "Imported transaction");
       const category = categoryIndex >= 0 ? cleanText(row[categoryIndex], 100, "Imported") : "Imported";
       const amountMinor = Math.abs(moneyMinor(row[costIndex]));
-      if (amountMinor === 0) throw new RangeError("Amount must be greater than zero");
+      if (amountMinor === 0) throw new RangeError("Enter an amount greater than zero.");
       const currency = currencyCode(row[currencyIndex]);
       const transactionDate = calendarDate(row[dateIndex]);
       const effects = personColumns.map(({ header, index: personColumn }) => ({

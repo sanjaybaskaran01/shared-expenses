@@ -29,6 +29,13 @@ function money(amountMinor: number, currency: string): string {
   return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(amountMinor / 100);
 }
 
+function syncStatusLabel(status: LocalExpense["syncStatus"]): string {
+  if (status === "pending") return "Saved on this device";
+  if (status === "conflicted") return "Needs review";
+  if (status === "rejected") return "Couldn’t sync";
+  return "Synced";
+}
+
 export function ExpenseDetail(props: ExpenseDetailProps) {
   const [comment, setComment] = createSignal("");
   const [confirmDelete, setConfirmDelete] = createSignal(false);
@@ -52,7 +59,7 @@ export function ExpenseDetail(props: ExpenseDetailProps) {
       setComment("");
       props.onChanged("Comment added");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not add comment");
+      setError(caught instanceof Error ? caught.message : "Unable to add this comment. Try again.");
     } finally {
       setBusy(false);
     }
@@ -69,12 +76,12 @@ export function ExpenseDetail(props: ExpenseDetailProps) {
         props.onChanged("Expense restored");
       } else {
         await voidExpense(expense, "Deleted from expense details");
-        props.onChanged("Expense deleted · restore it from Activity");
+        props.onChanged("Expense deleted. Restore it from Activity.");
       }
       setConfirmDelete(false);
       props.onOpenChange(false);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not update expense");
+      setError(caught instanceof Error ? caught.message : "Unable to update this expense. Try again.");
     } finally {
       setBusy(false);
     }
@@ -117,16 +124,16 @@ export function ExpenseDetail(props: ExpenseDetailProps) {
 
               <section>
                 <div class="mb-3 flex items-center justify-between"><h3 class="flex items-center gap-2 text-sm font-semibold"><MessageCircle size={16} /> Comments</h3><span class="text-xs text-muted-foreground">{comments().length}</span></div>
-                <div class="grid gap-2"><For each={comments()} fallback={<p class="rounded-lg bg-muted/55 px-4 py-5 text-center text-sm text-muted-foreground">No comments yet.</p>}>{(item) => <article class="rounded-lg bg-muted/65 p-3"><div class="flex items-center justify-between gap-3"><strong class="text-xs">{memberName(item.actorId)}</strong><time class="text-xs text-muted-foreground">{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(item.clientTimestamp))}</time></div><p class="mt-1 text-sm leading-5">{String((item.payload as Record<string, unknown>).body ?? "")}</p></article>}</For></div>
-                <form class="mt-3 flex gap-2" onSubmit={(event) => void submitComment(event)}><input class="form-control h-11" value={comment()} onInput={(event) => setComment(event.currentTarget.value)} placeholder="Add a comment" maxlength={2000} /><Button type="submit" size="icon" disabled={busy() || !comment().trim()} aria-label="Send comment"><ArrowRight size={17} /></Button></form>
+                <div class="grid gap-2"><For each={comments()} fallback={<p class="rounded-lg bg-muted/55 px-4 py-5 text-center text-sm text-muted-foreground">No comments yet. Add the first one below.</p>}>{(item) => <article class="rounded-lg bg-muted/65 p-3"><div class="flex items-center justify-between gap-3"><strong class="text-xs">{memberName(item.actorId)}</strong><time class="text-xs text-muted-foreground">{new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(item.clientTimestamp))}</time></div><p class="mt-1 text-sm leading-5">{String((item.payload as Record<string, unknown>).body ?? "")}</p></article>}</For></div>
+                <form class="mt-3 grid gap-2" onSubmit={(event) => void submitComment(event)}><label for="expense-comment" class="text-sm font-medium">Add a comment</label><div class="flex gap-2"><input id="expense-comment" class="form-control h-11" value={comment()} onInput={(event) => setComment(event.currentTarget.value)} placeholder="e.g. I paid in cash" maxlength={2000} /><Button type="submit" size="icon" disabled={busy() || !comment().trim()} aria-label="Send comment"><ArrowRight size={17} /></Button></div></form>
               </section>
 
               <section class="expense-provenance" aria-label="Expense history and sync status">
                 <Show when={expense.readOnly} fallback={<CheckCircle2 size={15} class="text-primary" />}><DatabaseBackup size={15} class="text-primary" /></Show>
-                <div><strong>{expense.readOnly ? "Imported from Splitwise · read only" : expense.version === 1 ? `Added by ${memberName(expense.createdBy)}` : `Last changed by ${memberName(latestChange()?.actorId ?? expense.createdBy)}`}</strong><span>{expense.readOnly ? `${expense.importedByDisplayName ? `Imported by ${expense.importedByDisplayName}` : "Imported to Tallied"}${expense.importedAt ? ` on ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(expense.importedAt))}` : ""}. Undo its migration to remove or replace this history.` : `${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(latestChange()?.clientTimestamp ?? expense.updatedAt))} · ${expense.syncStatus === "pending" ? "waiting to sync" : expense.syncStatus === "conflicted" ? "conflict needs review" : expense.syncStatus === "rejected" ? "not accepted by the server" : "accepted by the server"}`}</span></div>
+                <div><strong>{expense.readOnly ? "Imported from Splitwise" : expense.version === 1 ? `Added by ${memberName(expense.createdBy)}` : `Last changed by ${memberName(latestChange()?.actorId ?? expense.createdBy)}`}</strong><span>{expense.readOnly ? `${expense.importedByDisplayName ? `Imported by ${expense.importedByDisplayName}` : "Imported to Tallied"}${expense.importedAt ? ` on ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(expense.importedAt))}` : ""}. This expense can’t be edited. Undo the import to remove or replace it.` : `${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(latestChange()?.clientTimestamp ?? expense.updatedAt))} · ${syncStatusLabel(expense.syncStatus)}`}</span></div>
               </section>
               <Show when={error()}><p class="error-callout" role="alert">{error()}</p></Show>
-              <Show when={!expense.readOnly}><div class="grid grid-cols-2 gap-2"><Show when={expense.status === "active"} fallback={<Button class="col-span-2" onClick={() => void changeStatus()} disabled={busy()}><RotateCcw size={16} /> Restore expense</Button>}><Button variant="secondary" onClick={() => props.onEdit(expense)}><PencilLine size={16} /> Edit</Button><Button ref={deleteButtonRef} variant="destructive" onClick={() => setConfirmDelete(true)}><Trash2 size={16} /> Delete</Button></Show></div></Show>
+              <Show when={!expense.readOnly}><div class="grid grid-cols-2 gap-2"><Show when={expense.status === "active"} fallback={<Button class="col-span-2" onClick={() => void changeStatus()} disabled={busy()}><RotateCcw size={16} /> Restore expense</Button>}><Button variant="secondary" onClick={() => props.onEdit(expense)}><PencilLine size={16} /> Edit expense</Button><Button ref={deleteButtonRef} variant="destructive" onClick={() => setConfirmDelete(true)}><Trash2 size={16} /> Delete expense</Button></Show></div></Show>
             </div>}</Show>
           </Dialog.Content>
         </div>

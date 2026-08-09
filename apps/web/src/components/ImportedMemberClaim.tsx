@@ -30,20 +30,20 @@ export function ImportedMemberClaim(props: ImportedMemberClaimProps) {
     try {
       const link = await createImportClaimLink(current.batchId, current.identityId);
       const share = {
-        title: `Link ${props.member.displayName}’s imported history on Tallied`,
-        text: `Open this secure Tallied link to connect your imported Splitwise history.`,
+        title: `Connect ${props.member.displayName}’s imported history on Tallied`,
+        text: "Use this secure Tallied link to connect your imported Splitwise history.",
         url: link.url,
       };
       if (navigator.share) {
         await navigator.share(share);
-        props.onNotify("Secure account link shared");
+        props.onNotify("Secure connection link shared");
       } else {
         await navigator.clipboard.writeText(`${share.text} ${share.url}`);
-        props.onNotify("Secure account link copied");
+        props.onNotify("Secure connection link copied");
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
-      props.onNotify(error instanceof Error ? error.message : "Could not create the secure link");
+      props.onNotify(error instanceof Error ? error.message : "Unable to create the secure link. Try again.");
     } finally {
       setBusy(false);
     }
@@ -56,10 +56,10 @@ export function ImportedMemberClaim(props: ImportedMemberClaimProps) {
     try {
       const { identities } = await getImportIdentities(current.batchId);
       const identity = identities.find(({ id }) => id === current.identityId);
-      if (!identity?.claimant) throw new Error("The claim is no longer waiting for review");
+      if (!identity?.claimant) throw new Error("This connection is no longer waiting for review.");
       setReview({ displayName: identity.claimant.displayName, email: identity.claimant.email });
     } catch (error) {
-      props.onNotify(error instanceof Error ? error.message : "Could not load the claim");
+      props.onNotify(error instanceof Error ? error.message : "Unable to load this connection. Try again.");
     } finally {
       setBusy(false);
     }
@@ -74,9 +74,9 @@ export function ImportedMemberClaim(props: ImportedMemberClaimProps) {
       else await rejectImportIdentityClaim(current.identityId);
       setReview(undefined);
       await appStore.sync();
-      props.onNotify(approved ? `${props.member.displayName}’s imported history is now linked` : "Request rejected; the imported history remains private");
+      props.onNotify(approved ? `${props.member.displayName}’s imported history is connected` : "Request declined. The imported history remains private.");
     } catch (error) {
-      props.onNotify(error instanceof Error ? error.message : "Could not resolve the claim");
+      props.onNotify(error instanceof Error ? error.message : "Unable to update this connection. Try again.");
     } finally {
       setBusy(false);
     }
@@ -87,24 +87,24 @@ export function ImportedMemberClaim(props: ImportedMemberClaimProps) {
       <span class="import-member-claim-icon"><ShieldCheck size={18} /></span>
       <div class="min-w-0 flex-1">
         <strong id={`claim-${props.member.userId}`}>
-          {claim()?.status === "awaiting_owner" ? `Review ${props.member.displayName}’s account link` : `Link ${props.member.displayName}’s imported history`}
+          {claim()?.status === "awaiting_owner" ? `Review ${props.member.displayName}’s connection` : `Connect ${props.member.displayName}’s imported history`}
         </strong>
         <p>
-          <Show when={claim()?.status === "awaiting_owner"} fallback="Their imported expenses are safe. You can keep adding expenses now; send this link to the Tallied account they already use.">
-            A signed-in account asked to claim this imported history. Confirm it is the right person.
+          <Show when={claim()?.status === "awaiting_owner"} fallback="Their imported expenses stay separate until they connect. You can keep adding expenses now; send this link to the Tallied account they use.">
+            A Tallied account requested access to this history. Confirm that it belongs to this person.
           </Show>
         </p>
         <Show when={review()}>{(claimant) => (
           <div class="import-claim-review" role="status">
             <span><b>{claimant().displayName || "Signed-in user"}</b><small>{claimant().email}</small></span>
-            <button type="button" disabled={busy()} onClick={() => void resolve(false)}><X size={15} /> Not them</button>
-            <button type="button" disabled={busy()} onClick={() => void resolve(true)}><Check size={15} /> Approve</button>
+            <button type="button" disabled={busy()} onClick={() => void resolve(false)}><X size={15} /> Decline request</button>
+            <button type="button" disabled={busy()} onClick={() => void resolve(true)}><Check size={15} /> Connect account</button>
           </div>
         )}</Show>
       </div>
       <Show when={!review()}>
         <button class="import-claim-action" type="button" disabled={busy()} onClick={() => void (claim()?.status === "awaiting_owner" ? loadReview() : sendLink())}>
-          <Show when={busy()} fallback={<><Link2 size={15} /> {claim()?.status === "awaiting_owner" ? "Review request" : "Send secure link"}</>}>
+          <Show when={busy()} fallback={<><Link2 size={15} /> {claim()?.status === "awaiting_owner" ? "Review request" : "Share secure link"}</>}>
             <LoaderCircle class="animate-spin" size={15} />
           </Show>
         </button>

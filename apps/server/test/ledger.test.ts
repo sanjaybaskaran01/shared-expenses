@@ -225,7 +225,7 @@ describe("ledger ingestion", () => {
       payload: { settlementCurrency: "EUR" },
     });
     expect((await store.push("user-1", [operation])).rejected).toEqual([
-      expect.objectContaining({ message: "Group currency is locked after the first expense or payment" }),
+      expect.objectContaining({ message: "The group currency cannot change after the first expense or payment." }),
     ]);
     expect(store.snapshot("user-1").groups).toEqual([
       expect.objectContaining({ id: "group-1", settlementCurrency: "USD" }),
@@ -342,7 +342,9 @@ describe("ledger ingestion", () => {
       },
     });
     const result = await store.push("user-1", [duplicateCreate]);
-    expect(result.rejected).toEqual([expect.objectContaining({ message: "Expense already exists" })]);
+    expect(result.rejected).toEqual([
+      expect.objectContaining({ message: "This expense already exists. Reload Tallied to see it." }),
+    ]);
     expect(store.snapshot("user-1").expenses).toEqual([
       expect.objectContaining({ description: "Dinner", version: 1 }),
     ]);
@@ -370,7 +372,7 @@ describe("ledger ingestion", () => {
     });
     const result = await store.push("user-1", [revive]);
     expect(result.rejected).toEqual([
-      expect.objectContaining({ message: "A voided expense cannot be amended" }),
+      expect.objectContaining({ message: "Restore this expense before editing it." }),
     ]);
     expect(store.snapshot("user-1").expenses).toEqual([expect.objectContaining({ status: "voided" })]);
   });
@@ -398,7 +400,7 @@ describe("ledger ingestion", () => {
       });
       const result = await store.push("user-1", [attack]);
       expect(result.rejected).toEqual([
-        expect.objectContaining({ message: "Target belongs to another group" }),
+        expect.objectContaining({ message: "This item belongs to another group. Reload Tallied and try again." }),
       ]);
       expect(store.snapshot("user-1").expenses).toEqual([
         expect.objectContaining({ id: "expense-1", status: "active" }),
@@ -425,7 +427,7 @@ describe("ledger ingestion", () => {
       });
       const result = await store.push("user-1", [attack]);
       expect(result.rejected).toEqual([
-        expect.objectContaining({ message: "Target belongs to another group" }),
+        expect.objectContaining({ message: "This item belongs to another group. Reload Tallied and try again." }),
       ]);
       expect(store.snapshot("user-1").expenses).toEqual([
         expect.objectContaining({ description: "Dinner", amountMinor: 1001 }),
@@ -443,7 +445,7 @@ describe("ledger ingestion", () => {
       });
       const result = await store.push("user-1", [attack]);
       expect(result.rejected).toEqual([
-        expect.objectContaining({ message: "Target belongs to another group" }),
+        expect.objectContaining({ message: "This item belongs to another group. Reload Tallied and try again." }),
       ]);
     });
   });
@@ -482,7 +484,7 @@ describe("ledger ingestion", () => {
       });
       const result = await store.push("user-1", [operation]);
       expect(result.rejected).toEqual([
-        expect.objectContaining({ message: "A payment cannot have the same payer and recipient" }),
+        expect.objectContaining({ message: "Choose two different people for the payment." }),
       ]);
     });
 

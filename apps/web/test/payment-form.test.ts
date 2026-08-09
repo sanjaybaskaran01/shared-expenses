@@ -5,7 +5,7 @@ describe("payment form validation", () => {
   test("rejects a cleared, zero, or malformed amount before recording", () => {
     expect(validatePaymentForm({ amount: "", payerId: "a", recipientId: "b" })).toEqual({
       field: "amount",
-      message: "Enter a payment amount greater than zero",
+      message: "Enter a payment amount greater than zero.",
     });
     expect(validatePaymentForm({ amount: "0", payerId: "a", recipientId: "b" })?.field).toBe("amount");
     expect(validatePaymentForm({ amount: "not money", payerId: "a", recipientId: "b" })?.field).toBe("amount");
@@ -15,7 +15,7 @@ describe("payment form validation", () => {
     expect(validatePaymentForm({ amount: "12.50", payerId: "", recipientId: "b" })?.field).toBe("participants");
     expect(validatePaymentForm({ amount: "12.50", payerId: "a", recipientId: "a" })).toEqual({
       field: "participants",
-      message: "Choose two different people",
+      message: "Choose two different people.",
     });
   });
 

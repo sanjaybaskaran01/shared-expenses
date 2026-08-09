@@ -165,7 +165,7 @@ async function currentActor(request: Request): Promise<string | null> {
 
 async function requireActor(request: Request): Promise<string | Response> {
   const actor = await currentActor(request);
-  return actor ?? errorResponse(request, 401, "UNAUTHENTICATED", "Sign in is required");
+  return actor ?? errorResponse(request, 401, "UNAUTHENTICATED", "Sign in to continue.");
 }
 
 async function bodyJson<T>(request: Request, maxBytes = 1_000_000): Promise<T> {
@@ -227,7 +227,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
         available: Boolean(config.splitwiseOAuth),
         reason: config.splitwiseOAuth
           ? null
-          : "Direct connection requires written Splitwise API approval. CSV, JSON, and balance-only migration remain available.",
+          : "Direct connection requires written Splitwise API approval. You can still use exported CSV or JSON files, or enter balances only.",
       },
       limits: { files: 20, fileBytes: 10_485_760, totalBytes: 52_428_800, rows: 100_000 },
     });
@@ -235,17 +235,17 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
 
   if (url.pathname === "/api/v1/import-claims/preview" && request.method === "POST") {
     if (!consumeImportMutation(`claim-preview:${publicRateKey(request)}`, 30, 60 * 60_000)) {
-      return errorResponse(request, 429, "CLAIM_RATE_LIMITED", "Too many claim checks. Try again later.");
+      return errorResponse(request, 429, "CLAIM_RATE_LIMITED", "Too many connection checks. Wait a moment, then try again.");
     }
     const body = await bodyJson<{ token?: string }>(request, 2_000);
     const token = body.token?.trim() ?? "";
     if (!validContactInviteToken(token)) {
-      return errorResponse(request, 400, "INVALID_CLAIM", "This migration claim link is invalid or expired");
+      return errorResponse(request, 400, "INVALID_CLAIM", "This connection link has expired or is no longer available.");
     }
     try {
       return json(request, ledger.previewImportClaim(token));
     } catch {
-      return errorResponse(request, 404, "INVALID_CLAIM", "This migration claim link is invalid or expired");
+      return errorResponse(request, 404, "INVALID_CLAIM", "This connection link has expired or is no longer available.");
     }
   }
 
@@ -255,16 +255,16 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
   ) {
     const rateKey = publicRateKey(request);
     if (!consumeImportMutation(`claim-auth:${rateKey}`, 15, 60 * 60_000)) {
-      return errorResponse(request, 429, "CLAIM_RATE_LIMITED", "Too many claim attempts. Try again later.");
+      return errorResponse(request, 429, "CLAIM_RATE_LIMITED", "Too many connection attempts. Wait a moment, then try again.");
     }
     const body = await bodyJson<{ token?: string; email?: string }>(request, 4_000);
     const token = body.token?.trim() ?? "";
     const email = body.email?.trim().toLowerCase() ?? "";
     if (!validContactInviteToken(token) || !validEmail(email)) {
-      return errorResponse(request, 400, "INVALID_CLAIM", "Enter a valid email and claim link");
+      return errorResponse(request, 400, "INVALID_CLAIM", "Enter a valid email address and use the full connection link.");
     }
     if (url.pathname.endsWith("/email") && !config.smtp.enabled) {
-      return errorResponse(request, 503, "EMAIL_NOT_CONFIGURED", "Email verification is unavailable");
+      return errorResponse(request, 503, "EMAIL_NOT_CONFIGURED", "Email verification is unavailable. Try Google sign-in instead.");
     }
     try {
       const reservation = ledger.reserveImportClaimEmail(token, email);
@@ -289,22 +289,22 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
       }
       return json(request, reservation, 201);
     } catch (error) {
-      return errorResponse(request, 400, "CLAIM_RESERVATION_REJECTED", error instanceof Error ? error.message : "Claim unavailable");
+      return errorResponse(request, 400, "CLAIM_RESERVATION_REJECTED", error instanceof Error ? error.message : "This connection is unavailable. Ask for a new link.");
     }
   }
 
   if (url.pathname === "/api/v1/contact-invitations/claim" && request.method === "POST") {
     if (!config.smtp.enabled) {
-      return errorResponse(request, 503, "EMAIL_NOT_CONFIGURED", "Email verification is unavailable");
+      return errorResponse(request, 503, "EMAIL_NOT_CONFIGURED", "Email verification is unavailable. Try Google sign-in instead.");
     }
     const body = await bodyJson<{ token?: string; email?: string }>(request);
     const token = body.token?.trim() ?? "";
     const email = body.email?.trim().toLowerCase() ?? "";
     if (!validContactInviteToken(token)) {
-      return errorResponse(request, 400, "INVALID_INVITATION", "This invitation link is invalid");
+      return errorResponse(request, 400, "INVALID_INVITATION", "This invitation link has expired or is no longer available.");
     }
     if (!validEmail(email)) {
-      return errorResponse(request, 400, "INVALID_EMAIL", "Enter a valid email address");
+      return errorResponse(request, 400, "INVALID_EMAIL", "Enter a valid email address.");
     }
     const reservation = contactInvites.reserve(token, email);
     await auth.api.signInMagicLink({
@@ -367,7 +367,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
   if (url.pathname === "/api/v1/push/config" && request.method === "GET") {
     const deviceId = url.searchParams.get("deviceId")?.trim() ?? "";
     if (!deviceId || deviceId.length > 100) {
-      return errorResponse(request, 400, "INVALID_DEVICE", "A registered device is required");
+      return errorResponse(request, 400, "INVALID_DEVICE", "Reload Tallied to register this device, then try again.");
     }
     return json(request, {
       publicKey: vapid.publicKey,
@@ -379,7 +379,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     const body = await bodyJson<{ deviceId?: string; subscription?: BrowserPushSubscription }>(request, 8_000);
     const deviceId = body.deviceId?.trim() ?? "";
     if (!deviceId || deviceId.length > 100 || !body.subscription) {
-      return errorResponse(request, 400, "INVALID_SUBSCRIPTION", "A device and push subscription are required");
+      return errorResponse(request, 400, "INVALID_SUBSCRIPTION", "Reload Tallied, then turn on notifications again.");
     }
     registerPushSubscription(db, config.authSecret, actorId, deviceId, body.subscription);
     return json(request, { subscribed: true }, 201);
@@ -389,7 +389,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     const body = await bodyJson<{ deviceId?: string }>(request, 2_000);
     const deviceId = body.deviceId?.trim() ?? "";
     if (!deviceId || deviceId.length > 100) {
-      return errorResponse(request, 400, "INVALID_DEVICE", "A registered device is required");
+      return errorResponse(request, 400, "INVALID_DEVICE", "Reload Tallied to register this device, then try again.");
     }
     revokePushSubscription(db, actorId, deviceId);
     return json(request, { subscribed: false });
@@ -399,7 +399,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     const body = await bodyJson<{ oldEndpoint?: string; subscription?: BrowserPushSubscription }>(request, 8_000);
     const oldEndpoint = body.oldEndpoint?.trim() ?? "";
     if (!oldEndpoint || !body.subscription) {
-      return errorResponse(request, 400, "INVALID_SUBSCRIPTION", "The old and replacement subscriptions are required");
+      return errorResponse(request, 400, "INVALID_SUBSCRIPTION", "Tallied could not refresh notifications. Turn them off, then on again.");
     }
     refreshPushSubscription(db, config.authSecret, actorId, oldEndpoint, body.subscription);
     return json(request, { subscribed: true });
@@ -421,7 +421,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     try {
       return json(request, ledger.resolveImportIdentityTargets(actorId, body));
     } catch (error) {
-      return errorResponse(request, 400, "IMPORT_IDENTITIES_INVALID", error instanceof Error ? error.message : "Identity check failed");
+      return errorResponse(request, 400, "IMPORT_IDENTITIES_INVALID", error instanceof Error ? error.message : "Tallied could not match the imported people. Review them and try again.");
     }
   }
 
@@ -435,7 +435,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
       );
     }
     if (!consumeImportMutation(actorId, 10)) {
-      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many migration attempts. Try again later.");
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many import attempts. Wait a moment, then try again.");
     }
     return json(request, splitwiseConnector.start(actorId), 201);
   }
@@ -445,7 +445,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     const body = await bodyJson<{ sessionId?: string }>(request, 2_000);
     const sessionId = body.sessionId?.trim() ?? "";
     if (!/^[0-9a-f-]{36}$/.test(sessionId)) {
-      return errorResponse(request, 400, "INVALID_SESSION", "Splitwise migration session is invalid");
+      return errorResponse(request, 400, "INVALID_SESSION", "This Splitwise connection has expired. Connect again.");
     }
     try {
       return json(request, { snapshot: await splitwiseConnector.snapshot(actorId, sessionId) });
@@ -454,7 +454,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
         request,
         400,
         "SPLITWISE_READ_FAILED",
-        error instanceof Error ? error.message : "Splitwise data could not be read",
+        error instanceof Error ? error.message : "Unable to read your Splitwise data. Try again.",
       );
     }
   }
@@ -469,7 +469,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
 
   if (url.pathname === "/api/v1/imports/activate" && request.method === "POST") {
     if (!consumeImportMutation(actorId, 10)) {
-      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many migration attempts. Try again later.");
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many import attempts. Wait a moment, then try again.");
     }
     const body = await bodyJson<ImportBatchCommitRequest>(request, 12_000_000);
     try {
@@ -485,33 +485,33 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
         request,
         400,
         "IMPORT_REJECTED",
-        error instanceof Error ? error.message : "The migration could not be verified",
+        error instanceof Error ? error.message : "Unable to verify this import. Review it and try again.",
       );
     }
   }
 
   if (url.pathname === "/api/v1/imports/stage" && request.method === "POST") {
     if (!consumeImportMutation(actorId, 30)) {
-      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many migration attempts. Try again later.");
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many import attempts. Wait a moment, then try again.");
     }
     const body = await bodyJson<ImportStageStartRequest>(request, 12_000_000);
     try {
       return json(request, ledger.startImportStage(actorId, body), 201);
     } catch (error) {
-      return errorResponse(request, 400, "IMPORT_STAGE_REJECTED", error instanceof Error ? error.message : "Upload unavailable");
+      return errorResponse(request, 400, "IMPORT_STAGE_REJECTED", error instanceof Error ? error.message : "This import upload is unavailable. Start again.");
     }
   }
 
   const importChunkMatch = /^\/api\/v1\/imports\/([^/]+)\/chunks$/.exec(url.pathname);
   if (importChunkMatch && request.method === "POST") {
     if (!consumeImportMutation(`import-chunk:${actorId}`, 1_000, 60 * 60_000)) {
-      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many migration chunks. Try again later.");
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "This import is uploading too quickly. Wait a moment, then try again.");
     }
     const body = await bodyJson<ImportStageChunkRequest>(request, 4_000_000);
     try {
       return json(request, await ledger.stageImportOperations(actorId, decodeURIComponent(importChunkMatch[1]!), body));
     } catch (error) {
-      return errorResponse(request, 400, "IMPORT_CHUNK_REJECTED", error instanceof Error ? error.message : "Upload unavailable");
+      return errorResponse(request, 400, "IMPORT_CHUNK_REJECTED", error instanceof Error ? error.message : "This import upload is unavailable. Start again.");
     }
   }
 
@@ -527,7 +527,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
       }
       return json(request, result, result.duplicate ? 200 : 201);
     } catch (error) {
-      return errorResponse(request, 400, "IMPORT_REJECTED", error instanceof Error ? error.message : "Migration unavailable");
+      return errorResponse(request, 400, "IMPORT_REJECTED", error instanceof Error ? error.message : "This import is unavailable. Review it and try again.");
     }
   }
 
@@ -535,7 +535,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
   if (importStageCancelMatch && request.method === "POST") {
     const cancelled = ledger.cancelImportStage(actorId, decodeURIComponent(importStageCancelMatch[1]!));
     if (!cancelled) {
-      return errorResponse(request, 409, "IMPORT_CANCEL_TOO_LATE", "This upload is unavailable or already activating");
+      return errorResponse(request, 409, "IMPORT_CANCEL_TOO_LATE", "This import is unavailable or is already being finished.");
     }
     return json(request, { status: "cancelled" });
   }
@@ -543,14 +543,14 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
   const importUndoStageStartMatch = /^\/api\/v1\/imports\/([^/]+)\/undo-stage$/.exec(url.pathname);
   if (importUndoStageStartMatch && request.method === "POST") {
     if (!consumeImportMutation(actorId, 10)) {
-      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many migration attempts. Try again later.");
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many import attempts. Wait a moment, then try again.");
     }
     const batchId = decodeURIComponent(importUndoStageStartMatch[1]!);
     const body = await bodyJson<ImportUndoStageStartRequest>(request, 10_000);
     try {
       return json(request, ledger.startImportUndoStage(actorId, batchId, body), 201);
     } catch (error) {
-      return errorResponse(request, 400, "IMPORT_UNDO_STAGE_REJECTED", error instanceof Error ? error.message : "Undo upload unavailable");
+      return errorResponse(request, 400, "IMPORT_UNDO_STAGE_REJECTED", error instanceof Error ? error.message : "Tallied could not prepare to undo this import. Try again.");
     }
   }
 
@@ -564,7 +564,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     try {
       return json(request, ledger.stageImportUndoOperations(actorId, batchId, body));
     } catch (error) {
-      return errorResponse(request, 400, "IMPORT_UNDO_CHUNK_REJECTED", error instanceof Error ? error.message : "Undo upload unavailable");
+      return errorResponse(request, 400, "IMPORT_UNDO_CHUNK_REJECTED", error instanceof Error ? error.message : "Tallied could not continue undoing this import. Try again.");
     }
   }
 
@@ -580,21 +580,21 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
       }
       return json(request, result);
     } catch (error) {
-      return errorResponse(request, 400, "IMPORT_UNDO_REJECTED", error instanceof Error ? error.message : "Undo unavailable");
+      return errorResponse(request, 400, "IMPORT_UNDO_REJECTED", error instanceof Error ? error.message : "Tallied could not undo this import. Try again.");
     }
   }
 
   const importUndoCancelMatch = /^\/api\/v1\/imports\/([^/]+)\/undo-cancel$/.exec(url.pathname);
   if (importUndoCancelMatch && request.method === "POST") {
     const cancelled = ledger.cancelImportUndoStage(actorId, decodeURIComponent(importUndoCancelMatch[1]!));
-    if (!cancelled) return errorResponse(request, 409, "IMPORT_CANCEL_TOO_LATE", "This undo is unavailable or already activating");
+    if (!cancelled) return errorResponse(request, 409, "IMPORT_CANCEL_TOO_LATE", "This undo is unavailable or is already being finished.");
     return json(request, { status: "cancelled" });
   }
 
   const importUndoMatch = /^\/api\/v1\/imports\/([^/]+)\/undo$/.exec(url.pathname);
   if (importUndoMatch && request.method === "POST") {
     if (!consumeImportMutation(actorId, 10)) {
-      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many migration attempts. Try again later.");
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many import attempts. Wait a moment, then try again.");
     }
     const batchId = decodeURIComponent(importUndoMatch[1]!);
     const body = await bodyJson<ImportUndoRequest>(request, 12_000_000);
@@ -611,7 +611,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
         request,
         400,
         "IMPORT_UNDO_REJECTED",
-        error instanceof Error ? error.message : "The migration could not be undone",
+        error instanceof Error ? error.message : "Unable to undo this import. Try again.",
       );
     }
   }
@@ -625,7 +625,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
   const importClaimLinkMatch = /^\/api\/v1\/imports\/([^/]+)\/identities\/([^/]+)\/claim-link$/.exec(url.pathname);
   if (importClaimLinkMatch && request.method === "POST") {
     if (!consumeImportMutation(actorId)) {
-      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many migration actions. Try again later.");
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many import actions. Wait a moment, then try again.");
     }
     try {
       const batchId = decodeURIComponent(importClaimLinkMatch[1]!);
@@ -635,23 +635,23 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
       shareUrl.hash = new URLSearchParams({ migrationClaim: claim.token }).toString();
       return json(request, { identityId: claim.identityId, url: shareUrl.toString(), expiresAt: claim.expiresAt }, 201);
     } catch (error) {
-      return errorResponse(request, 403, "CLAIM_LINK_REJECTED", error instanceof Error ? error.message : "Claim link unavailable");
+      return errorResponse(request, 403, "CLAIM_LINK_REJECTED", error instanceof Error ? error.message : "Unable to create a connection link. Try again.");
     }
   }
 
   if (url.pathname === "/api/v1/import-claims/claim" && request.method === "POST") {
     if (!consumeImportMutation(actorId)) {
-      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many migration actions. Try again later.");
+      return errorResponse(request, 429, "IMPORT_RATE_LIMITED", "Too many import actions. Wait a moment, then try again.");
     }
     const body = await bodyJson<{ token?: string }>(request, 2_000);
     const token = body.token?.trim() ?? "";
     if (!validContactInviteToken(token)) {
-      return errorResponse(request, 400, "INVALID_CLAIM", "This migration claim link is invalid or expired");
+      return errorResponse(request, 400, "INVALID_CLAIM", "This connection link has expired or is no longer available.");
     }
     try {
       return json(request, ledger.claimImportedIdentity(actorId, token));
     } catch (error) {
-      return errorResponse(request, 400, "CLAIM_REJECTED", error instanceof Error ? error.message : "Claim unavailable");
+      return errorResponse(request, 400, "CLAIM_REJECTED", error instanceof Error ? error.message : "This connection is unavailable. Ask for a new link.");
     }
   }
 
@@ -659,12 +659,12 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     const body = await bodyJson<{ requestId?: string }>(request, 2_000);
     const requestId = body.requestId?.trim() ?? "";
     if (!validContactInviteToken(requestId)) {
-      return errorResponse(request, 400, "INVALID_CLAIM_REQUEST", "Claim request is unavailable");
+      return errorResponse(request, 400, "INVALID_CLAIM_REQUEST", "This connection request is unavailable.");
     }
     try {
       return json(request, ledger.importClaimStatus(actorId, requestId));
     } catch (error) {
-      return errorResponse(request, 404, "CLAIM_REQUEST_UNAVAILABLE", error instanceof Error ? error.message : "Claim request is unavailable");
+      return errorResponse(request, 404, "CLAIM_REQUEST_UNAVAILABLE", error instanceof Error ? error.message : "This connection request is unavailable.");
     }
   }
 
@@ -673,7 +673,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     try {
       return json(request, ledger.approveImportIdentityClaim(actorId, decodeURIComponent(approveImportClaimMatch[1]!)));
     } catch (error) {
-      return errorResponse(request, 403, "CLAIM_APPROVAL_REJECTED", error instanceof Error ? error.message : "Claim unavailable");
+      return errorResponse(request, 403, "CLAIM_APPROVAL_REJECTED", error instanceof Error ? error.message : "Unable to connect this account. Try again.");
     }
   }
 
@@ -682,7 +682,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     try {
       return json(request, ledger.rejectImportIdentityClaim(actorId, decodeURIComponent(rejectImportClaimMatch[1]!)));
     } catch (error) {
-      return errorResponse(request, 403, "CLAIM_REJECTION_REJECTED", error instanceof Error ? error.message : "Claim unavailable");
+      return errorResponse(request, 403, "CLAIM_REJECTION_REJECTED", error instanceof Error ? error.message : "Unable to decline this request. Try again.");
     }
   }
 
@@ -691,7 +691,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     try {
       return json(request, ledger.deleteImportSourceData(actorId, decodeURIComponent(sourceDataDeleteMatch[1]!)));
     } catch (error) {
-      return errorResponse(request, 403, "SOURCE_DELETE_REJECTED", error instanceof Error ? error.message : "Source data unavailable");
+      return errorResponse(request, 403, "SOURCE_DELETE_REJECTED", error instanceof Error ? error.message : "This source data is no longer available.");
     }
   }
 
@@ -715,12 +715,12 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     const body = await bodyJson<{ token?: string }>(request);
     const token = body.token?.trim() ?? "";
     if (!validContactInviteToken(token)) {
-      return errorResponse(request, 400, "INVALID_INVITATION", "This invitation link is invalid");
+      return errorResponse(request, 400, "INVALID_INVITATION", "This invitation link is invalid. Ask the sender for a new one.");
     }
     const user = db.query<{ email: string }, [string]>(
       `SELECT email FROM "user" WHERE id = ? LIMIT 1`,
     ).get(actorId);
-    if (!user) return errorResponse(request, 401, "UNAUTHENTICATED", "Sign in is required");
+    if (!user) return errorResponse(request, 401, "UNAUTHENTICATED", "Sign in to continue.");
     contactInvites.acceptForSignedInUser(token, actorId, user.email);
     return json(request, { status: "accepted", ...contactInvites.list(actorId) });
   }
@@ -770,7 +770,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
       (body.encryptionPublicKeyJwk &&
         (body.encryptionPublicKeyJwk.kty !== "EC" || body.encryptionPublicKeyJwk.crv !== "P-256"))
     ) {
-      return errorResponse(request, 400, "INVALID_DEVICE", "id, publicKeyJwk, and name are required");
+      return errorResponse(request, 400, "INVALID_DEVICE", "Unable to register this device. Reload Tallied and try again.");
     }
     ledger.registerDevice({
       id: body.id,
@@ -785,17 +785,17 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
   const invitationMatch = /^\/api\/v1\/groups\/([^/]+)\/invitations$/.exec(url.pathname);
   if (invitationMatch && request.method === "POST") {
     if (!config.smtp.enabled) {
-      return errorResponse(request, 503, "EMAIL_NOT_CONFIGURED", "Email invitations are unavailable");
+      return errorResponse(request, 503, "EMAIL_NOT_CONFIGURED", "Email invitations are unavailable on this Tallied installation.");
     }
     const groupId = decodeURIComponent(invitationMatch[1]!);
     const membership = db.query<{ one: number }, [string, string]>(
       "SELECT 1 AS one FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'active'",
     ).get(groupId, actorId);
-    if (!membership) return errorResponse(request, 403, "NOT_A_GROUP_MEMBER", "Active group membership is required");
+    if (!membership) return errorResponse(request, 403, "NOT_A_GROUP_MEMBER", "You must be a current group member to do this.");
     const body = await bodyJson<{ email?: string }>(request);
     const email = body.email?.trim().toLowerCase() ?? "";
     if (!validEmail(email)) {
-      return errorResponse(request, 400, "INVALID_EMAIL", "Enter a valid email address");
+      return errorResponse(request, 400, "INVALID_EMAIL", "Enter a valid email address.");
     }
     const existingUser = db.query<{ name: string }, [string]>(
       `SELECT name FROM "user" WHERE lower(email) = ? LIMIT 1`,
@@ -805,7 +805,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
       `SELECT 1 AS one FROM group_members
        WHERE group_id = ? AND lower(email) = ? AND status IN ('placeholder', 'active') LIMIT 1`,
     ).get(groupId, email);
-    if (duplicate) return errorResponse(request, 409, "ALREADY_INVITED", "This email is already in the group");
+    if (duplicate) return errorResponse(request, 409, "ALREADY_INVITED", "This email is already in the group.");
 
     const invitationId = randomUUID();
     const now = new Date().toISOString();
@@ -837,7 +837,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
         db.query("DELETE FROM group_members WHERE group_id = ? AND user_id = ?").run(groupId, placeholderUserId);
         db.query("DELETE FROM group_invitations WHERE id = ?").run(invitationId);
       })();
-      return errorResponse(request, 503, "INVITE_EMAIL_FAILED", "The invitation could not be sent. Try again.");
+      return errorResponse(request, 503, "INVITE_EMAIL_FAILED", "Unable to send the invitation. Check the email address and try again.");
     }
     return json(request, { id: invitationId, email, status: "pending" }, 201);
   }
@@ -846,9 +846,9 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     const body = await bodyJson<{ category?: string; message?: string; pageUrl?: string }>(request);
     const category = body.category === "bug" || body.category === "idea" ? body.category : null;
     const message = body.message?.trim() ?? "";
-    if (!category) return errorResponse(request, 400, "INVALID_CATEGORY", 'category must be "bug" or "idea"');
+    if (!category) return errorResponse(request, 400, "INVALID_CATEGORY", "Choose Bug or Idea.");
     if (!message || message.length > 4_000) {
-      return errorResponse(request, 400, "INVALID_MESSAGE", "Enter a message of at most 4000 characters");
+      return errorResponse(request, 400, "INVALID_MESSAGE", "Enter a message with no more than 4,000 characters.");
     }
     const pageUrl = typeof body.pageUrl === "string" ? body.pageUrl.slice(0, 300) : "";
     if (config.ownerEmail) {
@@ -889,7 +889,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
   if (url.pathname === "/api/v1/sync/push" && request.method === "POST") {
     const body = await bodyJson<SyncPushRequest>(request);
     if (!Array.isArray(body.operations)) {
-      return errorResponse(request, 400, "INVALID_BATCH", "operations must be an array");
+      return errorResponse(request, 400, "INVALID_BATCH", "Tallied could not sync these changes. Reload and try again.");
     }
     const result = await ledger.push(actorId, body.operations as OperationEnvelope<JsonValue>[]);
     if (result.accepted.length > 0 || result.duplicates.length > 0) {
@@ -925,7 +925,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
   if (url.pathname === "/api/v2/sync/push" && request.method === "POST") {
     const body = await bodyJson<{ operations?: ConfidentialOperationEnvelope[] }>(request);
     if (!Array.isArray(body.operations) || body.operations.length > 100) {
-      return errorResponse(request, 400, "INVALID_BATCH", "operations must contain at most 100 entries");
+      return errorResponse(request, 400, "INVALID_BATCH", "Sync no more than 100 changes at a time.");
     }
     return json(request, await confidentialLedger.push(actorId, body.operations));
   }
@@ -944,7 +944,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     try {
       return json(request, { devices: confidentialLedger.groupDevices(actorId, groupId) });
     } catch {
-      return errorResponse(request, 403, "NOT_A_GROUP_MEMBER", "Active group membership is required");
+      return errorResponse(request, 403, "NOT_A_GROUP_MEMBER", "You need to be a current group member to do this.");
     }
   }
 
@@ -954,7 +954,7 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     try {
       return json(request, { envelopes: confidentialLedger.keyEnvelopes(actorId, groupId) });
     } catch {
-      return errorResponse(request, 403, "NOT_A_GROUP_MEMBER", "Active group membership is required");
+      return errorResponse(request, 403, "NOT_A_GROUP_MEMBER", "You need to be a current group member to do this.");
     }
   }
 
@@ -962,13 +962,13 @@ async function apiRoute(request: Request, url: URL): Promise<Response> {
     const groupId = decodeURIComponent(keyEnvelopesMatch[1]!);
     const body = await bodyJson<{ envelope?: GroupKeyEnvelope }>(request);
     if (!body.envelope || body.envelope.groupId !== groupId) {
-      return errorResponse(request, 400, "INVALID_KEY_ENVELOPE", "A matching group key envelope is required");
+      return errorResponse(request, 400, "INVALID_KEY_ENVELOPE", "This device is missing the group encryption key. Reload and try again.");
     }
     try {
       const status = await confidentialLedger.putKeyEnvelope(actorId, body.envelope);
       return json(request, { status }, status === "created" ? 201 : 200);
     } catch {
-      return errorResponse(request, 400, "INVALID_KEY_ENVELOPE", "The key envelope was rejected");
+      return errorResponse(request, 400, "INVALID_KEY_ENVELOPE", "Tallied could not verify the group encryption key. Reload and try again.");
     }
   }
 
@@ -1037,7 +1037,7 @@ const server = Bun.serve({
         request,
         500,
         "REQUEST_FAILED",
-        `The request could not be completed (reference ${requestId})`,
+        `Tallied could not complete that request. Try again. If it keeps happening, contact support with reference ${requestId}.`,
       );
     }
   },

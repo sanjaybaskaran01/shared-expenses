@@ -303,7 +303,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       props.onOpenChange(false);
       props.onSaved("created");
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Could not save this expense");
+      setError(submitError instanceof Error ? submitError.message : "Unable to save this expense. Check your connection and try again.");
     } finally {
       setSaving(false);
     }
@@ -520,7 +520,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       return;
     }
     if (languageSafetyIssues().length > 0 && !languageSafetyConfirmed()) {
-      setError("Review the language warning and confirm this is a new expense before adding it.");
+      setError("Review the warning and confirm that this is a new expense.");
       queueMicrotask(() => languageSafetyConfirmationRef?.focus());
       return;
     }
@@ -546,7 +546,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       props.onOpenChange(false);
       props.onSaved(editingExpense ? "updated" : "created");
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Could not save this expense");
+      setError(submitError instanceof Error ? submitError.message : "Unable to save this expense. Check your connection and try again.");
     } finally {
       setSaving(false);
     }
@@ -614,9 +614,9 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                     <span class="language-entry-mark" aria-hidden="true"><Sparkles size={17} stroke-width={2} /></span>
                     <div class="min-w-0 flex-1">
                       <strong id="language-entry-title">Describe the expense</strong>
-                      <small>Names, total, payer & split—in one sentence.</small>
+                      <small>Include the total, payer, and split in one sentence.</small>
                     </div>
-                    <button type="button" onClick={() => { setEntryMode("form"); queueMicrotask(() => amountInputRef?.focus()); }}>Use form</button>
+                    <button type="button" onClick={() => { setEntryMode("form"); queueMicrotask(() => amountInputRef?.focus()); }}>Open form</button>
                   </div>
                   <label class="language-entry-input">
                     <span class="sr-only">Describe the expense in plain English</span>
@@ -625,7 +625,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                       value={languageText()}
                       onInput={(event) => { setLanguageText(event.currentTarget.value); setError(""); }}
                       name="expense-language"
-                      placeholder="I paid $35 for lunch with Maya & Rishi, split equally…"
+                      placeholder="I paid $35 for lunch with Maya and Rishi, split equally"
                       autocomplete="off"
                       autocapitalize="sentences"
                       enterkeyhint="done"
@@ -645,7 +645,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                         <span>
                           <i aria-hidden="true" />
                           <strong>{draft().status === "ready" ? "Ready to add" : draft().status === "needs-review" ? "Review details" : "Complete details"}</strong>
-                          <small>{draft().status === "ready" ? "Parsed locally" : `${draft().issues.length} ${draft().issues.length === 1 ? "detail needs" : "details need"} confirmation`}</small>
+                          <small>{draft().status === "ready" ? "Details found" : `${draft().issues.length} ${draft().issues.length === 1 ? "detail needs" : "details need"} confirmation`}</small>
                         </span>
                         <small class="language-understanding-local">On this device</small>
                       </div>
@@ -663,7 +663,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                       </Show>
                     </div>
                   )}</Show>
-                  <p class="language-privacy"><span aria-hidden="true">●</span> Private & offline — nothing you type leaves this device.</p>
+                  <p class="language-privacy"><span aria-hidden="true">●</span> Private on this device. Your text is never uploaded.</p>
                 </section>
 
                 <Show when={error()}><p id="expense-language-error" class="error-callout" role="alert">{error()}</p></Show>
@@ -674,15 +674,15 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                     disabled={!languageDraft() || saving()}
                     onClick={() => languageDraft()?.status === "ready" ? void submitLanguageDraft() : editLanguageField()}
                   >
-                    <Show when={saving()} fallback={<><Check size={16} /> {languageDraft()?.status === "ready" && languageDraft()?.amount ? `Looks right — add ${formatMinor(Math.round(Number(languageDraft()!.amount) * 100), languageDraft()!.currency)}` : languageDraft()?.status === "incomplete" ? "Complete in form" : "Review details"}</>}><LoaderCircle class="animate-spin" size={16} /> Saving…</Show>
+                    <Show when={saving()} fallback={<><Check size={16} /> {languageDraft()?.status === "ready" && languageDraft()?.amount ? `Add ${formatMinor(Math.round(Number(languageDraft()!.amount) * 100), languageDraft()!.currency)}` : languageDraft()?.status === "incomplete" ? "Complete expense" : "Review details"}</>}><LoaderCircle class="animate-spin" size={16} /> Saving…</Show>
                   </Button>
-                  <p class="micro-label text-center">Tap any chip to change it before adding</p>
+                  <p class="micro-label text-center">Select a detail to change it before adding.</p>
                 </footer>
               </Show>
 
               <Show when={props.expense || entryMode() === "form"}>
               <Show when={!props.expense}>
-                <button type="button" class="language-mode-return" onClick={() => { setEntryMode("natural"); queueMicrotask(() => languageInputRef?.focus()); }}><Sparkles size={15} /> Describe it in one sentence</button>
+                <button type="button" class="language-mode-return" onClick={() => { setEntryMode("natural"); queueMicrotask(() => languageInputRef?.focus()); }}><Sparkles size={15} /> Use one-sentence entry</button>
               </Show>
               <label class="amount-stage">
                 <span class="micro-label">Total · {currency()}</span>
@@ -712,7 +712,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                 </span>
               </label>
 
-              <label class="description-field"><span class="sr-only">What was it for?</span><input ref={descriptionInputRef} value={description()} onInput={(event) => { setDescription(event.currentTarget.value); if (formIssue()?.field === "description") { setFormIssue(undefined); setError(""); } }} placeholder="What was it for?" maxlength={200} autocomplete="off" enterkeyhint="done" aria-invalid={formIssue()?.field === "description"} aria-describedby={formIssue()?.field === "description" ? "expense-form-error" : undefined} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} /></label>
+              <label class="description-field"><span class="micro-label">Description</span><input ref={descriptionInputRef} value={description()} onInput={(event) => { setDescription(event.currentTarget.value); if (formIssue()?.field === "description") { setFormIssue(undefined); setError(""); } }} placeholder="e.g. Dinner" maxlength={200} autocomplete="off" enterkeyhint="done" aria-invalid={formIssue()?.field === "description"} aria-describedby={formIssue()?.field === "description" ? "expense-form-error" : undefined} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} /></label>
 
               <Show when={props.smartCategoriesEnabled && description().trim()}>
                 <button type="button" class="expense-category-control" onClick={useOrEditCategory} aria-label={`${pendingCategorySuggestion() ? "Suggested" : "Category"} ${visibleCategory()}. ${pendingCategorySuggestion() ? "Use suggestion" : "Change category"}`}>
@@ -720,10 +720,10 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                   <span><small>{pendingCategorySuggestion() ? "Suggested category" : "Category"}</small><strong>{visibleCategory()}</strong></span>
                   <span class="expense-category-source">
                     {pendingCategorySuggestion()
-                      ? "Use"
+                      ? "Use category"
                       : categorySuggestion()?.category === category()
                         ? categorySuggestion()?.source.startsWith("personal") ? "Remembered" : "Suggested"
-                        : "Change"}
+                        : "Change category"}
                     <ChevronRight size={15} />
                   </span>
                 </button>
@@ -745,7 +745,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                 <section class="language-review-callout" aria-labelledby="language-review-title">
                   <div>
                     <strong id="language-review-title">Confirm this is a new expense</strong>
-                    <p>The wording below may describe a payment or an instruction instead.</p>
+                    <p>This may describe a payment or instruction rather than a new expense.</p>
                   </div>
                   <ul>
                     <For each={languageSafetyIssues()}>{(issue) => <li>{issue.message}</li>}</For>
@@ -760,14 +760,14 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                         if (event.currentTarget.checked) setError("");
                       }}
                     />
-                    <span>I reviewed this and want to record it as a new expense.</span>
+                    <span>I checked these details and want to add a new expense.</span>
                   </label>
                 </section>
               </Show>
 
               <Show when={Number(amount()) > 0 && payers().length > 0 && allocations().length > 0}>
                 <section class="expense-outcome" aria-label="Effect of this expense">
-                  <div><span>Your part of this expense</span><strong>{outcomeHeadline()}</strong></div>
+                  <div><span>Your balance change</span><strong>{outcomeHeadline()}</strong></div>
                   <p>You paid {formatMinor(outcome().actorPaidMinor, currency())} · your share is {formatMinor(outcome().actorShareMinor, currency())}</p>
                 </section>
               </Show>
@@ -815,7 +815,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                       );
                     }}</For>
                   </div>
-                  <div class="split-status"><span class="micro-label"><Show when={splitMethod() === "exact" && exactLeftoverMinor() !== 0} fallback={<Show when={allocations().length > 0} fallback="The split must assign the full amount.">Fully split · {formatMinor(allocations().reduce((sum, item) => sum + item.amountMinor, 0), currency())}</Show>}>{formatMinor(Math.abs(exactLeftoverMinor()), currency())} {exactLeftoverMinor() > 0 ? "left over" : "over assigned"}</Show></span><Show when={splitMethod() === "exact" && exactLeftoverMinor() > 0}><button type="button" onClick={assignExactRemainder}>Give it to {groupMembers().find((member) => member.userId === (activeSplitParticipantId() ?? participants().at(-1)))?.displayName ?? "last person"}</button></Show></div>
+                  <div class="split-status"><span class="micro-label"><Show when={splitMethod() === "exact" && exactLeftoverMinor() !== 0} fallback={<Show when={allocations().length > 0} fallback="The split must assign the full amount.">Full amount assigned · {formatMinor(allocations().reduce((sum, item) => sum + item.amountMinor, 0), currency())}</Show>}>{formatMinor(Math.abs(exactLeftoverMinor()), currency())} {exactLeftoverMinor() > 0 ? "left over" : "too much assigned"}</Show></span><Show when={splitMethod() === "exact" && exactLeftoverMinor() > 0}><button type="button" onClick={assignExactRemainder}>Assign remainder to {groupMembers().find((member) => member.userId === (activeSplitParticipantId() ?? participants().at(-1)))?.displayName ?? "last person"}</button></Show></div>
                 </section>
               </Show>
 
@@ -832,11 +832,11 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
               <button ref={detailsControlRef} type="button" class="details-disclosure" aria-expanded={activePanel() === "details"} onClick={() => togglePanel("details")}><span class="flex items-center gap-2"><SlidersHorizontal size={15} /> {activePanel() === "details" ? "Hide details" : "More details"}</span>{activePanel() === "details" ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
               <Show when={activePanel() === "details"}>
                 <section class="disclosure-panel grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-2" aria-label="More expense details">
-                  <div class="disclosure-heading sm:col-span-2"><div><p>More details</p><small>Optional fields for bookkeeping.</small></div><button type="button" onClick={closePanel}>Done</button></div>
+                  <div class="disclosure-heading sm:col-span-2"><div><p>More details</p><small>Add a category, currency, schedule, or note.</small></div><button type="button" onClick={closePanel}>Done</button></div>
                   <label class="grid gap-2 text-sm font-medium">Category<select ref={categorySelectRef} class="form-control" value={category()} onInput={(event) => { setCategory(event.currentTarget.value); setCategoryEdited(true); }}><For each={EXPENSE_CATEGORIES}>{(item) => <option>{item}</option>}</For></select></label>
                   <label class="grid gap-2 text-sm font-medium">Currency<select class="form-control" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)}><For each={currencies}>{(item) => <option value={item}>{item}</option>}</For></select></label>
                   <label class="grid gap-2 text-sm font-medium">Repeats<select class="form-control" value={recurrence()} onInput={(event) => setRecurrence(event.currentTarget.value as Recurrence)}><option value="none">Does not repeat</option><option value="weekly">Weekly</option><option value="fortnightly">Every two weeks</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label>
-                  <label class="grid gap-2 text-sm font-medium sm:col-span-2">Note <span class="sr-only">optional</span><textarea class="form-control min-h-20 resize-y py-2" value={notes()} onInput={(event) => setNotes(event.currentTarget.value)} placeholder="Optional note" maxlength={5000} /></label>
+                  <label class="grid gap-2 text-sm font-medium sm:col-span-2">Note <span class="font-normal text-muted-foreground">(optional)</span><textarea class="form-control min-h-20 resize-y py-2" value={notes()} onInput={(event) => setNotes(event.currentTarget.value)} placeholder="e.g. Paid in cash" maxlength={5000} /></label>
                 </section>
               </Show>
 
@@ -845,7 +845,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                 <Button class="h-11 w-full" type="submit" disabled={saving()}>
                   <Show when={saving()} fallback={<><Check size={16} /> {props.expense ? "Save changes" : `Add ${formatMinor(Math.round((Number(amount()) || 0) * 100), currency())}`}</>}><LoaderCircle class="animate-spin" size={16} /> Saving…</Show>
                 </Button>
-                <p class="micro-label text-center">Saved on this device first · syncs automatically</p>
+                <p class="micro-label text-center">Saves on this device, then syncs automatically.</p>
               </footer>
               </Show>
             </form>

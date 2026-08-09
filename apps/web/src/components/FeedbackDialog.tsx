@@ -60,7 +60,7 @@ export function FeedbackButton(props: { compact?: boolean; class?: string }) {
         handleOpenChange(false);
       }, 1400);
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Could not send this — try again");
+      setError(submitError instanceof Error ? submitError.message : "Unable to send feedback. Check your connection and try again.");
     } finally {
       setSending(false);
     }
@@ -105,7 +105,7 @@ export function FeedbackButton(props: { compact?: boolean; class?: string }) {
                     <span class="feedback-success grid size-11 place-items-center rounded-md">
                       <Check size={20} />
                     </span>
-                    <p class="text-sm font-medium">Thanks — we got it.</p>
+                    <p class="text-sm font-medium">Thanks. Your feedback was sent.</p>
                   </div>
                 }
               >
@@ -139,7 +139,7 @@ export function FeedbackButton(props: { compact?: boolean; class?: string }) {
                       maxlength={4000}
                       value={message()}
                       onInput={(event) => setMessage(event.currentTarget.value)}
-                      placeholder={category() === "bug" ? "Tell us what happened…" : "Tell us what you'd like to see…"}
+                      placeholder={category() === "bug" ? "e.g. The Save button did not respond" : "e.g. Add monthly spending summaries"}
                     />
                   </label>
                   <Show when={error()}>
@@ -148,7 +148,7 @@ export function FeedbackButton(props: { compact?: boolean; class?: string }) {
                     </p>
                   </Show>
                   <Button type="submit" disabled={sending() || !message().trim()}>
-                    <Show when={sending()} fallback={<><Check size={16} /> Send</>}>
+                    <Show when={sending()} fallback={<><Check size={16} /> Send feedback</>}>
                       <LoaderCircle class="animate-spin" size={16} /> Sending…
                     </Show>
                   </Button>

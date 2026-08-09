@@ -45,7 +45,7 @@ function nonNegativeMoneyToMinor(value: string): number {
 
 function signedMoneyToMinor(value: string): number {
   const normalized = value.trim();
-  if (!/^-?\d+(?:\.\d{1,2})?$/.test(normalized)) throw new RangeError("Use an amount with at most two decimal places");
+  if (!/^-?\d+(?:\.\d{1,2})?$/.test(normalized)) throw new RangeError("Enter an amount with no more than two decimal places.");
   const negative = normalized.startsWith("-");
   const absolute = negative ? normalized.slice(1) : normalized;
   const minor = /^0+(?:\.0{1,2})?$/.test(absolute) ? 0 : parseDecimalToMinor(absolute);
@@ -54,15 +54,15 @@ function signedMoneyToMinor(value: string): number {
 
 function percentageToBasisPoints(value: string): number {
   const normalized = value.trim();
-  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) throw new RangeError("Use percentages with at most two decimal places");
+  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) throw new RangeError("Enter percentages with no more than two decimal places.");
   const basisPoints = Math.round(Number(normalized) * 100);
-  if (!Number.isSafeInteger(basisPoints) || basisPoints < 0) throw new RangeError("Enter a valid percentage");
+  if (!Number.isSafeInteger(basisPoints) || basisPoints < 0) throw new RangeError("Enter a valid percentage.");
   return basisPoints;
 }
 
 export function calculateExpenseAllocations(input: Pick<NewExpenseInput, "amount" | "participantIds" | "splitMethod" | "splitValues">): ParticipantAmount[] {
   const amountMinor = parseDecimalToMinor(input.amount);
-  if (input.participantIds.length === 0) throw new RangeError("Select at least one participant");
+  if (input.participantIds.length === 0) throw new RangeError("Select at least one person.");
   if (input.splitMethod === "equal") return allocateEqually(amountMinor, input.participantIds);
   if (input.splitMethod === "exact") {
     return validateExactAllocation(amountMinor, input.participantIds.map((participantId) => ({
@@ -82,7 +82,7 @@ export function calculateExpenseAllocations(input: Pick<NewExpenseInput, "amount
       amountMinor: signedMoneyToMinor(input.splitValues[participantId] ?? "0"),
     }));
     const remaining = amountMinor - adjustments.reduce((sum, item) => sum + item.amountMinor, 0);
-    if (remaining < 0) throw new RangeError("Adjustments cannot exceed the total");
+    if (remaining < 0) throw new RangeError("Reduce the adjustments so they do not exceed the total.");
     const shared = allocateEqually(remaining, input.participantIds);
     return validateExactAllocation(amountMinor, shared.map((item, index) => ({
       participantId: item.participantId,
@@ -91,7 +91,7 @@ export function calculateExpenseAllocations(input: Pick<NewExpenseInput, "amount
   }
   return allocateByWeights(amountMinor, input.participantIds.map((participantId) => {
     const weight = Number(input.splitValues[participantId] ?? "0");
-    if (!Number.isSafeInteger(weight) || weight < 0) throw new RangeError("Shares must be whole numbers");
+    if (!Number.isSafeInteger(weight) || weight < 0) throw new RangeError("Enter shares as whole numbers.");
     return { participantId, weight };
   }));
 }
@@ -102,7 +102,7 @@ export function calculateExpensePayers(input: {
   payerValues: Record<string, string>;
 }): ParticipantAmount[] {
   const amountMinor = parseDecimalToMinor(input.amount);
-  if (input.payerIds.length === 0) throw new RangeError("Select at least one payer");
+  if (input.payerIds.length === 0) throw new RangeError("Select at least one person who paid.");
   if (input.payerIds.length === 1) return [{ participantId: input.payerIds[0]!, amountMinor }];
   return validateExactAllocation(amountMinor, input.payerIds.map((participantId) => ({
     participantId,
@@ -145,8 +145,8 @@ export async function initializeStore(actorId?: string): Promise<void> {
 
 export async function createExpense(input: NewExpenseInput): Promise<string> {
   const device = await ensureDevice();
-  if (!input.description.trim()) throw new RangeError("Description is required");
-  if (input.participantIds.length === 0) throw new RangeError("Select at least one participant");
+  if (!input.description.trim()) throw new RangeError("Enter what the expense was for.");
+  if (input.participantIds.length === 0) throw new RangeError("Select at least one person.");
   const amountMinor = parseDecimalToMinor(input.amount);
   const allocations = calculateExpenseAllocations(input);
   const operationId = crypto.randomUUID();
@@ -207,13 +207,13 @@ export async function createExpense(input: NewExpenseInput): Promise<string> {
 export async function updateExpense(expense: LocalExpense, input: NewExpenseInput): Promise<string> {
   const device = await ensureDevice();
   const current = await localDb.expenses.get(expense.id);
-  if (!current) throw new RangeError("This expense no longer exists");
-  if (current.version !== expense.version) throw new RangeError("This expense changed. Reopen it and try again");
-  if (current.status !== "active") throw new RangeError("A deleted expense cannot be edited");
-  if (current.readOnly) throw new RangeError("Imported expenses are read-only. Undo the migration and import again to change them.");
-  if (current.groupId !== input.groupId) throw new RangeError("An expense cannot be moved to another group");
-  if (!input.description.trim()) throw new RangeError("Description is required");
-  if (input.participantIds.length === 0) throw new RangeError("Select at least one participant");
+  if (!current) throw new RangeError("This expense no longer exists.");
+  if (current.version !== expense.version) throw new RangeError("This expense changed. Reopen it and try again.");
+  if (current.status !== "active") throw new RangeError("Restore this expense before editing it.");
+  if (current.readOnly) throw new RangeError("Imported expenses can’t be edited. Undo the import and import again to make changes.");
+  if (current.groupId !== input.groupId) throw new RangeError("Keep this expense in its original group.");
+  if (!input.description.trim()) throw new RangeError("Enter what the expense was for.");
+  if (input.participantIds.length === 0) throw new RangeError("Select at least one person.");
   const amountMinor = parseDecimalToMinor(input.amount);
   const allocations = calculateExpenseAllocations(input);
   const payerIds = input.payerIds ?? (input.payerId ? [input.payerId] : []);
@@ -247,7 +247,7 @@ export async function updateExpense(expense: LocalExpense, input: NewExpenseInpu
   await localDb.transaction("rw", localDb.operations, localDb.expenses, async () => {
     const latest = await localDb.expenses.get(current.id);
     if (!latest || latest.version !== current.version || latest.status !== "active") {
-      throw new RangeError("This expense changed while you were editing it. Reopen it and try again");
+      throw new RangeError("This expense changed while you were editing it. Reopen it and try again.");
     }
     await localDb.operations.add({ ...operation, syncStatus: "pending" });
     await localDb.expenses.put({
@@ -275,8 +275,8 @@ export async function createGroup(input: NewGroupInput): Promise<string> {
   const device = await ensureDevice();
   const name = input.name.trim();
   const settlementCurrency = input.settlementCurrency.trim().toUpperCase();
-  if (!name || name.length > 100) throw new RangeError("Enter a group name of at most 100 characters");
-  if (!/^[A-Z]{3}$/.test(settlementCurrency)) throw new RangeError("Choose a three-letter currency");
+  if (!name || name.length > 100) throw new RangeError("Enter a group name with 100 characters or fewer.");
+  if (!/^[A-Z]{3}$/.test(settlementCurrency)) throw new RangeError("Choose a valid three-letter currency code.");
   const groupId = crypto.randomUUID();
   const clientTimestamp = new Date().toISOString();
   const unsigned: UnsignedOperation = {
@@ -311,9 +311,9 @@ export async function createGroup(input: NewGroupInput): Promise<string> {
 export async function changeGroupCurrency(groupId: string, value: string): Promise<void> {
   const device = await ensureDevice();
   const settlementCurrency = value.trim().toUpperCase();
-  if (!/^[A-Z]{3}$/.test(settlementCurrency)) throw new RangeError("Choose a three-letter currency");
+  if (!/^[A-Z]{3}$/.test(settlementCurrency)) throw new RangeError("Choose a valid three-letter currency code.");
   const group = await localDb.groups.get(groupId);
-  if (!group) throw new RangeError("This group no longer exists");
+  if (!group) throw new RangeError("This group no longer exists.");
   if (group.settlementCurrency === settlementCurrency) return;
   const expenseCount = await localDb.expenses.where("groupId").equals(groupId).count();
   const hasPayment = await localDb.operations
@@ -326,7 +326,7 @@ export async function changeGroupCurrency(groupId: string, value: string): Promi
     )
     .first();
   if (expenseCount > 0 || hasPayment) {
-    throw new RangeError("Currency is locked after the first expense or payment");
+    throw new RangeError("The currency cannot change after the first expense or payment.");
   }
   const clientTimestamp = new Date().toISOString();
   const operation = await signOperation({
@@ -343,7 +343,7 @@ export async function changeGroupCurrency(groupId: string, value: string): Promi
   await localDb.transaction("rw", localDb.operations, localDb.groups, async () => {
     const current = await localDb.groups.get(groupId);
     if (!current || (current.version ?? 0) !== (group.version ?? 0)) {
-      throw new RangeError("This group changed. Refresh and try again");
+      throw new RangeError("This group changed. Refresh and try again.");
     }
     await localDb.operations.add({ ...operation, syncStatus: "pending" });
     await localDb.groups.update(groupId, {
@@ -366,10 +366,10 @@ async function enqueueOperation(unsigned: UnsignedOperation): Promise<LocalOpera
 export async function voidExpense(expense: LocalExpense, reason = ""): Promise<void> {
   const device = await ensureDevice();
   const current = await localDb.expenses.get(expense.id);
-  if (!current) throw new RangeError("This expense no longer exists");
-  if (current.version !== expense.version) throw new RangeError("This expense changed. Reopen it and try again");
-  if (current.status !== "active") throw new RangeError("This expense is already deleted");
-  if (current.readOnly) throw new RangeError("Imported expenses can only be removed by undoing their migration");
+  if (!current) throw new RangeError("This expense no longer exists.");
+  if (current.version !== expense.version) throw new RangeError("This expense changed. Reopen it and try again.");
+  if (current.status !== "active") throw new RangeError("This expense is already deleted.");
+  if (current.readOnly) throw new RangeError("Undo the import to remove an imported expense.");
   const clientTimestamp = new Date().toISOString();
   const operation = await signOperation({
     id: crypto.randomUUID(), groupId: current.groupId, actorId: device.actorId, deviceId: device.deviceId,
@@ -378,7 +378,7 @@ export async function voidExpense(expense: LocalExpense, reason = ""): Promise<v
   await localDb.transaction("rw", localDb.operations, localDb.expenses, async () => {
     const latest = await localDb.expenses.get(current.id);
     if (!latest || latest.version !== current.version || latest.status !== "active") {
-      throw new RangeError("This expense changed. Reopen it and try again");
+      throw new RangeError("This expense changed. Reopen it and try again.");
     }
     await localDb.operations.add({ ...operation, syncStatus: "pending" });
     await localDb.expenses.update(current.id, { status: "voided", version: current.version + 1, updatedAt: clientTimestamp, syncStatus: "pending" });
@@ -389,10 +389,10 @@ export async function voidExpense(expense: LocalExpense, reason = ""): Promise<v
 export async function restoreExpense(expense: LocalExpense): Promise<void> {
   const device = await ensureDevice();
   const current = await localDb.expenses.get(expense.id);
-  if (!current) throw new RangeError("This expense no longer exists");
-  if (current.version !== expense.version) throw new RangeError("This expense changed. Reopen it and try again");
-  if (current.status !== "voided") throw new RangeError("This expense is already active");
-  if (current.readOnly) throw new RangeError("Imported expenses cannot be restored independently");
+  if (!current) throw new RangeError("This expense no longer exists.");
+  if (current.version !== expense.version) throw new RangeError("This expense changed. Reopen it and try again.");
+  if (current.status !== "voided") throw new RangeError("This expense is already active.");
+  if (current.readOnly) throw new RangeError("Undo the import to restore an imported expense.");
   const clientTimestamp = new Date().toISOString();
   const operation = await signOperation({
     id: crypto.randomUUID(), groupId: current.groupId, actorId: device.actorId, deviceId: device.deviceId,
@@ -401,7 +401,7 @@ export async function restoreExpense(expense: LocalExpense): Promise<void> {
   await localDb.transaction("rw", localDb.operations, localDb.expenses, async () => {
     const latest = await localDb.expenses.get(current.id);
     if (!latest || latest.version !== current.version || latest.status !== "voided") {
-      throw new RangeError("This expense changed. Reopen it and try again");
+      throw new RangeError("This expense changed. Reopen it and try again.");
     }
     await localDb.operations.add({ ...operation, syncStatus: "pending" });
     await localDb.expenses.update(current.id, { status: "active", version: current.version + 1, updatedAt: clientTimestamp, syncStatus: "pending" });
@@ -412,7 +412,7 @@ export async function restoreExpense(expense: LocalExpense): Promise<void> {
 export async function addComment(expense: LocalExpense, body: string): Promise<void> {
   const device = await ensureDevice();
   const value = body.trim();
-  if (!value || value.length > 2_000) throw new RangeError("Enter a comment of at most 2,000 characters");
+  if (!value || value.length > 2_000) throw new RangeError("Enter a comment with 2,000 characters or fewer.");
   await enqueueOperation({
     id: crypto.randomUUID(), groupId: expense.groupId, actorId: device.actorId, deviceId: device.deviceId,
     type: "CommentAdded", targetId: expense.id, baseVersion: expense.version, clientTimestamp: new Date().toISOString(), payload: { body: value },
@@ -424,7 +424,7 @@ export async function recordPayment(input: {
 }): Promise<string> {
   const device = await ensureDevice();
   const amountMinor = parseDecimalToMinor(input.amount);
-  if (input.payerId === input.recipientId) throw new RangeError("Payer and recipient must be different people");
+  if (input.payerId === input.recipientId) throw new RangeError("Choose two different people for the payment.");
   const paymentId = crypto.randomUUID();
   await enqueueOperation({
     id: crypto.randomUUID(), groupId: input.groupId, actorId: device.actorId, deviceId: device.deviceId,

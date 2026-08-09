@@ -15,10 +15,10 @@ export function validatePaymentForm(input: {
   try {
     parseDecimalToMinor(input.amount);
   } catch {
-    return { field: "amount", message: "Enter a payment amount greater than zero" };
+    return { field: "amount", message: "Enter a payment amount greater than zero." };
   }
   if (!input.payerId || !input.recipientId || input.payerId === input.recipientId) {
-    return { field: "participants", message: "Choose two different people" };
+    return { field: "participants", message: "Choose two different people." };
   }
   return undefined;
 }

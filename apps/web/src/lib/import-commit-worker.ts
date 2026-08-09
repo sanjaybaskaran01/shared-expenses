@@ -52,7 +52,7 @@ export function planImportOffMainThread(
     const worker = new Worker(new URL("./import-commit.worker.ts", import.meta.url), { type: "module" });
     const timeout = globalThis.setTimeout(() => {
       worker.terminate();
-      reject(new Error("This migration took too long to prepare"));
+      reject(new Error("This import took too long to prepare. Try again."));
     }, 10 * 60_000);
     const finish = (): void => {
       globalThis.clearTimeout(timeout);
@@ -69,7 +69,7 @@ export function planImportOffMainThread(
     });
     worker.addEventListener("error", () => {
       finish();
-      reject(new Error("This migration could not be prepared on this device"));
+      reject(new Error("Unable to prepare this import on this device."));
     }, { once: true });
     try {
       worker.postMessage({

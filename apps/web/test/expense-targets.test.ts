@@ -32,7 +32,7 @@ describe("expense targets", () => {
     expect(targets[3]).toEqual(expect.objectContaining({
       label: "Mira",
       groupId: "trip",
-      pendingLabel: "Account not linked yet · you can still add expenses",
+      pendingLabel: "Account not connected yet · you can still add expenses",
     }));
   });
 

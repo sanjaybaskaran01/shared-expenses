@@ -88,7 +88,7 @@ export function OverviewView(props: {
           {(total) => (
             <section class="overview-balance" aria-label={`${total.currency} balance across all groups`}>
               <div class="overview-balance-primary">
-                <span class="micro-label">Summary · {total.currency}</span>
+                <span class="micro-label">Overall · {total.currency}</span>
                 <strong class="money-type" classList={{ "money-in": total.net > 0, "money-out": total.net < 0 }}>
                   {total.net === 0 ? money(0, total.currency) : `${total.net > 0 ? "+" : "−"}${money(Math.abs(total.net), total.currency)}`}
                 </strong>
@@ -119,12 +119,12 @@ export function OverviewView(props: {
         <Card id={tabPanelId("home-balance", "people")} class="home-list-card overflow-hidden" role="tabpanel" aria-labelledby={tabId("home-balance", "people")}>
           <SectionHeading
             title="People"
-            detail={relationships().length ? "Net across all shared groups" : contactsWithoutBalance().length ? "Connected on Tallied" : "No open balances"}
-            action={<button type="button" class="list-add-action" onClick={() => setInviteOpen(true)}><UserPlus size={14} /> Invite</button>}
+            detail={relationships().length ? "Combined across shared groups" : contactsWithoutBalance().length ? "Connected on Tallied" : "No open balances"}
+            action={<button type="button" class="list-add-action" onClick={() => setInviteOpen(true)}><UserPlus size={14} /> Invite friend</button>}
           />
           <For
             each={relationships()}
-            fallback={<Show when={!contactsWithoutBalance().length}><div class="px-6 py-12 text-center"><ReceiptText class="mx-auto text-muted-foreground" size={25} /><p class="mt-3 text-sm text-muted-foreground">Invite a friend or add an expense to get started.</p></div></Show>}
+            fallback={<Show when={!contactsWithoutBalance().length}><div class="px-6 py-12 text-center"><ReceiptText class="mx-auto text-muted-foreground" size={25} /><p class="mt-3 text-sm text-muted-foreground">Invite someone to start splitting expenses.</p></div></Show>}
           >
             {(relationship, index) => {
               const personName = createMemo(() => nameFor(relationship.userId));
@@ -176,7 +176,7 @@ export function OverviewView(props: {
       <Show when={homeSection() === "groups"}>
         <Card id={tabPanelId("home-balance", "groups")} class="home-list-card overflow-hidden" role="tabpanel" aria-labelledby={tabId("home-balance", "groups")}>
           <SectionHeading title="Groups" detail="Your groups" action={<button type="button" class="list-add-action" onClick={props.onCreateGroup}><UsersRound size={14} /> Create group</button>} />
-          <For each={appStore.groups()} fallback={<div class="px-6 py-12 text-center text-sm text-muted-foreground">Create a group to start splitting.</div>}>
+          <For each={appStore.groups()} fallback={<div class="px-6 py-12 text-center text-sm text-muted-foreground">No groups yet. Create one for a trip, home, or event.</div>}>
             {(group) => {
               const balance = createMemo(() => groupBalance(group.id, group.settlementCurrency));
               const paymentCount = createMemo(() => groupPaymentCount(group.id));

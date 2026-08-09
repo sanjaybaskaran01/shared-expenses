@@ -53,13 +53,13 @@ export function ContactInviteDialog(props: {
         if (contactPickerAvailable()) {
           const contact = await pickContactForMessage();
           if (!contact) {
-            setMessage("Invite created. Choose Share invite whenever you’re ready.");
+            setMessage("Invite saved. Share it when you’re ready.");
             return;
           }
           phone = contact.tel?.[0] ?? "";
         }
         messageInvitation(invitation.url, phone);
-        setMessage("Invite created. Messages is ready for you to choose or confirm the recipient.");
+        setMessage("Choose or confirm the recipient in Messages.");
         return;
       }
       const result = await shareInvitation(invitation.url);
@@ -67,12 +67,12 @@ export function ContactInviteDialog(props: {
         result === "copied"
           ? "Invite copied. Send it to one person."
           : result === "cancelled"
-            ? "Invite saved below—you can share it later."
-            : "Invite ready. It can be claimed by one verified email.",
+            ? "Invite saved below. Share it when you’re ready."
+            : "Invite ready. One verified email can use it.",
       );
     } catch (error) {
       setMessageTone("error");
-      setMessage(error instanceof Error ? error.message : "Could not create an invitation");
+      setMessage(error instanceof Error ? error.message : "Unable to create an invitation. Try again.");
     } finally {
       setBusy(false);
     }
@@ -89,10 +89,10 @@ export function ContactInviteDialog(props: {
     try {
       applyState(await revokeContactInvitation(id));
       setMessageTone("status");
-      setMessage("Invite revoked and its credit returned.");
+      setMessage("Invite revoked. You can create another.");
     } catch (error) {
       setMessageTone("error");
-      setMessage(error instanceof Error ? error.message : "Could not revoke the invite");
+      setMessage(error instanceof Error ? error.message : "Unable to revoke the invite. Try again.");
     } finally {
       setBusy(false);
     }
@@ -125,7 +125,7 @@ export function ContactInviteDialog(props: {
               <div>
                 <Dialog.Title class="text-base font-semibold">Invite friends</Dialog.Title>
                 <Dialog.Description class="mt-0.5 text-xs text-muted-foreground">
-                  No group required. Each link works once.
+                  Invite someone without adding them to a group. Each link works once.
                 </Dialog.Description>
               </div>
               <Dialog.CloseButton class="icon-button" aria-label="Close invite form"><X size={18} /></Dialog.CloseButton>
@@ -134,8 +134,8 @@ export function ContactInviteDialog(props: {
             <div class="grid gap-5 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
               <section class="invite-credit-panel">
                 <div>
-                  <span class="micro-label">Invitations available</span>
-                  <strong>{state.loading ? "Checking…" : state.error ? "Connect to check" : `${state()?.creditsRemaining ?? 0} of ${state()?.creditsTotal ?? 5}`}</strong>
+                  <span class="micro-label">Invites remaining</span>
+                  <strong>{state.loading ? "Checking…" : state.error ? "Go online to check" : `${state()?.creditsRemaining ?? 0} of ${state()?.creditsTotal ?? 5}`}</strong>
                 </div>
                 <UserPlus size={20} />
               </section>
@@ -149,7 +149,7 @@ export function ContactInviteDialog(props: {
                   <Send size={16} /> Share invite
                 </Button>
                 <Button variant="secondary" disabled={busy() || state.loading || Boolean(state.error) || state()?.creditsRemaining === 0} onClick={() => void createAndShare("message")}>
-                  <MessageCircle size={16} /> Message
+                  <MessageCircle size={16} /> Send message
                 </Button>
               </div>
 
@@ -169,7 +169,7 @@ export function ContactInviteDialog(props: {
                       <div class="flex items-center gap-3 px-3 py-3">
                         <Avatar name={contact.displayName} />
                         <strong class="min-w-0 flex-1 truncate text-sm">{contact.displayName}</strong>
-                        <span class="inline-flex items-center gap-1 text-xs text-muted-foreground"><Check size={13} /> Joined</span>
+                        <span class="inline-flex items-center gap-1 text-xs text-muted-foreground"><Check size={13} /> Connected</span>
                       </div>
                     )}</For>
                   </div>
@@ -178,16 +178,16 @@ export function ContactInviteDialog(props: {
 
               <Show when={state()?.invitations.some((invite) => invite.status === "pending" || invite.status === "reserved")}>
                 <section>
-                  <h3 class="micro-label mb-2">Open invitations</h3>
+                  <h3 class="micro-label mb-2">Pending invites</h3>
                   <div class="divide-y divide-border/60 rounded-lg border border-border">
                     <For each={state()?.invitations.filter((invite) => invite.status === "pending" || invite.status === "reserved")}>
                       {(invite) => (
                         <div class="flex items-center gap-3 px-3 py-3 text-sm">
                           <span class="min-w-0 flex-1">
-                            <strong class="block">{invite.status === "reserved" ? "Verifying email" : "Ready to share"}</strong>
+                            <strong class="block">{invite.status === "reserved" ? "Waiting for email verification" : "Ready to share"}</strong>
                             <small class="text-muted-foreground">Expires {new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(invite.expiresAt))}</small>
                           </span>
-                          <button class="min-h-11 px-2 text-xs font-medium text-destructive" type="button" disabled={busy()} onClick={() => void revoke(invite.id)}>Revoke</button>
+                          <button class="min-h-11 px-2 text-xs font-medium text-destructive" type="button" disabled={busy()} onClick={() => void revoke(invite.id)}>Revoke invite</button>
                         </div>
                       )}
                     </For>
@@ -196,7 +196,7 @@ export function ContactInviteDialog(props: {
               </Show>
 
               <p class="text-xs leading-5 text-muted-foreground">
-                Tallied never uploads your address book. On iPhone, the share sheet or Messages lets you choose a recipient privately. Anyone with the link can claim it once, so confirm who joined before sharing expenses.
+                Tallied never uploads your contacts. On iPhone, choose a recipient in the share sheet or Messages. Anyone with the link can use it once, so check who joined before sharing expenses.
               </p>
             </div>
           </Dialog.Content>

@@ -115,10 +115,10 @@ export async function buildImportCommit(
   const importerExternalIds = new Set(
     options.importerExternalIds ?? (options.importerExternalId ? [options.importerExternalId] : []),
   );
-  if (importerExternalIds.size === 0) throw new RangeError("Choose every imported name that represents you");
+  if (importerExternalIds.size === 0) throw new RangeError("Choose every imported name that belongs to you.");
   const selected = new Set(options.selectedGroupIds);
   const selectedGroups = draft.groups.filter((group) => selected.has(group.externalId));
-  if (selectedGroups.length === 0) throw new RangeError("Choose at least one group to migrate");
+  if (selectedGroups.length === 0) throw new RangeError("Choose at least one group to import.");
   const selectedRecords = draft.records.filter((record) => selected.has(record.externalGroupId));
   const selectedSourceHashes = new Set(selectedGroups.flatMap((group) => group.sourceHashes ?? []));
   const selectableSourceHashes = new Set(draft.groups.flatMap((group) => group.sourceHashes ?? []));
@@ -132,7 +132,7 @@ export async function buildImportCommit(
   for (const record of selectedRecords) for (const personId of recordParticipantIds(record)) involved.add(personId);
   const people = draft.people.filter((person) => involved.has(person.externalId));
   if ([...importerExternalIds].some((externalId) => !people.some((person) => person.externalId === externalId))) {
-    throw new RangeError("A selected self identity is not part of the chosen groups");
+    throw new RangeError("One of the names you chose for yourself is not in the selected groups. Review your choices.");
   }
   const filteredDraft: NormalizedImportDraft = {
     ...draft,
@@ -144,7 +144,7 @@ export async function buildImportCommit(
   };
   const reconciliation = reconcileImportDraft(filteredDraft);
   if (reconciliation.blockingWarnings.length > 0 || !reconciliation.zeroSum) {
-    throw new RangeError("Resolve every migration check before finishing the import");
+    throw new RangeError("Resolve each import issue before continuing.");
   }
 
   const fingerprintSource: JsonValue = {
@@ -187,7 +187,7 @@ export async function buildImportCommit(
     : { resolved: defaultResolution };
   const participantId = (externalId: string): string => {
     const localUserId = resolvedPeople[externalId];
-    if (!localUserId) throw new RangeError("A transaction references a person who could not be verified");
+    if (!localUserId) throw new RangeError("Tallied could not verify one person in this transaction. Review the imported people.");
     return localUserId;
   };
   const resolvedAmounts = (amounts: readonly { externalPersonId: string; amountMinor: number }[]) => {
@@ -240,7 +240,7 @@ export async function buildImportCommit(
   const plannedRecords = await mapWithConcurrency(selectedRecords, 16, async (record) => {
     const groupId = groupIds.get(record.externalGroupId);
     const sourceGroup = selectedGroups.find(({ externalId }) => externalId === record.externalGroupId);
-    if (!groupId || !sourceGroup) throw new RangeError("A transaction references a group that was not selected");
+    if (!groupId || !sourceGroup) throw new RangeError("One transaction belongs to a group you did not select. Review your group choices.");
     const dedupeStrategy = record.source.providerRecordId ? "provider_id" as const : "csv_candidate" as const;
     const semanticScope = dedupeStrategy === "csv_candidate"
       ? csvImportScope(sourceGroup.name, record.currency)
@@ -281,11 +281,11 @@ export async function buildImportCommit(
         allocations: resolvedAmounts(record.allocations ?? []),
       };
     } else if (record.kind === "payment") {
-      if (!record.payerExternalId || !record.recipientExternalId) throw new RangeError("An imported payment is incomplete");
+      if (!record.payerExternalId || !record.recipientExternalId) throw new RangeError("An imported payment is missing who paid or who received it.");
       const payerId = participantId(record.payerExternalId);
       const recipientId = participantId(record.recipientExternalId);
       if (payerId === recipientId) {
-        throw new RangeError("A payment is between two imported names both marked as you; review your identity choices");
+        throw new RangeError("A payment is between two names you marked as yourself. Review your name choices.");
       }
       type = "PaymentRecorded";
       payload = {
@@ -301,7 +301,7 @@ export async function buildImportCommit(
       type = record.kind === "opening_balance" ? "OpeningBalanceCreated" : "ImportedTransactionRecorded";
       const effects = resolvedAmounts(record.effects ?? []).filter(({ amountMinor }) => amountMinor !== 0);
       if (effects.length < 2) {
-        throw new RangeError("A balance entry collapses after combining names marked as you; review your identity choices");
+        throw new RangeError("A balance disappears after combining names you marked as yourself. Review your name choices.");
       }
       payload = {
         ...common,

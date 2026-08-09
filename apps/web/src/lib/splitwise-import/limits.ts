@@ -29,7 +29,7 @@ export function sourceRowLimit(options: SourceOptions): number {
 
 export function sourceRowLimitMessage(maxRows: number, fallbackNoun: "rows" | "expenses"): string {
   if (maxRows < IMPORT_ROW_LIMIT) {
-    return `This phone supports up to ${maxRows.toLocaleString("en-US")} ${maxRows === 1 ? "entry" : "entries"} in one migration. Use Tallied on a desktop for exports up to ${IMPORT_ROW_LIMIT.toLocaleString("en-US")}.`;
+    return `This phone can import up to ${maxRows.toLocaleString("en-US")} ${maxRows === 1 ? "entry" : "entries"} at a time. Use Tallied on a desktop for exports with up to ${IMPORT_ROW_LIMIT.toLocaleString("en-US")} entries.`;
   }
   const noun = maxRows === 1 ? (fallbackNoun === "rows" ? "row" : "expense") : fallbackNoun;
   return `This ${fallbackNoun === "rows" ? "file" : "backup"} contains more than ${maxRows.toLocaleString("en-US")} ${noun}`;

@@ -155,26 +155,26 @@ export function createAuth(db: Database, config: AppConfig, contactInvites: Cont
             ? contactInvites.invitationContext(contactInvitationId, email)
             : null;
           const subject = migrationClaim
-            ? "Claim your imported Splitwise history on Tallied"
+            ? "Connect your imported Splitwise history on Tallied"
             : contactInvitation
             ? `${contactInvitation.inviterName} invited you to Tallied`
             : invitation
             ? `${invitation.inviterName} invited you to ${invitation.groupName}`
-            : "Your secure Tallied sign-in link";
+            : "Sign in to Tallied";
           const text = migrationClaim
-            ? `Open this single-use link to verify your email, sign in, and review your imported-history claim: ${url}`
+            ? `Open this secure link to verify your email, sign in, and connect your imported history: ${url}\n\nThis link expires in 10 minutes.`
             : contactInvitation
-            ? `${contactInvitation.inviterName} invited you to connect on Tallied. Open this single-use link to verify your email, join, and sign in: ${url}`
+            ? `${contactInvitation.inviterName} invited you to join Tallied. Open this single-use link to verify your email and sign in: ${url}\n\nThis link expires in 10 minutes.`
             : invitation
-            ? `${invitation.inviterName} invited you to join ${invitation.groupName} on Tallied. Open this single-use link to join and sign in: ${url}`
-            : `Open this single-use link to sign in to Tallied: ${url}`;
+            ? `${invitation.inviterName} invited you to join ${invitation.groupName} on Tallied. Open this single-use link to verify your email and join: ${url}\n\nThis link expires in 10 minutes.`
+            : `Open this single-use link to sign in to Tallied: ${url}\n\nThis link expires in 10 minutes.`;
           const html = migrationClaim
-            ? `<p>Verify your email to review an imported-history claim on Tallied.</p><p><a href="${escapeHtml(url)}">Continue to Tallied</a></p><p>This single-use link expires in 10 minutes. No balances are revealed until the claim is securely connected.</p>`
+            ? `<p>Verify your email to connect your imported history on Tallied.</p><p><a href="${escapeHtml(url)}">Connect imported history</a></p><p>This secure link expires in 10 minutes. No balances are shown until the account is connected.</p>`
             : contactInvitation
-            ? `<p><strong>${escapeHtml(contactInvitation.inviterName)}</strong> invited you to connect on Tallied.</p><p><a href="${escapeHtml(url)}">Join Tallied</a></p><p>This single-use link verifies your email and signs you in. It expires in 10 minutes.</p>`
+            ? `<p><strong>${escapeHtml(contactInvitation.inviterName)}</strong> invited you to join Tallied.</p><p><a href="${escapeHtml(url)}">Join Tallied</a></p><p>This single-use link verifies your email and signs you in. It expires in 10 minutes.</p>`
             : invitation
             ? `<p><strong>${escapeHtml(invitation.inviterName)}</strong> invited you to join <strong>${escapeHtml(invitation.groupName)}</strong> on Tallied.</p><p><a href="${escapeHtml(url)}">Join ${escapeHtml(invitation.groupName)}</a></p><p>This single-use link verifies your email and signs you in. It expires in 10 minutes.</p>`
-            : `<p>Use this single-use link to sign in to Tallied:</p><p><a href="${escapeHtml(url)}">Open Tallied</a></p><p>This link expires in 10 minutes.</p>`;
+            : `<p>Use this secure link to sign in to Tallied:</p><p><a href="${escapeHtml(url)}">Sign in to Tallied</a></p><p>This link expires in 10 minutes.</p>`;
           enqueueEmail(db, {
             idempotencyKey: emailKey("magic-link", email, token),
             recipient: email,

@@ -82,7 +82,7 @@ self.addEventListener("message", async (event: MessageEvent<PlanRequest>) => {
   } catch (error) {
     self.postMessage({
       type: "error",
-      message: error instanceof Error ? error.message : "This migration could not be prepared",
+      message: error instanceof Error ? error.message : "Tallied could not prepare this import. Try again.",
     } satisfies PlanResponse);
   }
 });

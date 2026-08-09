@@ -52,7 +52,7 @@ async function apiFetch<T>(path: string, init: RequestInit = {}, timeoutMs = 30_
   });
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
-    throw new ApiRequestError(response.status, payload?.error?.message ?? `Request failed (${response.status})`);
+    throw new ApiRequestError(response.status, payload?.error?.message ?? "Unable to complete this request. Try again.");
   }
   return (await response.json()) as T;
 }
@@ -207,7 +207,7 @@ async function stageImportInternal(
       body: JSON.stringify(startBody),
     });
   } catch (error) {
-    if (allowRestart && error instanceof Error && /prepared migration details changed/i.test(error.message)) {
+    if (allowRestart && error instanceof Error && /prepared (?:migration|import)(?: details)? changed/i.test(error.message)) {
       await cancelImportUpload(body.id);
       return stageImportInternal(body, onProgress, false);
     }
@@ -226,7 +226,7 @@ async function stageImportInternal(
       operations: chunkOperations,
       operationLinks: chunkOperations.map((operation) => {
         const link = links.get(operation.id);
-        if (!link) throw new Error("A migration operation is missing its source mapping");
+        if (!link) throw new Error("An imported record is missing its source. Review the import and try again.");
         return link;
       }),
     };

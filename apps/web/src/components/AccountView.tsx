@@ -28,7 +28,7 @@ export function AccountView(props: { displayName: string; email: string | undefi
   return (
     <div class="page-enter space-y-5">
       <header>
-        <p class="eyebrow">Preferences & security</p>
+        <p class="eyebrow">Settings</p>
         <h1 class="page-title">Account</h1>
       </header>
       <Card class="p-5">
@@ -36,7 +36,7 @@ export function AccountView(props: { displayName: string; email: string | undefi
           <Avatar name={props.displayName} class="size-14 text-lg" />
           <div class="min-w-0 flex-1">
             <h2 class="font-semibold">{props.displayName}</h2>
-            <p class="truncate text-sm text-muted-foreground">{props.email ?? "Offline account on this device"}</p>
+            <p class="truncate text-sm text-muted-foreground">{props.email ?? "Saved on this device"}</p>
           </div>
           <Show when={!import.meta.env.DEV}>
             <Button
@@ -51,26 +51,26 @@ export function AccountView(props: { displayName: string; email: string | undefi
         </div>
         <Show when={!import.meta.env.DEV}>
           <p class="mt-4 border-t border-border/60 pt-3 text-xs leading-5 text-muted-foreground">
-            Logging out removes this account's cached ledger from this device.
+            Logging out removes this account’s saved Tallied data from this device.
           </p>
         </Show>
       </Card>
       <button class="migration-account-card" type="button" onClick={props.onOpenMigration}>
         <span class="category-icon"><DatabaseBackup size={18} /></span>
-        <span class="min-w-0 flex-1 text-left"><strong class="block text-sm">Move from Splitwise</strong><small class="mt-0.5 block text-xs text-muted-foreground">Review balances before anything changes</small></span>
+        <span class="min-w-0 flex-1 text-left"><strong class="block text-sm">Move from Splitwise</strong><small class="mt-0.5 block text-xs text-muted-foreground">Review everything before importing</small></span>
         <ChevronRight size={16} class="text-muted-foreground" />
       </button>
       <Card class="overflow-hidden">
-        <SectionHeading title="Expense entry" detail="On-device preview" />
+        <SectionHeading title="Expense entry" detail="Category suggestions" />
         <div class="smart-category-setting">
           <span class="category-icon category-tone-leisure"><Sparkles size={17} /></span>
-          <span class="min-w-0 flex-1"><strong>Smart category suggestions</strong><small>Uses built-in English rules and your past choices. No description is sent to a model.</small></span>
-          <button type="button" class="preference-switch" role="switch" aria-checked={props.smartCategoriesEnabled} aria-label="Smart category suggestions" onClick={() => props.onSmartCategoriesChange(!props.smartCategoriesEnabled)}><span /></button>
+          <span class="min-w-0 flex-1"><strong>Suggest expense categories</strong><small>Uses built-in English rules and your past choices. No description is sent to a model.</small></span>
+          <button type="button" class="preference-switch" role="switch" aria-checked={props.smartCategoriesEnabled} aria-label="Suggest expense categories" onClick={() => props.onSmartCategoriesChange(!props.smartCategoriesEnabled)}><span /></button>
         </div>
       </Card>
       <NotificationSettings onNotify={props.onNotify} />
       <Card class="overflow-hidden">
-        <SectionHeading title="Appearance" detail="Optimized for iPhone" />
+        <SectionHeading title="Appearance" detail="Choose a theme" />
         <div class="grid grid-cols-3 gap-2 p-4">
           <For
             each={
@@ -101,16 +101,16 @@ export function AccountView(props: { displayName: string; email: string | undefi
             {
               icon: ShieldCheck,
               title: "Protected on this device",
-              detail: "This device signs changes so edits can be attributed",
+              detail: "This device signs each change so you can see where it came from",
             },
             {
               icon: Cloud,
               title: "Works offline",
-              detail: "New entries stay safe here until sync resumes",
+              detail: "New entries save here until sync resumes",
             },
             {
               icon: Scale,
-              title: "Reviewable history",
+              title: "See every change",
               detail: "Edits and deletions remain visible in Activity",
             },
           ]}

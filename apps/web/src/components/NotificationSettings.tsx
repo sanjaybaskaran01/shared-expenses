@@ -12,12 +12,12 @@ type ViewState = PushAvailability | "loading" | "error";
 
 const descriptions: Record<ViewState, string> = {
   loading: "Checking this device…",
-  enabled: "Alerts arrive when a friend adds an expense or records a repayment.",
-  available: "Get an alert when a friend adds an expense or records a repayment.",
-  "install-required": "On iPhone, use Share → Add to Home Screen first, then turn notifications on in Tallied.",
+  enabled: "You’ll get alerts when someone adds an expense or records a payment.",
+  available: "Get alerts when someone adds an expense or records a payment.",
+  "install-required": "On iPhone, add Tallied to your Home Screen, then return here to turn on notifications.",
   denied: "Notifications are blocked. Allow Tallied in your browser or iPhone notification settings.",
   unsupported: "This browser cannot receive web notifications. Live updates still appear while Tallied is open.",
-  error: "Tallied could not check notifications. Your expenses and sync are unaffected.",
+  error: "Unable to check notification settings. Your expenses and sync are unaffected.",
 };
 
 export function NotificationSettings(props: { onNotify(message: string): void }) {
@@ -31,7 +31,7 @@ export function NotificationSettings(props: { onNotify(message: string): void })
       setError("");
     } catch (cause) {
       setState("error");
-      setError(cause instanceof Error ? cause.message : "Notifications are temporarily unavailable");
+      setError(cause instanceof Error ? cause.message : "Notifications are temporarily unavailable. Try again.");
     }
   }
 
@@ -50,7 +50,7 @@ export function NotificationSettings(props: { onNotify(message: string): void })
         props.onNotify("Notifications turned on for this device");
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Notifications could not be changed");
+      setError(cause instanceof Error ? cause.message : "Unable to change notifications. Try again.");
       try {
         setState(await currentPushAvailability());
       } catch {
@@ -68,12 +68,12 @@ export function NotificationSettings(props: { onNotify(message: string): void })
     <Card class="overflow-hidden">
       <div class="border-b border-border/60 px-4 py-3">
         <strong class="block text-sm">Notifications</strong>
-        <span class="text-xs text-muted-foreground">Per device · no notification service account</span>
+        <span class="text-xs text-muted-foreground">Set separately on each device</span>
       </div>
       <div class="smart-category-setting">
         <span class="category-icon category-tone-transport"><Bell size={17} /></span>
         <span class="min-w-0 flex-1">
-          <strong>{state() === "enabled" ? "Shared updates are on" : "Shared expense alerts"}</strong>
+          <strong>Shared expense notifications</strong>
           <small>{descriptions[state()]}</small>
         </span>
         <button
@@ -81,7 +81,7 @@ export function NotificationSettings(props: { onNotify(message: string): void })
           class="preference-switch"
           role="switch"
           aria-checked={state() === "enabled"}
-          aria-label={state() === "enabled" ? "Turn off shared expense notifications" : "Turn on shared expense notifications"}
+          aria-label="Send shared expense notifications"
           disabled={!canToggle() || busy()}
           onClick={() => void toggle()}
         ><span /></button>

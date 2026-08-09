@@ -216,9 +216,9 @@ describe("migration commit planner", () => {
       sign: signer,
     };
     await expect(buildImportCommit(scoped, { ...options, selectedGroupIds: ["trip:USD"] })).resolves.toBeDefined();
-    await expect(buildImportCommit(scoped, { ...options, selectedGroupIds: ["trip:INR"] })).rejects.toThrow("Resolve every migration check");
+    await expect(buildImportCommit(scoped, { ...options, selectedGroupIds: ["trip:INR"] })).rejects.toThrow("Resolve each import issue");
     scoped.warnings = [{ ...scoped.warnings[0]!, sourceHash: "3".repeat(64) }];
-    await expect(buildImportCommit(scoped, { ...options, selectedGroupIds: ["trip:USD"] })).rejects.toThrow("Resolve every migration check");
+    await expect(buildImportCommit(scoped, { ...options, selectedGroupIds: ["trip:USD"] })).rejects.toThrow("Resolve each import issue");
   });
 
   test("blocks planning when the chosen source does not reconcile", async () => {
@@ -232,6 +232,6 @@ describe("migration commit planner", () => {
       deviceId: "device-1",
       importedAt: "2026-08-04T12:00:00.000Z",
       sign: signer,
-    })).rejects.toThrow("Resolve every migration check");
+    })).rejects.toThrow("Resolve each import issue");
   });
 });

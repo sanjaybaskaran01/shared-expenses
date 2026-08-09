@@ -212,9 +212,9 @@ function ExpenseList(props: {
               <span class="mx-auto mb-3 grid size-11 place-items-center rounded-[4px] bg-muted text-muted-foreground">
                 <ReceiptText size={19} />
               </span>
-              <h3 class="text-sm font-semibold">Nothing here yet</h3>
+              <h3 class="text-sm font-semibold">No expenses yet</h3>
               <p class="mt-1 text-sm text-muted-foreground">
-                Your first shared expense will appear here.
+                Add an expense to start this group’s balance.
               </p>
             </div>
           </div>
@@ -233,7 +233,7 @@ function ExpenseList(props: {
                       return <button type="button" class="expense-timeline-row group-row" classList={{ "opacity-55": expense().status === "voided" }} onClick={() => props.onOpen(expense())}>
                         <time class="expense-date-rail" datetime={expense().expenseDate}><span>{new Intl.DateTimeFormat(undefined, { month: "short" }).format(date)}</span><strong>{new Intl.DateTimeFormat(undefined, { day: "2-digit" }).format(date)}</strong></time>
                         <CategoryMark category={expense().category} />
-                        <div class="min-w-0"><strong class="expense-row-title">{expense().description}</strong><span class="expense-row-context">{payer} paid · split {expense().allocations.length} {expense().allocations.length === 1 ? "way" : "ways"}{expense().syncStatus === "pending" ? " · on device" : ""}{expense().status === "voided" ? " · deleted" : ""}</span></div>
+                        <div class="min-w-0"><strong class="expense-row-title">{expense().description}</strong><span class="expense-row-context">{payer} paid · split with {expense().allocations.length} {expense().allocations.length === 1 ? "person" : "people"}{expense().syncStatus === "pending" ? " · saved on device" : ""}{expense().status === "voided" ? " · deleted" : ""}</span></div>
                         <div class="expense-row-money"><strong classList={{ "money-in": expense().yourNetMinor > 0, "money-out": expense().yourNetMinor < 0, "sync-attention": expense().syncStatus === "conflicted" || expense().syncStatus === "rejected" }}>{expense().syncStatus === "conflicted" ? "needs review" : expense().syncStatus === "rejected" ? "not synced" : expense().status === "voided" ? "deleted" : expense().yourNetMinor > 0 ? `+${money(expense().yourNetMinor, expense().currency)}` : expense().yourNetMinor < 0 ? `−${money(-expense().yourNetMinor, expense().currency)}` : money(0, expense().currency)}</strong><span classList={{ "money-in": expense().yourNetMinor > 0, "money-out": expense().yourNetMinor < 0 }}>{expense().status === "voided" ? `deleted · ${money(expense().amountMinor, expense().currency)}` : expense().yourNetMinor > 0 ? "you lent" : expense().yourNetMinor < 0 ? "you owe" : "settled"}</span></div>
                         <ChevronRight size={15} class="expense-row-chevron" />
                       </button>;
@@ -280,8 +280,8 @@ function GroupsOverview(props: {
     <div class="page-enter space-y-5 sm:space-y-6">
       <header class="groups-overview-heading">
         <div>
-          <p class="eyebrow">Your groups</p>
-          <h1 class="page-title">Groups</h1>
+          <p class="eyebrow">Shared expenses</p>
+          <h1 class="page-title">Your groups</h1>
           <p class="mt-1 text-sm text-muted-foreground">
             See what each group owes you—or what you owe.
           </p>
@@ -426,7 +426,7 @@ function GroupsView(props: {
           <div class="group-title-line">
             <h1 class="page-title">{group()?.name ?? "Groups"}</h1>
             <div class="group-title-actions">
-              <Show when={group()}><button class="group-settings-action" type="button" aria-label={`Open settings for ${group()?.name}`} onClick={() => setSettingsOpen(true)}><Settings2 size={18} aria-hidden="true" /></button></Show>
+              <Show when={group()}><button class="group-settings-action" type="button" aria-label={`Open ${group()?.name} settings`} onClick={() => setSettingsOpen(true)}><Settings2 size={18} aria-hidden="true" /></button></Show>
             </div>
           </div>
           <Show when={group()} fallback={<p class="mt-1 text-sm text-muted-foreground">No groups yet</p>}>
@@ -491,11 +491,11 @@ function GroupsView(props: {
             <Show when={groupSection() === "balances"}>
               <div id={tabPanelId("group-view", "balances")} class="page-enter space-y-3" role="tabpanel" aria-labelledby={tabId("group-view", "balances")}>
                 <Show when={settlementBlockers() > 0}>
-                  <section class="settlement-warning" role="status"><div><strong>Settlement paused</strong><span>{settlementBlockers()} provisional {settlementBlockers() === 1 ? "expense needs" : "expenses need"} review before anyone records a payment.</span></div><button type="button" onClick={() => setGroupSection("expenses")}>View activity</button></section>
+                  <section class="settlement-warning" role="status"><div><strong>Review expenses first</strong><span>Check {settlementBlockers()} {settlementBlockers() === 1 ? "expense" : "expenses"} before recording a payment.</span></div><button type="button" onClick={() => setGroupSection("expenses")}>Review expenses</button></section>
                 </Show>
                 <section class="balance-strip" aria-label={`${activeGroup.name} balance summary`}>
-                  <div class="balance-cell balance-cell-in"><span class="micro-label">Coming in</span><strong class="money-type money-in">{money(incoming(), currency())}</strong></div>
-                  <div class="balance-cell balance-cell-out"><span class="micro-label">Going out</span><strong class="money-type money-out">{money(outgoing(), currency())}</strong></div>
+                  <div class="balance-cell balance-cell-in"><span class="micro-label">You’re owed</span><strong class="money-type money-in">{money(incoming(), currency())}</strong></div>
+                  <div class="balance-cell balance-cell-out"><span class="micro-label">You owe</span><strong class="money-type money-out">{money(outgoing(), currency())}</strong></div>
                   <div class="balance-cell balance-cell-net"><span class="micro-label">Net balance</span><strong class="money-type" classList={{ "money-in": yourBalance() > 0, "money-out": yourBalance() < 0 }}>{yourBalance() === 0 ? money(0, currency()) : `${yourBalance() > 0 ? "+" : "−"}${money(Math.abs(yourBalance()), currency())}`}</strong></div>
                   <select class="balance-currency" value={currency()} onInput={(event) => setCurrency(event.currentTarget.value)} aria-label="Balance currency"><For each={currenciesFor(activeGroup.id)}>{(item) => <option value={item}>{item}</option>}</For></select>
                 </section>
@@ -551,7 +551,7 @@ function GroupsView(props: {
                     </section>
 
                     <section class="insight-settlement" aria-labelledby="settlement-plan-title">
-                      <header><div><h3 id="settlement-plan-title">{settlementBlockers() > 0 ? "Settlement paused" : "Simplest way to settle"}</h3><p>{settlementBlockers() > 0 ? `${settlementBlockers()} provisional ${settlementBlockers() === 1 ? "expense needs" : "expenses need"} review` : settlementPlan().length ? `${settlementPlan().length} ${settlementPlan().length === 1 ? "transfer" : "transfers"} clears the group` : "No payments needed"}</p></div><button type="button" onClick={() => setGroupSection(settlementBlockers() > 0 ? "expenses" : "balances")}>{settlementBlockers() > 0 ? "View activity" : "See balances"} <ChevronRight size={14} /></button></header>
+                      <header><div><h3 id="settlement-plan-title">{settlementBlockers() > 0 ? "Review expenses first" : "Simplest way to settle"}</h3><p>{settlementBlockers() > 0 ? `Check ${settlementBlockers()} ${settlementBlockers() === 1 ? "expense" : "expenses"}` : settlementPlan().length ? `${settlementPlan().length} ${settlementPlan().length === 1 ? "payment" : "payments"} settles the group` : "No payments needed"}</p></div><button type="button" onClick={() => setGroupSection(settlementBlockers() > 0 ? "expenses" : "balances")}>{settlementBlockers() > 0 ? "Review expenses" : "See balances"} <ChevronRight size={14} /></button></header>
                       <Show when={settlementBlockers() === 0 && settlementPlan().length} fallback={<p class="insight-settled-copy">{settlementBlockers() > 0 ? "Resolve the flagged change before recording a settlement." : `Everyone is settled in ${currency()}.`}</p>}>
                         <div class="insight-transfer-list"><For each={settlementPlan()}>{(settlement) => <div><span>{memberName(activeGroup.id, settlement.payerId, props.actorId)} pays {memberName(activeGroup.id, settlement.recipientId, props.actorId)}</span><strong>{money(settlement.amountMinor, currency())}</strong></div>}</For></div>
                       </Show>
@@ -562,7 +562,7 @@ function GroupsView(props: {
                       <Show when={insights().monthTrend} fallback={<article class="insight-story"><span>Typical expense</span><strong>{money(insights().averageMinor, currency())}</strong><p>Average across this group</p></article>}>
                         {(trend) => <article class="insight-story"><span>Latest month</span><strong>{trend().differenceMinor === 0 ? "No change" : `${money(Math.abs(trend().differenceMinor), currency())} ${trend().differenceMinor > 0 ? "higher" : "lower"}`}</strong><p>{monthLabel(trend().currentMonth)} vs {monthLabel(trend().previousMonth)} · {Math.abs(trend().percentageChange)}%</p></article>}
                       </Show>
-                      <article class="insight-story" classList={{ "insight-story-attention": syncHealth().attention > 0 || syncHealth().pending > 0 }} role="status"><span>Ledger health</span><strong>{syncHealth().attention > 0 ? `${syncHealth().attention} ${syncHealth().attention === 1 ? "change needs" : "changes need"} review` : syncHealth().pending > 0 ? `${syncHealth().pending} ${syncHealth().pending === 1 ? "change" : "changes"} waiting` : "No sync problems"}</strong><p>{syncHealth().attention > 0 ? "Conflicted or rejected changes" : syncHealth().pending > 0 ? "Safe on this device until sync" : "No queued or rejected group changes"}</p></article>
+                      <article class="insight-story" classList={{ "insight-story-attention": syncHealth().attention > 0 || syncHealth().pending > 0 }} role="status"><span>Sync status</span><strong>{syncHealth().attention > 0 ? `${syncHealth().attention} ${syncHealth().attention === 1 ? "change needs" : "changes need"} review` : syncHealth().pending > 0 ? `${syncHealth().pending} ${syncHealth().pending === 1 ? "change is" : "changes are"} syncing` : "Up to date on this device"}</strong><p>{syncHealth().attention > 0 ? "Open Activity to review them" : syncHealth().pending > 0 ? "Saved on this device" : "No local changes need attention"}</p></article>
                     </div>
 
                     <section class="insight-chart-shell" aria-labelledby="insight-chart-title">
@@ -628,7 +628,7 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
   function updateSmartCategories(enabled: boolean): void {
     setSmartCategoriesEnabled(enabled);
     localStorage.setItem(smartCategoriesStorageKey, enabled ? "enabled" : "disabled");
-    notify(enabled ? "Smart category suggestions enabled" : "Smart category suggestions disabled");
+    notify(enabled ? "Category suggestions turned on" : "Category suggestions turned off");
   }
   async function acceptPendingInvitation(): Promise<void> {
     const invitationToken = inviteTokenFromHash();
@@ -645,27 +645,27 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
       notify("You’re connected on Tallied");
     } catch (error) {
       setInviteRecovery("waiting");
-      setInviteRecoveryMessage(error instanceof Error ? error.message : "Could not verify this invitation");
+      setInviteRecoveryMessage(error instanceof Error ? error.message : "Unable to verify this invitation. Try again.");
     }
   }
   async function acceptPendingMigrationClaim(): Promise<void> {
     const token = migrationClaimFromHash();
     if (!token) return;
     setMigrationClaimBusy(true);
-    setMigrationClaimMessage("Claiming your imported history…");
+    setMigrationClaimMessage("Connecting your imported history…");
     try {
       const result = await claimImportedIdentity(token);
       clearLocationHash();
       setMigrationClaimPending(false);
       if (result.status === "claimed") {
-        setMigrationClaimMessage(`${result.displayName}'s imported history is now connected to your account.`);
+        setMigrationClaimMessage(`${result.displayName}’s imported history is connected to your account.`);
         await appStore.sync();
       } else {
         if (result.requestId) localStorage.setItem(claimRequestStorageKey, result.requestId);
-        setMigrationClaimMessage(`Request sent. The migration owner must confirm that you are ${result.displayName}. No balances are visible yet.`);
+        setMigrationClaimMessage(`Request sent. The person who imported the history must confirm that you are ${result.displayName}. You can’t see the balances yet.`);
       }
     } catch (error) {
-      setMigrationClaimMessage(error instanceof Error ? error.message : "This migration claim could not be completed");
+      setMigrationClaimMessage(error instanceof Error ? error.message : "Unable to connect this imported history. Try again.");
     } finally {
       setMigrationClaimBusy(false);
     }
@@ -676,17 +676,17 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
     try {
       const result = await getImportClaimStatus(requestId);
       if (result.status === "awaiting_owner") {
-        setMigrationClaimMessage(`Your request to claim ${result.displayName}'s imported history is waiting for the migration owner. No balances are visible yet.`);
+        setMigrationClaimMessage(`Your request to connect ${result.displayName}’s imported history is waiting for approval. You can’t see the balances yet.`);
       } else if (result.status === "claimed") {
         localStorage.removeItem(claimRequestStorageKey);
-        setMigrationClaimMessage(`${result.displayName}'s imported history is now connected to your account.`);
+        setMigrationClaimMessage(`${result.displayName}’s imported history is connected to your account.`);
         await appStore.sync();
       } else {
         localStorage.removeItem(claimRequestStorageKey);
-        setMigrationClaimMessage(result.status === "rejected" ? "The migration owner did not approve this claim." : "This claim request expired. Ask the migration owner for a new link.");
+        setMigrationClaimMessage(result.status === "rejected" ? "The person who imported the history declined this request." : "This connection request expired. Ask for a new link.");
       }
     } catch {
-      setMigrationClaimMessage("Your imported-history claim is saved on this device. Reconnect to check its status.");
+      setMigrationClaimMessage("Your connection request is saved on this device. Go online to check its status.");
     }
   }
   onMount(() => {
@@ -696,7 +696,7 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
     void initializeStore(props.actorId);
     if (inviteTokenFromHash()) void acceptPendingInvitation();
     if (migrationClaimFromHash()) {
-      setMigrationClaimMessage(`Review this claim before continuing${props.email ? ` as ${props.email}` : ""}. It can join this account to imported groups; members will see your verified identity.`);
+      setMigrationClaimMessage(`Review this connection before continuing${props.email ? ` as ${props.email}` : ""}. Connecting gives this account access to the imported groups and shows other members your verified account.`);
     }
     void refreshMigrationClaimRequest();
     const openNotification = (urlValue?: string) => {
@@ -745,7 +745,7 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
         ? "Too many authorization callbacks arrived. Nothing was imported; wait a moment, then try again."
         : outcome === "splitwise-auth-cancelled"
           ? "Splitwise connection was cancelled. Nothing was imported; you can choose another route."
-          : "Splitwise did not authorize this migration. Nothing was imported; you can try again or upload exports instead.");
+          : "Splitwise did not authorize this import. Nothing was imported. Try again or upload exported files instead.");
       setMigrationOpen(true);
       clearLocationHash();
     }
@@ -876,7 +876,7 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
       setSelectedGroupId(targetGroupId);
       setGroupsMode("detail");
       setTab("groups");
-      notify("Settlement paused · review the provisional expense first");
+      notify("Review the expense before recording a payment.");
       return;
     }
     if (targetGroupId) setSelectedGroupId(targetGroupId);
@@ -944,7 +944,7 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
           <FeedbackButton class="mb-2" />
           <ConnectionPill />
           <p class="mt-2 text-xs leading-5 text-muted-foreground">
-            Changes save locally before syncing.
+            Changes save on this device, then sync automatically.
           </p>
         </div>
       </aside>
@@ -960,10 +960,10 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
             <section class="invite-recovery-banner" role={inviteRecovery() === "waiting" ? "alert" : "status"} aria-live={inviteRecovery() === "waiting" ? "assertive" : "polite"}>
               <div>
                 <strong>{inviteRecovery() === "accepting" ? "Verifying your invitation…" : "Your invitation is saved"}</strong>
-                <p>{inviteRecovery() === "accepting" ? "Tallied is connecting this account to your inviter." : "Reconnect to verify and join. Wait to add shared expenses until this finishes; offline drafts are not connected to the invitation yet."}</p>
+                <p>{inviteRecovery() === "accepting" ? "Tallied is connecting you to the person who invited you." : "Reconnect to finish joining. Don’t add shared expenses yet—offline entries will not be connected to this invitation."}</p>
                 <Show when={inviteRecoveryMessage()}><small>{inviteRecoveryMessage()}</small></Show>
               </div>
-              <Show when={inviteRecovery() === "waiting"}><Button variant="secondary" onClick={() => void acceptPendingInvitation()}>Retry</Button></Show>
+              <Show when={inviteRecovery() === "waiting"}><Button variant="secondary" onClick={() => void acceptPendingInvitation()}>Try again</Button></Show>
             </section>
           </Show>
           <Show when={migrationClaimMessage()}>
@@ -971,12 +971,12 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
               <div><strong>Imported history</strong><p>{migrationClaimMessage()}</p></div>
               <Show when={migrationClaimPending()} fallback={<button class="icon-button" aria-label="Dismiss imported history message" onClick={() => setMigrationClaimMessage("")}><X size={17} /></button>}>
                 <div class="flex flex-wrap gap-2">
-                  <Button disabled={migrationClaimBusy()} onClick={() => void acceptPendingMigrationClaim()}>{migrationClaimBusy() ? "Checking…" : "Continue claim"}</Button>
+                  <Button disabled={migrationClaimBusy()} onClick={() => void acceptPendingMigrationClaim()}>{migrationClaimBusy() ? "Checking…" : "Review connection"}</Button>
                   <Button variant="secondary" disabled={migrationClaimBusy()} onClick={() => {
                     clearLocationHash();
                     setMigrationClaimPending(false);
                     setMigrationClaimMessage("");
-                  }}>Not now</Button>
+                  }}>Review later</Button>
                 </div>
               </Show>
             </section>
@@ -1173,8 +1173,8 @@ export default function App() {
     <>
       <Show when={releaseWatch.updateAvailable()}>
         <div class="update-banner" role="status" aria-live="polite">
-          <span>A new version of Tallied is available</span>
-          <Button size="sm" variant="secondary" onClick={reloadForUpdate}>Reload</Button>
+          <span>Tallied is ready to update</span>
+          <Button size="sm" variant="secondary" onClick={reloadForUpdate}>Update now</Button>
         </div>
       </Show>
       <Show

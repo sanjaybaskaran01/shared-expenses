@@ -95,7 +95,7 @@ function subscriptionJson(subscription: PushSubscription): BrowserPushSubscripti
   const serialized = subscription.toJSON();
   const p256dh = serialized.keys?.p256dh;
   const auth = serialized.keys?.auth;
-  if (!serialized.endpoint || !p256dh || !auth) throw new Error("The browser returned an incomplete push subscription");
+  if (!serialized.endpoint || !p256dh || !auth) throw new Error("Unable to finish notification setup. Reload Tallied and try again.");
   return {
     endpoint: serialized.endpoint,
     expirationTime: serialized.expirationTime ?? null,
@@ -107,19 +107,19 @@ export async function enablePushNotifications(): Promise<void> {
   const base = runtimeAvailability();
   const availability = classifyPushAvailability(base);
   if (availability === "install-required") {
-    throw new Error("Add Tallied to your Home Screen before turning on notifications");
+    throw new Error("Add Tallied to your Home Screen before turning on notifications.");
   }
-  if (availability === "unsupported") throw new Error("This browser does not support web notifications");
-  if (availability === "denied") throw new Error("Allow Tallied notifications in your browser settings first");
+  if (availability === "unsupported") throw new Error("This browser does not support web notifications.");
+  if (availability === "denied") throw new Error("Allow Tallied notifications in your browser settings, then try again.");
   // Keep the permission prompt in the original click's user-activation task,
   // which iOS requires for Home Screen web apps.
   const permission = Notification.permission === "granted"
     ? "granted"
     : await Notification.requestPermission();
-  if (permission !== "granted") throw new Error("Notifications were not allowed");
+  if (permission !== "granted") throw new Error("Notifications were not allowed. You can turn them on later in Account.");
   const device = await ensureDevice();
   const registration = await navigator.serviceWorker.getRegistration();
-  if (!registration) throw new Error("Install or reload Tallied before turning on notifications");
+  if (!registration) throw new Error("Reload Tallied before turning on notifications.");
   const config = await getPushConfig(device.deviceId);
   const existing = await registration.pushManager.getSubscription();
   const subscription = existing ?? await registration.pushManager.subscribe({

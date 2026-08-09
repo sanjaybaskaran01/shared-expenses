@@ -37,7 +37,7 @@ describe("Splitwise CSV import", () => {
     expect(draft.records).toEqual([]);
     expect(draft.warnings).toContainEqual(expect.objectContaining({
       code: "TOO_MANY_ROWS",
-      message: "This phone supports up to 1 entry in one migration. Use Tallied on a desktop for exports up to 100,000.",
+      message: "This phone can import up to 1 entry at a time. Use Tallied on a desktop for exports with up to 100,000 entries.",
       blocking: true,
     }));
   });

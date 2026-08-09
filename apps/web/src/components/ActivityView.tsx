@@ -109,12 +109,12 @@ export function ActivityView(props: {
         </p>
       </header>
       <div>
-        <h2 class="activity-feed-title">Everything that changed</h2>
+        <h2 class="activity-feed-title">Recent changes</h2>
         <For
           each={activityDays()}
           fallback={
             <Card class="mt-4 px-6 py-12 text-center text-sm text-muted-foreground">
-              Activity appears after your first change.
+              No activity yet. Add an expense or record a payment to see changes here.
             </Card>
           }
         >
@@ -149,7 +149,7 @@ export function ActivityView(props: {
                   <div class="activity-row-value">
                     <Show when={expense()} fallback={<Show when={payment()} fallback={<Show when={imported()}>{(item) => <><strong>{money(item().amountMinor, item().currency)}</strong><span class="activity-payment-label">imported</span></>}</Show>}>{(item) => <><strong>{money(item().amountMinor, item().currency)}</strong><span class="activity-payment-label">payment</span></>}</Show>}>{(item) => <strong>{money(item().amountMinor, item().currency)}</strong>}</Show>
                     <Show when={operation.type === "ExpenseVoided" && expense()?.status === "voided" && !expense()?.readOnly}>
-                      <button class="min-h-11 px-2" onClick={() => expense() && void restore(expense()!)}>Restore</button>
+                      <button class="min-h-11 px-2" onClick={() => expense() && void restore(expense()!)}>Restore expense</button>
                     </Show>
                   </div>
                   <Show when={expense()}><ChevronRight size={15} class="activity-row-chevron" /></Show>

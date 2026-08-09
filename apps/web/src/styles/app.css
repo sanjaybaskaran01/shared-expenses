@@ -581,7 +581,8 @@ textarea.form-control { height: auto; } select.form-control { appearance: auto; 
 .amount-native-input { width: min(62vw, 18rem); border: 0; background: transparent; color: inherit; font-size: inherit; line-height: 1; outline: none; }
 .amount-native-input::placeholder { color: color-mix(in srgb, var(--balance-foreground) 35%, transparent); }
 .description-field { display: block; border-bottom: 1px solid var(--border); }
-.description-field input { width: 100%; min-height: 3.2rem; border: 0; background: transparent; padding: .25rem .1rem; color: var(--foreground); font-size: 1.22rem; font-weight: 650; outline: none; }
+.description-field > .micro-label { display: block; padding: .2rem .1rem 0; }
+.description-field input { width: 100%; min-height: 3.2rem; border: 0; background: transparent; padding: .1rem; color: var(--foreground); font-size: 1.22rem; font-weight: 650; outline: none; }
 .description-field input::placeholder { color: var(--muted-foreground); }
 .expense-quick-controls { display: grid; overflow: hidden; border: 1px solid var(--border); border-radius: .7rem; background: var(--card); }
 .quick-control { display: grid; min-width: 0; min-height: 3.45rem; grid-template-columns: auto minmax(4.2rem, .72fr) minmax(0, 1.3fr) auto; align-items: center; gap: .6rem; background: var(--card); padding: .42rem .7rem; color: var(--foreground); text-align: left; transition: background-color 160ms ease, box-shadow 160ms ease, transform 140ms ease; }

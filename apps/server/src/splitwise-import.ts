@@ -22,7 +22,7 @@ export const splitwiseReadPaths = [
 
 export function assertSplitwiseReadPath(pathname: string): void {
   if (!(splitwiseReadPaths as readonly string[]).includes(pathname)) {
-    throw new Error("Splitwise migration only permits documented read endpoints");
+    throw new Error("Tallied can import only from documented, read-only Splitwise endpoints.");
   }
 }
 
@@ -131,7 +131,7 @@ export class SplitwiseImportConnector {
     const text = await response.text();
     if (!response.ok || text.length > 20_000) {
       this.fail(row.id);
-      throw new Error("Splitwise did not authorize this migration");
+      throw new Error("Splitwise did not authorize this import. Connect again or use exported files.");
     }
     let token: unknown;
     try {
@@ -177,7 +177,7 @@ export class SplitwiseImportConnector {
         expenses.push(...records);
         if (records.length < 100) break;
       }
-      if (expenses.length >= EXPENSE_LIMIT) throw new Error("Splitwise history exceeds the 100,000-row migration limit");
+      if (expenses.length >= EXPENSE_LIMIT) throw new Error("This Splitwise history exceeds the 100,000-row import limit.");
       const names = categoryNames(categories);
       const enrichedExpenses = expenses.map((expense) => {
         if (!expense || typeof expense !== "object") return expense;
@@ -194,7 +194,7 @@ export class SplitwiseImportConnector {
         fetchedAt: new Date().toISOString(),
       };
       if (new TextEncoder().encode(JSON.stringify(result)).byteLength > TOTAL_BYTES_LIMIT) {
-        throw new Error("Splitwise history exceeds the 50 MiB migration limit");
+        throw new Error("This Splitwise history exceeds the 50 MiB import limit.");
       }
       this.db.query(
         `UPDATE splitwise_oauth_sessions SET status = 'normalized', encrypted_access_token = NULL,

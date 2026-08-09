@@ -58,7 +58,7 @@ self.addEventListener("message", async (event: MessageEvent<UndoRequest>) => {
         total,
       } satisfies UndoResponse),
     });
-    if (undo.operations.length === 0) throw new Error("Sync this device before undoing the migration");
+    if (undo.operations.length === 0) throw new Error("Sync this device before undoing the import.");
     const result = await undoImport(request.batchId, undo, (completed, total) => self.postMessage({
       type: "progress",
       phase: "uploading",
@@ -69,7 +69,7 @@ self.addEventListener("message", async (event: MessageEvent<UndoRequest>) => {
   } catch (error) {
     self.postMessage({
       type: "error",
-      message: error instanceof Error ? error.message : "The migration could not be undone",
+      message: error instanceof Error ? error.message : "Unable to undo this import. Try again.",
     } satisfies UndoResponse);
   }
 });

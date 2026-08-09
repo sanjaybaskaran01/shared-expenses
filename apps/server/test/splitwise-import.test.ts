@@ -148,7 +148,7 @@ describe("approval-gated Splitwise connector", () => {
 
   test("refuses any write or undocumented path", () => {
     expect(() => assertSplitwiseReadPath("/get_expenses")).not.toThrow();
-    expect(() => assertSplitwiseReadPath("/create_expense")).toThrow("only permits documented read endpoints");
+    expect(() => assertSplitwiseReadPath("/create_expense")).toThrow("only from documented, read-only Splitwise endpoints");
     expect(() => assertSplitwiseReadPath("https://attacker.invalid/get_expenses")).toThrow();
   });
 });

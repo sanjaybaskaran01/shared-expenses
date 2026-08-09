@@ -178,7 +178,7 @@ function parseImportMetadata(payload: Record<string, JsonValue>): ParsedImportMe
   const sourceProvider = requiredString(metadata, "sourceProvider", 30);
   if (sourceProvider !== "splitwise") throw new TypeError("sourceProvider must be splitwise");
   if (metadata.sourceMetadata !== undefined) {
-    throw new TypeError("Provider source metadata must not be embedded in shared ledger operations");
+    throw new TypeError("This import contains unsupported provider data. Create a new import.");
   }
   const importedAt = requiredString(metadata, "importedAt", 40);
   if (!Number.isFinite(Date.parse(importedAt))) throw new TypeError("importedAt must be a valid timestamp");
@@ -311,7 +311,7 @@ export class LedgerStore {
       "SELECT COALESCE(SUM(payload_bytes), 0) AS total FROM import_undo_uploads WHERE status IN ('staging', 'ready', 'activating')",
     ).get()?.total ?? 0;
     if (importBytes + undoBytes + addedBytes > globalStagedUploadLimitBytes) {
-      throw new TypeError("Temporary migration storage is full. Finish, cancel, or wait for another upload to expire.");
+      throw new TypeError("Temporary import storage is full. Finish or cancel another import, or try again later.");
     }
   }
 
@@ -568,7 +568,7 @@ export class LedgerStore {
     for (const operation of operations) {
       if (operation.actorId !== actorId) throw new TypeError("Import operation actor does not match the signed-in account");
       if (!plannedGroupIds.has(operation.groupId)) {
-        throw new TypeError("Every imported record must belong to a group created by this migration");
+        throw new TypeError("Every imported entry must belong to a group created by this import.");
       }
       deviceIds.add(operation.deviceId);
     }
@@ -578,7 +578,7 @@ export class LedgerStore {
       "SELECT user_id, status FROM devices WHERE id = ? LIMIT 1",
     ).get(deviceId);
     if (!device || device.user_id !== actorId || device.status !== "active") {
-      throw new TypeError("The device that signed this migration is no longer trusted");
+      throw new TypeError("This device is no longer trusted to finish the import. Sign in again and retry.");
     }
   }
 
@@ -593,7 +593,7 @@ export class LedgerStore {
     };
 
     if (operations.length > 100) {
-      result.rejected.push({ id: "batch", code: "BATCH_TOO_LARGE", message: "A sync batch may contain at most 100 operations" });
+      result.rejected.push({ id: "batch", code: "BATCH_TOO_LARGE", message: "Sync no more than 100 changes at a time." });
       return result;
     }
 
@@ -658,7 +658,7 @@ export class LedgerStore {
               json_array_length(b.warnings_json) AS warning_count
        FROM import_batches b WHERE b.id = ? AND b.imported_by = ? LIMIT 1`,
     ).get(batchId, actorId);
-    if (!row || !["completed", "undone", "cancelled"].includes(row.status)) throw new Error("Import batch is unavailable");
+    if (!row || !["completed", "undone", "cancelled"].includes(row.status)) throw new Error("This import is no longer available. Start again.");
     return {
       id: row.id,
       provider: row.provider,
@@ -749,7 +749,7 @@ export class LedgerStore {
       !/^[a-f0-9]{64}$/.test(batch.fingerprint) ||
       !/^[a-f0-9]{64}$/.test(request.preparationHash)
     ) {
-      throw new TypeError("Import batch identity is invalid");
+      throw new TypeError("Tallied could not verify this import. Start again.");
     }
     if (batch.provider !== "splitwise" || !["current", "history", "balances", "custom"].includes(batch.mode)) {
       throw new TypeError("Import provider or mode is invalid");
@@ -765,7 +765,7 @@ export class LedgerStore {
       throw new TypeError("Import size is outside the supported limit");
     }
     if (!batch.reconciliation.zeroSum || batch.reconciliation.blockingWarnings.length > 0) {
-      throw new TypeError("Resolve every migration check before uploading the import");
+      throw new TypeError("Resolve each import issue before uploading.");
     }
     const completed = this.db.query<{ id: string }, [string, string, string]>(
       `SELECT id FROM import_batches WHERE imported_by = ? AND provider = ? AND fingerprint = ?
@@ -802,9 +802,9 @@ export class LedgerStore {
         throw new TypeError("A different upload already uses this import fingerprint");
       }
       if (existing.preparation_hash !== request.preparationHash) {
-        throw new TypeError("Prepared migration details changed; restart the earlier upload");
+        throw new TypeError("The prepared import changed. Cancel the earlier upload and start again.");
       }
-      if (existing.status === "activating") throw new Error("This migration is already activating");
+      if (existing.status === "activating") throw new Error("This import is already being finished.");
       return {
         batchId: existing.batch_id,
         expectedOperationCount: existing.expected_operation_count,
@@ -819,7 +819,7 @@ export class LedgerStore {
        WHERE actor_id = ? AND status IN ('staging', 'ready', 'activating')`,
     ).get(actorId)?.count ?? 0;
     if (activeUploadCount >= 2) {
-      throw new Error("Finish or cancel an existing migration upload before starting another");
+      throw new Error("Finish or cancel the current import before starting another.");
     }
     const serializedEnvelope = JSON.stringify(batch);
     if (new TextEncoder().encode(serializedEnvelope).byteLength > 2_000_000) {
@@ -1053,7 +1053,7 @@ export class LedgerStore {
       operation.id !== rows[index]!.operation_id ||
       operation.contentHash !== rows[index]!.content_hash ||
       operation.groupId !== rows[index]!.group_id
-    )) throw new Error("Encrypted import staging metadata does not match its signed operations");
+    )) throw new Error("The prepared import no longer matches its signed data. Start again.");
     const operationLinks = rows.map((row, index) => ({
       operationId: operations[index]!.id,
       externalType: row.external_type,
@@ -1067,7 +1067,7 @@ export class LedgerStore {
     const reconstructedRequest: ImportBatchCommitRequest = { ...base, operations, operationLinks };
     const preparationHash = await sha256Hex(canonicalJson(importPreparationMaterial(reconstructedRequest)));
     if (preparationHash !== upload.preparation_hash) {
-      throw new Error("Prepared migration details do not match the staged upload");
+      throw new Error("The prepared import does not match the uploaded data. Start again.");
     }
     const claimed = this.db.query(
       `UPDATE import_uploads SET status = 'activating'
@@ -1109,7 +1109,7 @@ export class LedgerStore {
     const batch = this.db.query<{ status: string }, [string, string]>(
       "SELECT status FROM import_batches WHERE id = ? AND imported_by = ? LIMIT 1",
     ).get(batchId, actorId);
-    if (!batch) throw new Error("Import batch is unavailable");
+    if (!batch) throw new Error("This import is no longer available. Start again.");
     if (batch.status === "undone") {
       return {
         batchId,
@@ -1360,7 +1360,7 @@ export class LedgerStore {
       if (resolved.has(identity.externalId)) throw new TypeError("Imported identities must be unique");
       const localUserId = resolution.resolved[identity.externalId];
       if (!localUserId || identity.localUserId !== localUserId) {
-        throw new TypeError("Imported identity resolution changed; review the migration again");
+        throw new TypeError("A person in this import changed. Review the import again.");
       }
       resolved.set(identity.externalId, localUserId);
     }
@@ -1373,7 +1373,7 @@ export class LedgerStore {
     operationById: ReadonlyMap<string, OperationEnvelope>,
   ): void {
     if (!request.reconciliation.zeroSum || request.reconciliation.blockingWarnings.length > 0) {
-      throw new TypeError("Resolve every migration check before finishing the import");
+      throw new TypeError("Resolve each import issue before continuing.");
     }
     const groupMapping = new Map<string, string>();
     for (const link of request.operationLinks) {
@@ -1546,7 +1546,7 @@ export class LedgerStore {
     options: { signaturesPreverified?: boolean } = {},
   ): Promise<ImportActivationResult> {
     if (!/^[0-9a-f-]{36}$/.test(request.id) || !/^[a-f0-9]{64}$/.test(request.fingerprint)) {
-      throw new TypeError("Import batch identity is invalid");
+      throw new TypeError("Tallied could not verify this import. Start again.");
     }
     if (request.provider !== "splitwise" || !["current", "history", "balances", "custom"].includes(request.mode)) {
       throw new TypeError("Import provider or mode is invalid");
@@ -1577,7 +1577,7 @@ export class LedgerStore {
         throw new TypeError("An import contains an unsupported operation");
       }
       if (this.db.query<{ one: number }, [string]>("SELECT 1 AS one FROM operations WHERE id = ?").get(operation.id)) {
-        throw new TypeError("An import operation already exists outside this batch");
+        throw new TypeError("An imported entry already exists outside this import.");
       }
     }
     // Chunk staging already proved immutable hash/signature integrity. Device
@@ -1641,7 +1641,7 @@ export class LedgerStore {
           dedupeHash,
           request.id,
         );
-        if (duplicate) throw new TypeError("One or more Splitwise records were already imported in another migration");
+        if (duplicate) throw new TypeError("One or more Splitwise entries were already added by another import.");
       }
       this.db.query(
         `INSERT INTO import_batches(
@@ -1722,7 +1722,7 @@ export class LedgerStore {
 
       for (const operation of request.operations.filter((item) => item.type !== "GroupCreated")) {
         const metadata = parseImportMetadata(jsonObject(operation.payload));
-        if (!metadata || metadata.importBatchId !== request.id) throw new TypeError("Imported provenance does not match its batch");
+        if (!metadata || metadata.importBatchId !== request.id) throw new TypeError("Tallied could not verify the source of an imported entry. Start again.");
         const outcome = this.ingestVerified(operation);
         if (outcome.kind !== "accepted") throw new TypeError("An imported record conflicted with existing data");
         accepted.push({ id: operation.id, serverSequence: outcome.serverSequence });
@@ -1780,7 +1780,7 @@ export class LedgerStore {
     const batch = this.db.query<{ status: string }, [string, string]>(
       "SELECT status FROM import_batches WHERE id = ? AND imported_by = ? LIMIT 1",
     ).get(batchId, actorId);
-    if (!batch) throw new Error("Import batch is unavailable");
+    if (!batch) throw new Error("This import is no longer available. Start again.");
     if (batch.status === "undone") {
       return { batch: this.importBatchSummary(batchId, actorId), duplicate: true, accepted: [] };
     }
@@ -1820,7 +1820,7 @@ export class LedgerStore {
       }
       operationIds.add(operation.id);
       const payloadBatchId = requiredString(jsonObject(operation.payload), "undoImportBatchId", 100);
-      if (payloadBatchId !== batchId) throw new TypeError("Undo provenance does not match its import batch");
+      if (payloadBatchId !== batchId) throw new TypeError("Tallied could not verify which import to undo. Try again.");
       if (this.db.query<{ one: number }, [string]>("SELECT 1 AS one FROM operations WHERE id = ?").get(operation.id)) {
         throw new TypeError("An undo operation id is already in use");
       }
@@ -1930,12 +1930,12 @@ export class LedgerStore {
        JOIN import_batches b ON b.id = i.batch_id
        WHERE i.id = ? AND i.batch_id = ? AND b.imported_by = ? AND b.status = 'completed' LIMIT 1`,
     ).get(identityId, batchId, actorId);
-    if (!identity) throw new Error("Only the migration owner can create this claim link");
+    if (!identity) throw new Error("Only the person who imported this history can create a connection link.");
     if (identity.status === "claimed" || identity.status === "revoked") {
-      throw new Error("This imported identity can no longer be claimed");
+      throw new Error("This imported history can no longer be connected.");
     }
     if (identity.status === "awaiting_owner") {
-      throw new Error("Review or reject the pending claim before creating a new link");
+      throw new Error("Review or decline the pending request before creating a new link.");
     }
     const token = randomBytes(32).toString("base64url");
     const tokenHash = this.secretHash("import-claim-token", token);
@@ -1972,7 +1972,7 @@ export class LedgerStore {
       !row.claim_expires_at ||
       Date.parse(row.claim_expires_at) <= Date.now()
     ) {
-      throw new Error("Claim link is invalid or expired");
+      throw new Error("This connection link has expired or is no longer available.");
     }
     return { provider: row.provider, expiresAt: row.claim_expires_at };
   }
@@ -2000,20 +2000,20 @@ export class LedgerStore {
       !identity || !["unclaimed", "reserved"].includes(identity.status) ||
       !identity.claim_expires_at || Date.parse(identity.claim_expires_at) <= now.getTime()
     ) {
-      throw new Error("Claim link is invalid or expired");
+      throw new Error("This connection link has expired or is no longer available.");
     }
     if (
       ["provider", "exported"].includes(identity.email_trust) &&
       identity.email_hash !== emailHash
     ) {
-      throw new Error("Use the verified email associated with this imported identity");
+      throw new Error("Use the verified email associated with this imported history.");
     }
     if (
       identity.status === "reserved" && identity.reserved_email_hash &&
       identity.reserved_email_hash !== emailHash && identity.reservation_expires_at &&
       Date.parse(identity.reservation_expires_at) > now.getTime()
     ) {
-      throw new Error("This claim link is already being verified");
+      throw new Error("This connection link is already being verified.");
     }
     const expiresAt = new Date(Math.min(
       Date.parse(identity.claim_expires_at),
@@ -2054,19 +2054,19 @@ export class LedgerStore {
       !["unclaimed", "reserved"].includes(identity.status) ||
       Date.parse(identity.claim_expires_at) <= Date.now()
     ) {
-      throw new Error("Claim link is invalid or expired");
+      throw new Error("This connection link has expired or is no longer available.");
     }
     const user = this.db.query<{ email: string; email_verified: number }, [string]>(
       `SELECT email, emailVerified AS email_verified FROM "user" WHERE id = ? LIMIT 1`,
     ).get(actorId);
-    if (!user || !user.email_verified) throw new Error("Verify your email before claiming imported history");
+    if (!user || !user.email_verified) throw new Error("Verify your email before connecting imported history.");
     if (
       identity.status === "reserved" && (
         identity.reserved_email_hash !== this.emailHash(user.email) ||
         !identity.reservation_expires_at || Date.parse(identity.reservation_expires_at) <= Date.now()
       )
     ) {
-      throw new Error("Sign in with the email reserved for this claim link");
+      throw new Error("Sign in with the email used for this connection link.");
     }
     const trustedEmail = ["provider", "exported"].includes(identity.email_trust)
       && identity.email_hash === this.emailHash(user.email);
@@ -2114,7 +2114,7 @@ export class LedgerStore {
        FROM import_claim_requests r JOIN imported_identities i ON i.id = r.identity_id
        WHERE r.token_hash = ? AND r.claimant_user_id = ? LIMIT 1`,
     ).get(this.secretHash("import-claim-request", requestId), actorId);
-    if (!row) throw new Error("Claim request is unavailable");
+    if (!row) throw new Error("This connection request is unavailable.");
     let status = row.status;
     if (status === "pending" && Date.parse(row.expires_at) <= Date.now()) {
       status = "expired";
@@ -2138,13 +2138,13 @@ export class LedgerStore {
        FROM imported_identities i JOIN import_batches b ON b.id = i.batch_id
        WHERE i.id = ? AND b.imported_by = ? AND i.status = 'awaiting_owner' LIMIT 1`,
     ).get(identityId, actorId);
-    if (!identity) throw new Error("Only the migration owner can approve this claim");
+    if (!identity) throw new Error("Only the person who imported this history can approve the connection.");
     if (
       !identity.reserved_by_user_id ||
       !identity.reservation_expires_at ||
       Date.parse(identity.reservation_expires_at) <= Date.now()
     ) {
-      throw new Error("The claim reservation expired");
+      throw new Error("This connection request expired. Share a new link.");
     }
     return this.completeImportClaim(identityId, identity.reserved_by_user_id);
   }
@@ -2154,7 +2154,7 @@ export class LedgerStore {
       `SELECT i.batch_id FROM imported_identities i JOIN import_batches b ON b.id = i.batch_id
        WHERE i.id = ? AND b.imported_by = ? AND i.status = 'awaiting_owner' LIMIT 1`,
     ).get(identityId, actorId);
-    if (!identity) throw new Error("Only the migration owner can reject this claim");
+    if (!identity) throw new Error("Only the person who imported this history can decline the request.");
     const now = new Date().toISOString();
     this.db.transaction(() => {
       this.db.query(
@@ -2184,10 +2184,10 @@ export class LedgerStore {
       "SELECT batch_id, display_name, placeholder_user_id, status FROM imported_identities WHERE id = ? LIMIT 1",
     ).get(identityId);
     if (!identity || identity.status === "claimed" || identity.status === "revoked") {
-      throw new Error("This imported identity can no longer be claimed");
+      throw new Error("This imported history can no longer be connected.");
     }
     const user = this.db.query<{ email: string }, [string]>('SELECT email FROM "user" WHERE id = ? LIMIT 1').get(claimedBy);
-    if (!user) throw new Error("Claiming account does not exist");
+    if (!user) throw new Error("This Tallied account no longer exists.");
 
     const duplicatePayer = this.db.query<{ one: number }, [string, string]>(
       `SELECT 1 AS one FROM expense_payers old
@@ -2210,7 +2210,7 @@ export class LedgerStore {
          (payer_id = ? AND recipient_id = ?) OR (payer_id = ? AND recipient_id = ?) LIMIT 1`,
     ).get(identity.placeholder_user_id, claimedBy, claimedBy, identity.placeholder_user_id);
     const conflict = duplicatePayer || duplicateAllocation || duplicateEffect || selfPayment;
-    if (conflict) throw new Error("This account already appears in the same imported transaction; the migration owner must reconcile it");
+    if (conflict) throw new Error("This account already appears in the same imported expense. The person who imported it must resolve the duplicate.");
 
     const now = new Date().toISOString();
     this.db.transaction(() => {
@@ -2275,7 +2275,7 @@ export class LedgerStore {
     const batch = this.db.query<{ source_data_deleted_at: string | null; fingerprint: string }, [string, string]>(
       "SELECT source_data_deleted_at, fingerprint FROM import_batches WHERE id = ? AND imported_by = ? LIMIT 1",
     ).get(batchId, actorId);
-    if (!batch) throw new Error("Import batch is unavailable");
+    if (!batch) throw new Error("This import is no longer available. Start again.");
     if (batch.source_data_deleted_at) return this.importBatchSummary(batchId, actorId);
     const now = new Date().toISOString();
     const deletedFingerprint = this.secretHash("import-deleted-fingerprint", `${batchId}:${batch.fingerprint}`);
@@ -2435,7 +2435,7 @@ export class LedgerStore {
       )
       .get(targetId);
     if (!existing) return null;
-    if (existing.group_id !== groupId) throw new Error("Target belongs to another group");
+    if (existing.group_id !== groupId) throw new Error("This item belongs to another group. Reload Tallied and try again.");
     return { status: existing.status, readOnly: existing.read_only === 1, importBatchId: existing.import_batch_id };
   }
 
@@ -2446,12 +2446,12 @@ export class LedgerStore {
     if (!existing.readOnly) return;
     const requestedBatchId = requiredString(jsonObject(operation.payload), "undoImportBatchId", 100);
     if (!existing.importBatchId || requestedBatchId !== existing.importBatchId) {
-      throw new Error("Imported records can only be changed by undoing their import");
+      throw new Error("Imported entries cannot be changed individually. Undo the import instead.");
     }
     const owned = this.db.query<{ one: number }, [string, string]>(
       "SELECT 1 AS one FROM import_batches WHERE id = ? AND imported_by = ? AND status = 'completed'",
     ).get(requestedBatchId, operation.actorId);
-    if (!owned) throw new Error("Only the migration owner can undo imported records");
+    if (!owned) throw new Error("Only the person who imported this history can undo it.");
   }
 
   private applyProjection(operation: OperationEnvelope, version: number, receivedAt: string): void {
@@ -2488,11 +2488,11 @@ export class LedgerStore {
              (SELECT COUNT(*) FROM imported_transactions WHERE group_id = ?) AS count`,
         )
         .get(operation.groupId, operation.groupId, operation.groupId)?.count ?? 0;
-      if (ledgerEntries > 0) throw new Error("Group currency is locked after the first expense or payment");
+      if (ledgerEntries > 0) throw new Error("The group currency cannot change after the first expense or payment.");
       const result = this.db
         .query("UPDATE groups SET settlement_currency = ? WHERE id = ? AND deleted_at IS NULL")
         .run(settlementCurrency, operation.groupId);
-      if (result.changes !== 1) throw new Error("Group does not exist");
+      if (result.changes !== 1) throw new Error("This group no longer exists.");
       return;
     }
 
@@ -2509,19 +2509,19 @@ export class LedgerStore {
       const settlementCurrency = this.db
         .query<{ settlement_currency: string }, [string]>("SELECT settlement_currency FROM groups WHERE id = ?")
         .get(operation.groupId)?.settlement_currency;
-      if (!settlementCurrency) throw new Error("Group does not exist");
+      if (!settlementCurrency) throw new Error("This group no longer exists.");
       if (payload.currency !== settlementCurrency) {
         throw new Error(`Expense currency must match the group settlement currency (${settlementCurrency})`);
       }
 
       const existing = this.assertTargetGroup("expenses", operation.targetId, operation.groupId);
       if (operation.type === "ExpenseCreated") {
-        if (existing) throw new Error("Expense already exists");
+        if (existing) throw new Error("This expense already exists. Reload Tallied to see it.");
       } else {
-        if (!existing) throw new Error("Expense does not exist");
-        if (existing.status !== "active") throw new Error("A voided expense cannot be amended");
-        if (existing.readOnly) throw new Error("Imported expenses are read-only; undo the migration and import again");
-        if (importMetadata) throw new Error("Import provenance is only valid when an expense is created");
+        if (!existing) throw new Error("This expense no longer exists.");
+        if (existing.status !== "active") throw new Error("Restore this expense before editing it.");
+        if (existing.readOnly) throw new Error("Imported expenses cannot be edited. Undo the import, then import them again.");
+        if (importMetadata) throw new Error("Tallied could not verify this imported expense. Reload and try again.");
       }
 
       this.db
@@ -2581,30 +2581,30 @@ export class LedgerStore {
 
     if (operation.type === "ExpenseVoided") {
       const existing = this.assertTargetGroup("expenses", operation.targetId, operation.groupId);
-      if (!existing) throw new Error("Expense does not exist");
+      if (!existing) throw new Error("This expense no longer exists.");
       this.assertImportedUndo(operation, existing);
       const result = this.db
         .query("UPDATE expenses SET status = 'voided', version = ?, updated_at = ? WHERE id = ? AND group_id = ?")
         .run(version, receivedAt, operation.targetId, operation.groupId);
-      if (result.changes !== 1) throw new Error("Expense does not exist");
+      if (result.changes !== 1) throw new Error("This expense no longer exists.");
       return;
     }
 
     if (operation.type === "ExpenseRestored") {
       const existing = this.assertTargetGroup("expenses", operation.targetId, operation.groupId);
-      if (!existing) throw new Error("Expense does not exist");
-      if (existing.readOnly) throw new Error("Imported expenses cannot be restored independently");
-      if (existing.status !== "voided") throw new Error("Only a voided expense can be restored");
+      if (!existing) throw new Error("This expense no longer exists.");
+      if (existing.readOnly) throw new Error("Undo the import to restore an imported expense.");
+      if (existing.status !== "voided") throw new Error("This expense is already active.");
       const result = this.db
         .query("UPDATE expenses SET status = 'active', version = ?, updated_at = ? WHERE id = ? AND group_id = ?")
         .run(version, receivedAt, operation.targetId, operation.groupId);
-      if (result.changes !== 1) throw new Error("Expense does not exist");
+      if (result.changes !== 1) throw new Error("This expense no longer exists.");
       return;
     }
 
     if (operation.type === "CommentAdded") {
       if (!this.assertTargetGroup("expenses", operation.targetId, operation.groupId)) {
-        throw new Error("Expense does not exist");
+        throw new Error("This expense no longer exists.");
       }
       const payload = jsonObject(operation.payload);
       this.db
@@ -2625,7 +2625,7 @@ export class LedgerStore {
       const importMetadata = parseImportMetadata(payload);
       const payerId = requiredString(payload, "payerId", 100);
       const recipientId = requiredString(payload, "recipientId", 100);
-      if (payerId === recipientId) throw new TypeError("A payment cannot have the same payer and recipient");
+      if (payerId === recipientId) throw new TypeError("Choose two different people for the payment.");
       this.assertFinancialParticipants(
         operation.groupId,
         "payment",
@@ -2638,13 +2638,13 @@ export class LedgerStore {
       const settlementCurrency = this.db
         .query<{ settlement_currency: string }, [string]>("SELECT settlement_currency FROM groups WHERE id = ?")
         .get(operation.groupId)?.settlement_currency;
-      if (!settlementCurrency) throw new Error("Group does not exist");
+      if (!settlementCurrency) throw new Error("This group no longer exists.");
       const currency = requiredCurrency(payload, "currency");
       if (currency !== settlementCurrency) {
         throw new Error(`Payment currency must match the group settlement currency (${settlementCurrency})`);
       }
       if (this.assertTargetGroup("payments", operation.targetId, operation.groupId)) {
-        throw new Error("Payment already exists");
+        throw new Error("This payment already exists. Reload Tallied to see it.");
       }
       this.db
         .query(
@@ -2681,13 +2681,13 @@ export class LedgerStore {
 
     if (operation.type === "PaymentReversed") {
       const existing = this.assertTargetGroup("payments", operation.targetId, operation.groupId);
-      if (!existing) throw new Error("Payment does not exist");
-      if (existing.status !== "active") throw new Error("Payment is already reversed");
+      if (!existing) throw new Error("This payment no longer exists.");
+      if (existing.status !== "active") throw new Error("This payment is already reversed.");
       this.assertImportedUndo(operation, existing);
       const result = this.db
         .query("UPDATE payments SET status = 'reversed', version = ?, updated_at = ? WHERE id = ? AND group_id = ?")
         .run(version, receivedAt, operation.targetId, operation.groupId);
-      if (result.changes !== 1) throw new Error("Payment does not exist");
+      if (result.changes !== 1) throw new Error("This payment no longer exists.");
       return;
     }
 
@@ -2705,7 +2705,7 @@ export class LedgerStore {
       const settlementCurrency = this.db
         .query<{ settlement_currency: string }, [string]>("SELECT settlement_currency FROM groups WHERE id = ?")
         .get(operation.groupId)?.settlement_currency;
-      if (!settlementCurrency) throw new Error("Group does not exist");
+      if (!settlementCurrency) throw new Error("This group no longer exists.");
       const currency = requiredCurrency(payload, "currency");
       if (currency !== settlementCurrency) {
         throw new Error(`Imported currency must match the group settlement currency (${settlementCurrency})`);
@@ -2750,16 +2750,16 @@ export class LedgerStore {
       const existing = this.db.query<{ group_id: string; batch_id: string; status: string }, [string]>(
         "SELECT group_id, batch_id, status FROM imported_transactions WHERE id = ? LIMIT 1",
       ).get(operation.targetId);
-      if (!existing || existing.group_id !== operation.groupId) throw new Error("Imported transaction does not exist");
-      if (existing.status !== "active") throw new Error("Imported transaction is already voided");
+      if (!existing || existing.group_id !== operation.groupId) throw new Error("This imported transaction no longer exists.");
+      if (existing.status !== "active") throw new Error("This imported transaction is already removed.");
       const requestedBatchId = requiredString(jsonObject(operation.payload), "undoImportBatchId", 100);
       if (requestedBatchId !== existing.batch_id) {
-        throw new Error("Imported records can only be changed by undoing their import");
+        throw new Error("Imported entries cannot be changed individually. Undo the import instead.");
       }
       const owned = this.db.query<{ one: number }, [string, string]>(
         "SELECT 1 AS one FROM import_batches WHERE id = ? AND imported_by = ? AND status = 'completed'",
       ).get(existing.batch_id, operation.actorId);
-      if (!owned) throw new Error("Only the migration owner can undo imported records");
+      if (!owned) throw new Error("Only the person who imported this history can undo it.");
       this.db.query("UPDATE imported_transactions SET status = 'voided', version = ? WHERE id = ?")
         .run(version, operation.targetId);
       return;

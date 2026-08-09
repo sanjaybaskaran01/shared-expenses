@@ -65,7 +65,7 @@ export function personId(name: string): string {
 }
 
 export function moneyMinor(value: unknown): number {
-  if (typeof value !== "string" && typeof value !== "number") throw new RangeError("Amount is missing");
+  if (typeof value !== "string" && typeof value !== "number") throw new RangeError("Enter an amount.");
   let normalized = String(value).trim();
   const parenthesized = /^\((.*)\)$/.exec(normalized);
   if (parenthesized) normalized = `-${parenthesized[1]}`;
@@ -75,10 +75,10 @@ export function moneyMinor(value: unknown): number {
     } else if (/^-?\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?$/.test(normalized)) {
       normalized = normalized.replace(/,/g, "");
     } else {
-      throw new RangeError("Use 1,234.56 or 1234.56 for this amount");
+      throw new RangeError("Enter this amount as 1,234.56 or 1234.56.");
     }
   }
-  if (!/^-?\d+(?:\.\d{1,2})?$/.test(normalized)) throw new RangeError("Amount must use at most two decimal places");
+  if (!/^-?\d+(?:\.\d{1,2})?$/.test(normalized)) throw new RangeError("Enter an amount with no more than two decimal places.");
   const negative = normalized.startsWith("-");
   const absolute = negative ? normalized.slice(1) : normalized;
   const minor = /^0+(?:\.0{1,2})?$/.test(absolute) ? 0 : parseDecimalToMinor(absolute);
@@ -87,7 +87,7 @@ export function moneyMinor(value: unknown): number {
 
 export function currencyCode(value: unknown): string {
   const currency = cleanText(value, 3).toUpperCase();
-  if (!/^[A-Z]{3}$/.test(currency)) throw new RangeError("Currency must be a three-letter code");
+  if (!/^[A-Z]{3}$/.test(currency)) throw new RangeError("Use a valid three-letter currency code.");
   let fractionDigits: number;
   try {
     fractionDigits = new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions().maximumFractionDigits ?? 2;
@@ -95,7 +95,7 @@ export function currencyCode(value: unknown): string {
     throw new RangeError(`${currency} is not a recognized currency`);
   }
   if (fractionDigits !== 2) {
-    throw new RangeError(`${currency} uses ${fractionDigits} decimal places; this migration currently supports only two-decimal currencies`);
+    throw new RangeError(`${currency} uses ${fractionDigits} decimal places. Tallied can currently import only currencies with two decimal places.`);
   }
   return currency;
 }
@@ -106,7 +106,7 @@ export function calendarDate(value: unknown): string {
   const american = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(source);
   if (american) return `${american[3]}-${american[1]!.padStart(2, "0")}-${american[2]!.padStart(2, "0")}`;
   const timestamp = Date.parse(source);
-  if (!Number.isFinite(timestamp)) throw new RangeError("Date is not recognized");
+  if (!Number.isFinite(timestamp)) throw new RangeError("Enter a date Tallied can recognize.");
   return new Date(timestamp).toISOString().slice(0, 10);
 }
 

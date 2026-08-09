@@ -340,7 +340,7 @@ describe("Splitwise migration ledger", () => {
     ];
     second.identities = second.identities.map((identity) => ({ ...identity, groupIds: ["import-group-2"] }));
 
-    expect(store.activateImport("user-1", second)).rejects.toThrow("already imported");
+    expect(store.activateImport("user-1", second)).rejects.toThrow("already added by another import");
     expect(db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM import_batches").get()?.count).toBe(1);
   });
 
@@ -415,7 +415,7 @@ describe("Splitwise migration ledger", () => {
     second.reconciliation.participantTotals = second.reconciliation.participantTotals.map((total) => ({ ...total, netMinor: total.netMinor > 0 ? 700 : -700 }));
     second.reconciliation.groupTotals = second.reconciliation.groupTotals.map((total) => ({ ...total, netMinor: 0 }));
 
-    expect(store.activateImport("user-1", second)).rejects.toThrow("already imported");
+    expect(store.activateImport("user-1", second)).rejects.toThrow("already added by another import");
     expect(db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM import_batches").get()?.count).toBe(1);
   });
 
@@ -521,7 +521,7 @@ describe("Splitwise migration ledger", () => {
       targetId: "import-record-1",
       baseVersion: 1,
       clientTimestamp: new Date().toISOString(),
-      payload: { undoImportBatchId: body.id, reason: "Undo migration" },
+      payload: { undoImportBatchId: body.id, reason: "Undo import" },
     });
     const result = await store.undoImport("user-1", body.id, { operations: [undo] });
     expect(result.duplicate).toBe(false);
@@ -558,7 +558,7 @@ describe("Splitwise migration ledger", () => {
       targetId: "import-record-1",
       baseVersion: 1,
       clientTimestamp: new Date().toISOString(),
-      payload: { undoImportBatchId: body.id, reason: "Undo migration" },
+      payload: { undoImportBatchId: body.id, reason: "Undo import" },
     });
     expect(store.startImportUndoStage("user-1", body.id, { expectedOperationCount: 1 })).toEqual(
       expect.objectContaining({ status: "staging", receivedOperationCount: 0, missingRanges: [{ start: 0, endExclusive: 1 }] }),
@@ -573,7 +573,7 @@ describe("Splitwise migration ledger", () => {
       "SELECT operation_json FROM import_staged_undo_operations WHERE batch_id = ?",
     ).get(body.id)?.operation_json ?? "";
     expect(stagedUndo.startsWith("v1.")).toBe(true);
-    expect(stagedUndo).not.toContain("Undo migration");
+    expect(stagedUndo).not.toContain("Undo import");
     expect(store.stageImportUndoOperations("user-1", body.id, chunk)).toEqual(
       expect.objectContaining({ status: "ready", receivedOperationCount: 1 }),
     );
@@ -624,7 +624,7 @@ describe("Splitwise migration ledger", () => {
     expect(store.listImportIdentities("user-1", body.id).find(({ id }) => id === "identity-friend")?.claimant).toEqual(
       expect.objectContaining({ displayName: "Mira", email: "mira@example.com" }),
     );
-    expect(() => store.approveImportIdentityClaim("user-2", "identity-friend")).toThrow("migration owner");
+    expect(() => store.approveImportIdentityClaim("user-2", "identity-friend")).toThrow("person who imported");
     expect(store.approveImportIdentityClaim("user-1", "identity-friend")).toEqual({
       status: "claimed",
       displayName: "Mira",
@@ -681,7 +681,7 @@ describe("Splitwise migration ledger", () => {
     const link = store.createImportClaimLink("user-1", body.id, "identity-friend");
     store.reserveImportClaimEmail(link.token, "wrong@example.com");
     const pending = store.claimImportedIdentity("user-3", link.token);
-    expect(() => store.createImportClaimLink("user-1", body.id, "identity-friend")).toThrow("Review or reject");
+    expect(() => store.createImportClaimLink("user-1", body.id, "identity-friend")).toThrow("Review or decline");
     expect(store.rejectImportIdentityClaim("user-1", "identity-friend")).toEqual({ status: "rejected" });
     expect(store.importClaimStatus("user-3", pending.requestId!).status).toBe("rejected");
     expect(store.createImportClaimLink("user-1", body.id, "identity-friend").token).toHaveLength(43);
@@ -803,7 +803,7 @@ describe("Splitwise migration ledger", () => {
     const changedStart = await stageStart(changedBody);
 
     expect(() => store.startImportStage("user-1", changedStart)).toThrow(
-      "Prepared migration details changed",
+      "The prepared import changed",
     );
     expect(db.query<{ count: number }, [string]>(
       "SELECT COUNT(*) AS count FROM import_staged_operations WHERE batch_id = ?",
@@ -822,7 +822,7 @@ describe("Splitwise migration ledger", () => {
       .run("0".repeat(64), body.id);
 
     await expect(store.activateImportStage("user-1", body.id)).rejects.toThrow(
-      "do not match the staged upload",
+      "does not match the uploaded data",
     );
     expect(db.query<{ status: string }, [string]>(
       "SELECT status FROM import_uploads WHERE batch_id = ?",

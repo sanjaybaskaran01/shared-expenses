@@ -93,7 +93,7 @@ export class ContactInviteStore {
       if (activeCount >= INVITE_LIMIT) {
         throw new ContactInviteError(
           "INVITE_LIMIT_REACHED",
-          "All five invitation credits are in use",
+          "All five invites are in use. Revoke a pending invite or wait for one to expire.",
           409,
         );
       }
@@ -121,7 +121,7 @@ export class ContactInviteStore {
       if (!invitation || invitation.status === "revoked" || invitation.status === "accepted" || invitation.expires_at <= nowIso) {
         throw new ContactInviteError(
           "INVITE_NOT_AVAILABLE",
-          "This invitation is no longer available",
+          "This invitation has expired or is no longer available. Ask the sender for a new one.",
           410,
         );
       }
@@ -130,7 +130,7 @@ export class ContactInviteStore {
       if (reservationActive && invitation.reserved_email_hash !== requestedEmailHash) {
         throw new ContactInviteError(
           "INVITE_RESERVED",
-          "This invitation is already reserved for another email address",
+          "This invitation was opened with another email address. Use that email or ask the sender for a new link.",
           409,
         );
       }
@@ -189,7 +189,7 @@ export class ContactInviteStore {
   acceptForSignedInUser(token: string, userId: string, email: string): void {
     this.reserve(token, email);
     if (this.acceptReservedForUser(userId, email) === 0) {
-      throw new ContactInviteError("INVITE_NOT_AVAILABLE", "This invitation could not be accepted", 409);
+      throw new ContactInviteError("INVITE_NOT_AVAILABLE", "This invitation has expired or is no longer available. Ask the sender for a new one.", 409);
     }
   }
 
@@ -202,7 +202,7 @@ export class ContactInviteStore {
        WHERE id = ? AND inviter_user_id = ? AND status IN ('pending', 'reserved')`,
     ).run(nowIso, invitationId, inviterUserId);
     if (result.changes !== 1) {
-      throw new ContactInviteError("INVITE_NOT_FOUND", "Invitation not found", 404);
+      throw new ContactInviteError("INVITE_NOT_FOUND", "This invitation is no longer available.", 404);
     }
   }
 

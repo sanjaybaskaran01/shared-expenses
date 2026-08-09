@@ -28,7 +28,7 @@ export function createOpeningBalanceDraft(input: {
     let field: ImportWarning["field"] = "personName";
     try {
       const name = cleanText(row.personName, 100);
-      if (!name) throw new RangeError("Enter a person");
+      if (!name) throw new RangeError("Enter a person.");
       const personKey = cleanText(row.personKey, 100);
       const externalPersonId = personKey
         ? `opening-person:${slug(personKey)}`
@@ -37,14 +37,14 @@ export function createOpeningBalanceDraft(input: {
       const currency = currencyCode(row.currency);
       field = "amount";
       const amountMinor = moneyMinor(row.amount);
-      if (amountMinor <= 0) throw new RangeError("Amount must be greater than zero");
+      if (amountMinor <= 0) throw new RangeError("Enter an amount greater than zero.");
       field = "groupName";
       const groupName = cleanText(row.groupName, 100, "Opening balances");
       const externalGroupId = `opening:${slug(groupName)}:${currency}`;
       field = "personName";
       const existingPerson = people.get(externalPersonId);
       if (existingPerson && existingPerson.displayName !== name) {
-        throw new RangeError("A reused person must keep the same name");
+        throw new RangeError("Use the same name each time you select this person.");
       }
       people.set(externalPersonId, { externalId: externalPersonId, displayName: name, emailTrust: "none" });
       const existingGroup = groups.get(externalGroupId);

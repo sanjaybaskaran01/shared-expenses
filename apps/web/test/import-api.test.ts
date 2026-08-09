@@ -138,7 +138,7 @@ describe("prepared import API", () => {
       const path = new URL(String(input)).pathname;
       paths.push(path);
       if (path === "/api/v1/imports/stage" && starts++ === 0) {
-        return response({ error: { message: "Prepared migration details changed; restart the earlier upload" } }, 400);
+        return response({ error: { message: "The prepared import changed. Cancel the earlier upload and start again." } }, 400);
       }
       if (path.endsWith("/cancel")) return response({ status: "cancelled" });
       if (path === "/api/v1/imports/stage") return response({

@@ -28,7 +28,7 @@ export async function ensureDevice(actorId?: string): Promise<DeviceRecord> {
       return rebound;
     }
     if (actorId && existing.actorId !== actorId) {
-      throw new Error("This device contains another account's local ledger. Sign out and clear local data first.");
+      throw new Error("This device has saved data for another account. Sign out of that account and clear its local data first.");
     }
     return existing;
   }
