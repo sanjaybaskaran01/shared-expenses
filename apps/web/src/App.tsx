@@ -951,9 +951,6 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
           <span class="flex items-center gap-2"><BrandMark size={28} /><strong class="mobile-wordmark">Tallied</strong></span>
           <span class="mobile-header-actions">
             <ConnectionPill />
-            <button class="mobile-add-action" type="button" onClick={addFromCurrentContext}>
-              <Plus size={16} /> Add expense
-            </button>
           </span>
         </header>
         <main id="main-content" tabindex={-1} class="app-main mx-auto w-full max-w-5xl px-4 pb-28 pt-5 sm:px-6 sm:pt-8 md:px-8 md:pb-12 lg:px-10">
@@ -1027,24 +1024,34 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
           </Switch>
         </main>
       </div>
-      <nav
-        class="mobile-tabbar glass-nav md:hidden"
-        aria-label="Primary navigation"
-      >
-        <For each={tabs}>
-          {(item) => (
-            <button
-              class="nav-item"
-              classList={{ active: tab() === item.id }}
-              aria-current={tab() === item.id ? "page" : undefined}
-              onClick={() => item.id === "groups" ? showGroupsOverview() : setTab(item.id)}
-            >
-              <item.icon size={20} stroke-width={tab() === item.id ? 2.6 : 2} />
-              <span>{item.label}</span>
-            </button>
-          )}
-        </For>
-      </nav>
+      <div class="mobile-bottom-dock md:hidden">
+        <nav
+          class="mobile-tabbar glass-nav"
+          aria-label="Primary navigation"
+        >
+          <For each={tabs}>
+            {(item) => (
+              <button
+                class="nav-item"
+                classList={{ active: tab() === item.id }}
+                aria-current={tab() === item.id ? "page" : undefined}
+                onClick={() => item.id === "groups" ? showGroupsOverview() : setTab(item.id)}
+              >
+                <item.icon size={20} stroke-width={tab() === item.id ? 2.6 : 2} />
+                <span>{item.label}</span>
+              </button>
+            )}
+          </For>
+        </nav>
+        <button
+          class="mobile-primary-action"
+          type="button"
+          onClick={addFromCurrentContext}
+        >
+          <Plus size={18} stroke-width={2.25} />
+          <span>Add expense</span>
+        </button>
+      </div>
       <Show when={toast()}>
         <div class="toast-enter toast-pill" role="status" aria-live="polite" aria-atomic="true">
           <CheckCircle2 size={16} />

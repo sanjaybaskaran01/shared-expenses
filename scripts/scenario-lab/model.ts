@@ -66,6 +66,20 @@ export interface ScenarioCheck {
   detail: string;
 }
 
+export interface ScenarioRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+export interface ScenarioViewport {
+  width: number;
+  height: number;
+}
+
 export interface ScenarioLedgerEvaluation {
   balances: Record<string, number>;
   checks: ScenarioCheck[];
@@ -73,6 +87,46 @@ export interface ScenarioLedgerEvaluation {
 
 function check(id: string, label: string, passed: boolean, detail: string): ScenarioCheck {
   return { id, label, status: passed ? "passed" : "failed", detail };
+}
+
+export function evaluateMobilePrimaryAction(
+  action: ScenarioRect,
+  navigation: ScenarioRect,
+  viewport: ScenarioViewport,
+): ScenarioCheck[] {
+  const centerX = action.left + action.width / 2;
+  const centerY = action.top + action.height / 2;
+  const hasVerticalClearance =
+    action.bottom <= navigation.top - 8 || navigation.bottom <= action.top - 8;
+  const hasHorizontalClearance =
+    action.right <= navigation.left - 8 || navigation.right <= action.left - 8;
+  const detail = JSON.stringify({ action, navigation, viewport, centerX, centerY });
+  return [
+    check(
+      "primary-action-hit-area",
+      "The mobile primary action has at least a 44 by 44 pixel touch target",
+      action.width >= 44 && action.height >= 44,
+      detail,
+    ),
+    check(
+      "primary-action-thumb-zone",
+      "The mobile primary action sits in the lower thumb zone",
+      centerY >= viewport.height * 0.62 &&
+        centerY <= navigation.bottom &&
+        centerX >= viewport.width * 0.2 &&
+        centerX <= viewport.width * 0.85,
+      detail,
+    ),
+    check(
+      "primary-action-clearance",
+      "The mobile primary action stays clear of navigation and ledger content",
+      (hasVerticalClearance || hasHorizontalClearance) &&
+        action.right <= viewport.width &&
+        action.left >= 0 &&
+        action.bottom <= viewport.height,
+      detail,
+    ),
+  ];
 }
 
 function addBalance(balances: Record<string, number>, actorId: string, amountMinor: number): void {

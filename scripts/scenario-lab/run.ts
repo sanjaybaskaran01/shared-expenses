@@ -6,6 +6,7 @@ import {
   ScenarioBarrier,
   evaluateClientConvergence,
   evaluateLedger,
+  evaluateMobilePrimaryAction,
   evaluateOutsiderIsolation,
   type ScenarioActor,
   type ScenarioCheck,
@@ -412,6 +413,8 @@ async function run(): Promise<void> {
         await page.goto(`${runtime!.webUrl}/?scenarioActor=dev`, { waitUntil: "domcontentloaded", timeout: 60_000 });
         await page.waitForFunction(() => Boolean((window as ScenarioWindow).__TALLY_SCENARIO__));
         await waitUntil("desktop account to load", async () => (await bridgeSnapshot(page)).connection === "online");
+        const desktopPrimaryActionVisible = await page.locator(".desktop-sidebar").getByRole("button", { name: "Add expense" }).isVisible();
+        const mobilePrimaryActionHidden = !(await page.locator(".mobile-primary-action").isVisible());
         await prepareExpense(page, "Desktop layout check", "12.34");
         const composer = page.getByRole("dialog", { name: "Add an expense" });
         const composerBox = await composer.evaluate((element) => {
@@ -420,6 +423,7 @@ async function run(): Promise<void> {
         });
         const checks = [
           makeCheck("desktop-sidebar", "Desktop navigation replaces the phone tab bar", await page.locator(".desktop-sidebar").isVisible() && !(await page.locator(".mobile-tabbar").isVisible()), "1440×900 viewport"),
+          makeCheck("desktop-primary-action", "Desktop keeps Add expense in the sidebar without the mobile thumb action", desktopPrimaryActionVisible && mobilePrimaryActionHidden, `sidebar=${desktopPrimaryActionVisible} mobileHidden=${mobilePrimaryActionHidden}`),
           makeCheck("desktop-composer", "Expense form remains centered and readable", composerBox.width >= 480 && composerBox.width <= 640 && composerBox.top >= 0 && composerBox.bottom <= 900, JSON.stringify(composerBox)),
         ];
         await recordStep(report, responsive, outputDirectory, {
@@ -431,6 +435,52 @@ async function run(): Promise<void> {
         await composer.getByRole("button", { name: "Cancel expense form" }).click();
       } finally {
         await context.close();
+      }
+
+      const compactContext = await browser!.newContext({
+        viewport: { width: 320, height: 800 },
+        deviceScaleFactor: 1,
+        isMobile: true,
+        hasTouch: true,
+        locale: "en-US",
+        timezoneId: "America/New_York",
+        reducedMotion: "reduce",
+      });
+      const compactPage = await compactContext.newPage();
+      const compactSession: ActorSession = {
+        actor: { id: "dev-compact", name: "Dev compact", color: "#426b91" },
+        context: compactContext,
+        page: compactPage,
+      };
+      try {
+        await compactPage.goto(`${runtime!.webUrl}/?scenarioActor=dev`, { waitUntil: "domcontentloaded", timeout: 60_000 });
+        await compactPage.waitForFunction(() => Boolean((window as ScenarioWindow).__TALLY_SCENARIO__));
+        await waitUntil("compact account to load", async () => (await bridgeSnapshot(compactPage)).connection === "online");
+        const compactAction = await compactPage.locator(".mobile-primary-action").evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+        });
+        const compactNavigation = await compactPage.getByRole("navigation", { name: "Primary navigation" }).evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+        });
+        const compactViewport = await compactPage.evaluate(() => ({
+          width: window.innerWidth,
+          height: window.innerHeight,
+          scrollWidth: document.documentElement.scrollWidth,
+        }));
+        await recordStep(report, responsive, outputDirectory, {
+          id: "compact-mobile-action",
+          title: "Primary action remains reachable on a narrow phone",
+          sessions: [compactSession],
+          note: "The labeled action shares the lower dock with navigation without clipping, covering content, or causing horizontal overflow at 320×800.",
+          checks: [
+            ...evaluateMobilePrimaryAction(compactAction, compactNavigation, compactViewport),
+            makeCheck("compact-no-overflow", "The 320 pixel layout has no horizontal overflow", compactViewport.scrollWidth <= compactViewport.width, `${compactViewport.scrollWidth}/${compactViewport.width}`),
+          ],
+        });
+      } finally {
+        await compactContext.close();
       }
     });
 
@@ -563,7 +613,18 @@ async function run(): Promise<void> {
       await settingsSession.page.getByRole("button", { name: "Groups" }).last().click();
       await settingsSession.page.getByRole("button", { name: /Goa trip/ }).click();
       await settingsSession.page.waitForTimeout(350);
+      const primaryActionBox = await settingsSession.page.locator(".mobile-primary-action").evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+      });
+      const primaryNavigationBox = await settingsSession.page.getByRole("navigation", { name: "Primary navigation" }).evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+      });
+      const viewport = await settingsSession.page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
       const groupHeaderChecks = [
+        ...evaluateMobilePrimaryAction(primaryActionBox, primaryNavigationBox, viewport),
+        makeCheck("header-action-removed", "The mobile header no longer duplicates the primary expense action", await settingsSession.page.locator(".mobile-header").getByRole("button", { name: "Add expense" }).count() === 0, "0 header actions"),
         makeCheck("group-settings-action", "The group header exposes a labeled settings action", await settingsSession.page.getByRole("button", { name: "Open settings for Goa trip" }).isVisible(), "Open settings for Goa trip"),
         makeCheck("group-people-action", "The people count opens group management", await settingsSession.page.getByRole("button", { name: /4 people/ }).isVisible(), "4 people"),
         makeCheck("group-primary-views", "Activity, Balances, and Insights remain visible as group views", (await Promise.all(["Activity", "Balances", "Insights"].map((name) => settingsSession.page.getByRole("tab", { name }).isVisible()))).every(Boolean), "3 visible tabs"),
@@ -572,7 +633,7 @@ async function run(): Promise<void> {
         id: "group-navigation",
         title: "Group navigation separates viewing from management",
         sessions: [settingsSession],
-        note: "Activity stays primary; people and settings are visible in the group header instead of being hidden inside a content tab.",
+        note: "Activity stays primary; people and settings remain visible in the group header, while Add expense stays in the lower thumb dock beside navigation.",
         checks: groupHeaderChecks,
       });
       await settingsSession.page.getByRole("button", { name: "Open settings for Goa trip" }).click();

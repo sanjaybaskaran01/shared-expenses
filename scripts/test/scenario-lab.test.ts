@@ -7,6 +7,7 @@ import {
   ScenarioBarrier,
   evaluateClientConvergence,
   evaluateLedger,
+  evaluateMobilePrimaryAction,
   evaluateOutsiderIsolation,
   type ScenarioClientSnapshot,
   type ScenarioServerSnapshot,
@@ -113,6 +114,31 @@ describe("scenario lab model", () => {
       groups: [{ id: "goa-trip", name: "Goa trip" }],
       expenses: [],
     }).status).toBe("failed");
+  });
+
+  test("keeps the mobile primary action in the thumb zone without covering navigation", () => {
+    const viewport = { width: 390, height: 844 };
+    const navigation = { left: 16, top: 766, right: 242, bottom: 832, width: 226, height: 66 };
+    const reachable = evaluateMobilePrimaryAction(
+      { left: 250, top: 766, right: 374, bottom: 832, width: 124, height: 66 },
+      navigation,
+      viewport,
+    );
+    expect(reachable.every(({ status }) => status === "passed")).toBe(true);
+
+    const topRight = evaluateMobilePrimaryAction(
+      { left: 274, top: 12, right: 374, bottom: 56, width: 100, height: 44 },
+      navigation,
+      viewport,
+    );
+    expect(topRight.find(({ id }) => id === "primary-action-thumb-zone")?.status).toBe("failed");
+
+    const overlapping = evaluateMobilePrimaryAction(
+      { left: 180, top: 766, right: 304, bottom: 832, width: 124, height: 66 },
+      navigation,
+      viewport,
+    );
+    expect(overlapping.find(({ id }) => id === "primary-action-clearance")?.status).toBe("failed");
   });
 
   test("seeds an isolated SQLite sandbox with all four people", async () => {
