@@ -21,6 +21,8 @@ The static app and API are separate components but share an origin in the easies
 
 Every v1 operation is written locally before upload, hashed canonically, and signed by a non-exportable P-256 device key. The server verifies the session actor, device ownership, signature, and group membership before materializing a projection.
 
+The central API router has one fail-closed ordering invariant. CORS preflights, health and capability metadata, invitation or migration claim setup, provider callbacks, and Better Auth are the only handlers before verified-session lookup. Notification, import, contact, group, account, feedback, and sync handlers run only after that lookup returns a verified actor; an unknown path cannot skip the gate. Group membership authorization remains beside each affected route or ledger operation.
+
 The experimental v2 path separates:
 
 - Control plane: account/session, opaque group identifier, membership, device public keys, invite state, and wrapped group keys.
