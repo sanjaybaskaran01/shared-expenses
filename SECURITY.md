@@ -18,4 +18,4 @@ Never deploy example credentials or commit `.env`, OAuth client secrets, SMTP ap
 
 ## Confidentiality statement
 
-The v1 device signatures prove operation provenance but do not provide end-to-end encryption. The experimental v2 path stores signed ciphertext and wrapped group keys, but the current product UI still uses v1. Read [docs/privacy-model.md](docs/privacy-model.md) for the exact boundary and migration gates.
+The v1 device signatures prove operation provenance but do not provide end-to-end encryption. The experimental v2 path stores signed ciphertext and wrapped group keys, but is disabled by default because the current product UI still uses v1. Read [docs/privacy-model.md](docs/privacy-model.md) for the exact boundary and migration gates.

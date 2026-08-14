@@ -43,11 +43,16 @@ export function createApiHttp(config: ServerConfig, auth: TalliedAuth): ApiHttp 
     if (contentLength > maxBytes) throw new RangeError("Request body is too large");
     const body = await request.text();
     if (new TextEncoder().encode(body).byteLength > maxBytes) throw new RangeError("Request body is too large");
+    let parsed: unknown;
     try {
-      return JSON.parse(body) as T;
+      parsed = JSON.parse(body);
     } catch {
       throw new RangeError("Request body must be valid JSON");
     }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new RangeError("Request body must be a JSON object");
+    }
+    return parsed as T;
   };
 
   const consumeMutation = (key: string, limit = 30, windowMs = 60 * 60_000): boolean => {

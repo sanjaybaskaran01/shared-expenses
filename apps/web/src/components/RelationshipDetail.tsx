@@ -32,10 +32,16 @@ export function RelationshipDetail(props: {
       appStore.members(),
       props.actorId,
     ).find((item) => item.userId === relationship.userId && item.currency === relationship.currency);
-    const sharedExpenseCount = appStore.expenses().filter((expense) => expense.groupId === groupId && expense.status === "active" && (
-      expense.payers.some((payer) => payer.participantId === relationship.userId) ||
-      expense.allocations.some((allocation) => allocation.participantId === relationship.userId)
-    )).length;
+    const sharedExpenseCount = appStore.expenses().filter((expense) =>
+      expense.groupId === groupId &&
+      expense.status === "active" &&
+      expense.syncStatus !== "rejected" &&
+      expense.syncStatus !== "conflicted" &&
+      (
+        expense.payers.some((payer) => payer.participantId === relationship.userId) ||
+        expense.allocations.some((allocation) => allocation.participantId === relationship.userId)
+      ),
+    ).length;
     return [{ group, amountMinor: contribution?.amountMinor ?? 0, sharedExpenseCount }];
   }));
   const settlement = createMemo<Settlement | undefined>(() => {
@@ -47,7 +53,12 @@ export function RelationshipDetail(props: {
   });
   const canSettle = createMemo(() => {
     const relationship = props.relationship;
-    return Boolean(settlement() && relationship && settlementBlockerCount(appStore.expenses(), relationship.groupIds[0]!, relationship.currency) === 0);
+    return Boolean(settlement() && relationship && settlementBlockerCount(
+      appStore.expenses(),
+      appStore.operations(),
+      relationship.groupIds[0]!,
+      relationship.currency,
+    ) === 0);
   });
   const balanceSummary = createMemo(() => {
     const amount = props.relationship?.amountMinor ?? 0;

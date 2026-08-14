@@ -353,7 +353,12 @@ function GroupsView(props: {
     appStore.expenses().filter((expense) => expense.groupId === group()?.id),
   );
   const activeExpenses = createMemo(() =>
-    expenses().filter((expense) => expense.status === "active"),
+    expenses().filter(
+      (expense) =>
+        expense.status === "active" &&
+        expense.syncStatus !== "rejected" &&
+        expense.syncStatus !== "conflicted",
+    ),
   );
   const payments = createMemo(() => activePayments(appStore.operations(), group()?.id));
   const [currency, setCurrency] = createSignal("USD");
@@ -412,7 +417,12 @@ function GroupsView(props: {
     if (balanceMinor < 0) return `Why do you owe ${money(Math.abs(balanceMinor), currency())}?`;
     return "Why is your balance settled?";
   });
-  const settlementBlockers = createMemo(() => settlementBlockerCount(appStore.expenses(), group()?.id ?? "", currency()));
+  const settlementBlockers = createMemo(() => settlementBlockerCount(
+    appStore.expenses(),
+    appStore.operations(),
+    group()?.id ?? "",
+    currency(),
+ ));
   const settlementPlan = createMemo(() => settlementBlockers() > 0 ? [] : simplifyBalances(balances()));
   const syncHealth = createMemo(() => summarizeOperationHealth(appStore.operations(), group()?.id ?? ""));
 
@@ -872,7 +882,7 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
     groupId?: string,
   ) {
     const targetGroupId = groupId ?? activeGroup()?.id;
-    if (targetGroupId && settlementBlockerCount(appStore.expenses(), targetGroupId, currency) > 0) {
+    if (targetGroupId && settlementBlockerCount(appStore.expenses(), appStore.operations(), targetGroupId, currency) > 0) {
       setSelectedGroupId(targetGroupId);
       setGroupsMode("detail");
       setTab("groups");
@@ -1115,7 +1125,7 @@ function AuthenticatedApp(props: { actorId: string; email: string | undefined })
         groupId={selectedGroupId()}
         currency={paymentCurrency()}
         suggested={suggestedSettlement()}
-        blocked={settlementBlockerCount(appStore.expenses(), selectedGroupId() ?? "", paymentCurrency()) > 0}
+        blocked={settlementBlockerCount(appStore.expenses(), appStore.operations(), selectedGroupId() ?? "", paymentCurrency()) > 0}
         onOpenChange={setPaymentOpen}
         onSaved={() => notify("Payment recorded")}
       />

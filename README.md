@@ -14,9 +14,9 @@ This is an original implementation in the shared-expense product category. It do
 - Standalone, single-use contact invitations with five credits per account and native sharing.
 - Local CSV/JSON or balance-only migration from Splitwise with reconciliation, undo, and private identity claims.
 - Signed P-256 device operations and strict server-side membership checks.
-- An experimental v2 server-blind sync boundary using AES-256-GCM group keys wrapped to member devices.
+- An experimental, disabled-by-default v2 server-blind sync boundary using AES-256-GCM group keys wrapped to member devices.
 
-The existing v1 ledger still stores readable projections on its server. The v2 cryptographic path is implemented and tested, but the product UI has not been migrated to it yet. See [the privacy model](docs/privacy-model.md) before making confidentiality claims.
+The existing v1 ledger still stores readable projections on its server. The v2 cryptographic path is implemented and tested, but the product UI has not been migrated to it yet; its API remains closed unless an operator explicitly enables the experimental flag. See [the privacy model](docs/privacy-model.md) before making confidentiality claims.
 
 ## Fast local start
 
@@ -61,7 +61,7 @@ Open `http://localhost:8080`. Put a TLS reverse proxy in front before using it a
 - Browser clients never receive database credentials.
 - Authentication is not authorization: every data path also checks active group membership.
 - Device signatures establish provenance and tamper evidence; they do not encrypt v1 data.
-- The v2 confidential store accepts only authenticated, member-scoped, device-signed ciphertext.
+- When explicitly enabled for experimentation, the v2 confidential store accepts only authenticated, member-scoped, device-signed ciphertext.
 - Invite bearer tokens are random, single-use, stored only as hashes, and placed in URL fragments to avoid request logs and referrers.
 - Phone contacts are not uploaded. iPhone uses the native share sheet or Messages recipient picker; supported Android browsers may expose a one-contact picker as a progressive enhancement.
 

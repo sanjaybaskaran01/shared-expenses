@@ -10,8 +10,8 @@ import Trash2 from "lucide-solid/icons/trash-2";
 import UserMinus from "lucide-solid/icons/user-minus";
 import UserPlus from "lucide-solid/icons/user-plus";
 import UsersRound from "lucide-solid/icons/users-round";
-import { For, Show, createMemo } from "solid-js";
-import { paymentActivityDetails } from "../lib/activity-view";
+import { For, Show, createMemo, createSignal } from "solid-js";
+import { paymentActivityDetails, restoreExpenseFailureMessage } from "../lib/activity-view";
 import { accountSyncCopy } from "../lib/connection-status";
 import type { LocalExpense, LocalOperation } from "../lib/db";
 import { money } from "../lib/format-money";
@@ -69,6 +69,7 @@ export function ActivityView(props: {
   onOpenExpense(expense: LocalExpense): void;
   onToast(message: string): void;
 }) {
+  const [restoringExpenseId, setRestoringExpenseId] = createSignal<string>();
   const syncCopy = createMemo(() => accountSyncCopy({
     connection: appStore.connection(),
     pendingCount: appStore.operations().filter(({ syncStatus }) => syncStatus === "pending").length,
@@ -96,8 +97,16 @@ export function ActivityView(props: {
     return [...groups.values()];
   });
   async function restore(expense: LocalExpense) {
-    await restoreExpense(expense);
-    props.onToast("Expense restored");
+    if (restoringExpenseId() === expense.id) return;
+    setRestoringExpenseId(expense.id);
+    try {
+      await restoreExpense(expense);
+      props.onToast("Expense restored");
+    } catch (error) {
+      props.onToast(restoreExpenseFailureMessage(error));
+    } finally {
+      setRestoringExpenseId(undefined);
+    }
   }
   return (
     <div class="page-enter space-y-5">
@@ -149,7 +158,7 @@ export function ActivityView(props: {
                   <div class="activity-row-value">
                     <Show when={expense()} fallback={<Show when={payment()} fallback={<Show when={imported()}>{(item) => <><strong>{money(item().amountMinor, item().currency)}</strong><span class="activity-payment-label">imported</span></>}</Show>}>{(item) => <><strong>{money(item().amountMinor, item().currency)}</strong><span class="activity-payment-label">payment</span></>}</Show>}>{(item) => <strong>{money(item().amountMinor, item().currency)}</strong>}</Show>
                     <Show when={operation.type === "ExpenseVoided" && expense()?.status === "voided" && !expense()?.readOnly}>
-                      <button class="min-h-11 px-2" onClick={() => expense() && void restore(expense()!)}>Restore expense</button>
+                      <button class="min-h-11 px-2" disabled={restoringExpenseId() === expense()?.id} onClick={() => expense() && void restore(expense()!)}>{restoringExpenseId() === expense()?.id ? "Restoring…" : "Restore expense"}</button>
                     </Show>
                   </div>
                   <Show when={expense()}><ChevronRight size={15} class="activity-row-chevron" /></Show>

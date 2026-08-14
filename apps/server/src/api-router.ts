@@ -13,12 +13,16 @@ export function createApiRouter(context: ApiContext) {
   return async (request: Request, url: URL, peerAddress: string | undefined): Promise<Response> => {
     const routeRequest = { request, url, peerAddress };
     // Security invariant: only OPTIONS, health/capabilities/claim previews,
-    // OAuth callbacks, and Better Auth may run before the verified-actor gate.
-    // Every other path fails closed through requireActor before any route handler.
+    // OAuth callbacks, Better Auth, and disabled experimental routes may run
+    // before the verified-actor gate. Every enabled route otherwise fails
+    // closed through requireActor before any route handler.
     const publicResponse = await handlePublicRoutes(context, routeRequest);
     if (publicResponse) return publicResponse;
     const authResponse = await handleAuthRoutes(context, routeRequest);
     if (authResponse) return authResponse;
+    if (url.pathname.startsWith("/api/v2/") && !context.config.experimentalConfidentialSync) {
+      return context.http.error(request, 404, "NOT_FOUND", "Not found");
+    }
 
     const actorOrResponse = await context.http.requireActor(request);
     if (actorOrResponse instanceof Response) return actorOrResponse;

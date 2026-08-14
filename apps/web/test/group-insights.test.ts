@@ -81,6 +81,17 @@ describe("group insights", () => {
 
     expect(result.monthTrend).toBeUndefined();
   });
+
+  test("does not include failed optimistic expenses in totals", () => {
+    const result = buildGroupInsights([
+      expense({ id: "accepted", amountMinor: 5_000 }),
+      expense({ id: "rejected", amountMinor: 99_000, syncStatus: "rejected" }),
+      expense({ id: "conflicted", amountMinor: 88_000, syncStatus: "conflicted" }),
+    ], "USD", "a");
+
+    expect(result.totalMinor).toBe(5_000);
+    expect(result.expenseCount).toBe(1);
+  });
 });
 
 describe("expense outcome preview", () => {
@@ -197,15 +208,47 @@ describe("group reconciliation", () => {
 });
 
 describe("settlement safety", () => {
-  test("blocks settlement only for active rejected or conflicted expenses in scope", () => {
-    expect(settlementBlockerCount([
-      expense({ id: "accepted", syncStatus: "accepted" }),
-      expense({ id: "rejected", syncStatus: "rejected" }),
-      expense({ id: "conflicted", syncStatus: "conflicted" }),
-      expense({ id: "voided", syncStatus: "rejected", status: "voided" }),
-      expense({ id: "other-currency", syncStatus: "rejected", currency: "EUR" }),
-      expense({ id: "other-group", syncStatus: "rejected", groupId: "group-2" }),
-    ], "group-1", "USD")).toBe(2);
+  test("blocks settlement for failed expense changes in scope, including a rejected void", () => {
+    const failedExpenseOperation = (
+      id: string,
+      targetId: string,
+      type: LocalOperation["type"],
+      syncStatus: LocalOperation["syncStatus"],
+      groupId = "group-1",
+    ): LocalOperation => ({
+      id,
+      groupId,
+      actorId: "a",
+      deviceId: "device-a",
+      type,
+      targetId,
+      baseVersion: 1,
+      clientTimestamp: "2026-07-26T12:00:00Z",
+      payload: {},
+      contentHash: "0".repeat(64),
+      signature: "signature",
+      syncStatus,
+    });
+
+    expect(settlementBlockerCount(
+      [
+        expense({ id: "accepted" }),
+        expense({ id: "failed-amend" }),
+        // The client restores this canonical active expense after its void fails.
+        expense({ id: "failed-void" }),
+        expense({ id: "other-currency", currency: "EUR" }),
+        expense({ id: "other-group", groupId: "group-2" }),
+      ],
+      [
+        failedExpenseOperation("accepted-change", "accepted", "ExpenseAmended", "accepted"),
+        failedExpenseOperation("failed-amend-operation", "failed-amend", "ExpenseAmended", "rejected"),
+        failedExpenseOperation("failed-void-operation", "failed-void", "ExpenseVoided", "conflicted"),
+        failedExpenseOperation("other-currency-operation", "other-currency", "ExpenseAmended", "rejected"),
+        failedExpenseOperation("other-group-operation", "other-group", "ExpenseAmended", "rejected", "group-2"),
+      ],
+      "group-1",
+      "USD",
+    )).toBe(2);
   });
 
   test("uses the latest expense operation when reporting sync health", () => {

@@ -79,9 +79,14 @@ export function ContactInviteDialog(props: {
   }
 
   async function copyLatest(): Promise<void> {
-    await navigator.clipboard.writeText(lastInviteUrl());
-    setMessageTone("status");
-    setMessage("Invite link copied.");
+    try {
+      await navigator.clipboard.writeText(lastInviteUrl());
+      setMessageTone("status");
+      setMessage("Invite link copied.");
+    } catch {
+      setMessageTone("error");
+      setMessage("Unable to copy the invite link. Select it and copy it manually.");
+    }
   }
 
   async function revoke(id: string): Promise<void> {

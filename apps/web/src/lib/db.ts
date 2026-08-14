@@ -15,6 +15,7 @@ export type SyncStatus = "pending" | "accepted" | "conflicted" | "rejected";
 export interface LocalOperation extends OperationEnvelope {
   syncStatus: SyncStatus;
   errorCode?: string;
+  errorMessage?: string;
   participantAliases?: Record<string, string>;
 }
 

@@ -1,13 +1,10 @@
 import {
-  operationContentHash,
   type ImportUndoResult,
-  type JsonValue,
-  type OperationEnvelope,
-  type UnsignedOperation,
 } from "@expenses/protocol";
 import type { LocalOperation } from "./db";
 import { undoImport } from "./api";
 import { buildImportUndo } from "./import-undo";
+import { signOperation } from "./operation-signing";
 
 interface UndoRequest {
   batchId: string;
@@ -22,26 +19,6 @@ type UndoResponse =
   | { type: "progress"; phase: "planning" | "uploading"; completed: number; total: number }
   | { type: "complete"; result: ImportUndoResult }
   | { type: "error"; message: string };
-
-function encodeBase64Url(buffer: ArrayBuffer): string {
-  return btoa(String.fromCharCode(...new Uint8Array(buffer)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
-async function signOperation<TPayload extends JsonValue>(
-  operation: UnsignedOperation<TPayload>,
-  privateKey: CryptoKey,
-): Promise<OperationEnvelope<TPayload>> {
-  const contentHash = await operationContentHash(operation);
-  const signature = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    privateKey,
-    new TextEncoder().encode(contentHash),
-  );
-  return { ...operation, contentHash, signature: encodeBase64Url(signature) };
-}
 
 self.addEventListener("message", async (event: MessageEvent<UndoRequest>) => {
   const request = event.data;

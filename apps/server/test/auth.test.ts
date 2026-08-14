@@ -8,6 +8,7 @@ import {
   resolvePublicRateKey,
   resolveSplitwiseOAuthConfig,
   resolveTrustedProxies,
+  validatedBaseUrl,
   validateProductionAuthDelivery,
   validateProductionAuthSecret,
   type AppConfig,
@@ -28,6 +29,7 @@ function testConfig(googleAuth?: AppConfig["googleAuth"]): AppConfig {
     publicApiUrl: "http://localhost:3000",
     authSecret: "test-only-auth-secret-not-for-production",
     devAuthBypass: false,
+    experimentalConfidentialSync: false,
     trustCloudflareProxy: false,
     trustedProxies: [],
     ownerEmail: "owner@example.com",
@@ -263,6 +265,19 @@ describe("production authentication secret", () => {
 
   test("accepts a sufficiently long non-example secret", () => {
     expect(() => validateProductionAuthSecret("a-secure-random-value-that-is-long-enough")).not.toThrow();
+  });
+});
+
+describe("production origin configuration", () => {
+  test("permits HTTP only for a loopback-only production deployment", () => {
+    expect(validatedBaseUrl("WEB_ORIGIN", "http://localhost:8080", true)).toBe("http://localhost:8080");
+    expect(validatedBaseUrl("PUBLIC_API_URL", "http://127.0.0.1:8080", true)).toBe("http://127.0.0.1:8080");
+    expect(validatedBaseUrl("WEB_ORIGIN", "http://[::1]:8080", true)).toBe("http://[::1]:8080");
+  });
+
+  test("requires HTTPS for remotely reachable production origins", () => {
+    expect(() => validatedBaseUrl("WEB_ORIGIN", "http://tallied.example.com", true)).toThrow("must use HTTPS");
+    expect(validatedBaseUrl("WEB_ORIGIN", "https://tallied.example.com", true)).toBe("https://tallied.example.com");
   });
 });
 

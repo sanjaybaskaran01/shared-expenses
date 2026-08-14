@@ -131,7 +131,12 @@ export function OverviewView(props: {
               const settlement = createMemo<Settlement>(() => relationship.amountMinor > 0
                 ? { payerId: relationship.userId, recipientId: props.actorId, amountMinor: relationship.amountMinor }
                 : { payerId: props.actorId, recipientId: relationship.userId, amountMinor: Math.abs(relationship.amountMinor) });
-              const needsReview = createMemo(() => relationship.groupIds.length === 1 && settlementBlockerCount(appStore.expenses(), relationship.groupIds[0]!, relationship.currency) > 0);
+              const needsReview = createMemo(() => relationship.groupIds.length === 1 && settlementBlockerCount(
+                appStore.expenses(),
+                appStore.operations(),
+                relationship.groupIds[0]!,
+                relationship.currency,
+              ) > 0);
               const canSettleHere = createMemo(() => relationship.groupIds.length === 1 && !needsReview());
               return (
                 <article class="relationship-row" style={{ "--row-index": Math.min(index(), 7) }}>

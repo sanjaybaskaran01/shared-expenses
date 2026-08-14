@@ -35,7 +35,15 @@ export function operationPayload(operation: LocalOperation): Record<string, Json
 }
 
 export function activePayments(operations: readonly LocalOperation[], groupId?: string, currency?: string): LocalOperation[] {
-  const reversed = new Set(operations.filter((operation) => operation.type === "PaymentReversed").map((operation) => operation.targetId));
+  const reversed = new Set(
+    operations
+      .filter((operation) =>
+        operation.type === "PaymentReversed" &&
+        operation.syncStatus !== "rejected" &&
+        operation.syncStatus !== "conflicted",
+      )
+      .map((operation) => operation.targetId),
+  );
   return operations.filter((operation) => {
     if (operation.type !== "PaymentRecorded" || reversed.has(operation.targetId) || operation.syncStatus === "rejected" || operation.syncStatus === "conflicted") return false;
     const data = operationPayload(operation);
@@ -50,7 +58,11 @@ export function activeImportedTransactions(
 ): LocalOperation[] {
   const voided = new Set(
     operations
-      .filter((operation) => operation.type === "ImportedTransactionVoided" || operation.type === "OpeningBalanceVoided")
+      .filter((operation) =>
+        (operation.type === "ImportedTransactionVoided" || operation.type === "OpeningBalanceVoided") &&
+        operation.syncStatus !== "rejected" &&
+        operation.syncStatus !== "conflicted",
+      )
       .map((operation) => operation.targetId),
   );
   return operations.filter((operation) => {
@@ -78,7 +90,13 @@ export function computeBalances(
   const balances: Record<string, number> = {};
   const add = (participantId: string, amountMinor: number) => { balances[participantId] = (balances[participantId] ?? 0) + amountMinor; };
   for (const expense of expenses) {
-    if (expense.groupId !== groupId || expense.currency !== currency || expense.status !== "active") continue;
+    if (
+      expense.groupId !== groupId ||
+      expense.currency !== currency ||
+      expense.status !== "active" ||
+      expense.syncStatus === "rejected" ||
+      expense.syncStatus === "conflicted"
+    ) continue;
     for (const payer of expense.payers) add(payer.participantId, payer.amountMinor);
     for (const allocation of expense.allocations) add(allocation.participantId, -allocation.amountMinor);
   }
@@ -145,7 +163,12 @@ export function computeRelationshipBalances(
 
     const currencies = new Set<string>([group.settlementCurrency]);
     for (const expense of expenses) {
-      if (expense.groupId === group.id && expense.status === "active") currencies.add(expense.currency);
+      if (
+        expense.groupId === group.id &&
+        expense.status === "active" &&
+        expense.syncStatus !== "rejected" &&
+        expense.syncStatus !== "conflicted"
+      ) currencies.add(expense.currency);
     }
     for (const operation of activePayments(operations, group.id)) {
       currencies.add(String(operationPayload(operation).currency));

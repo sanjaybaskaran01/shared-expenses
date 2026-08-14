@@ -1,13 +1,10 @@
 import {
-  operationContentHash,
   type ImportPreparedReview,
-  type JsonValue,
   type NormalizedImportDraft,
-  type OperationEnvelope,
-  type UnsignedOperation,
 } from "@expenses/protocol";
 import { resolveImportIdentities, stageImport } from "./api";
 import { buildImportCommit, preparedImportReview } from "./import-commit";
+import { signOperation } from "./operation-signing";
 
 interface PlanRequest {
   draft: NormalizedImportDraft;
@@ -24,26 +21,6 @@ type PlanResponse =
   | { type: "progress"; phase: "planning" | "uploading"; completed: number; total: number }
   | { type: "complete"; review: ImportPreparedReview }
   | { type: "error"; message: string };
-
-function encodeBase64Url(buffer: ArrayBuffer): string {
-  return btoa(String.fromCharCode(...new Uint8Array(buffer)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
-async function signOperation<TPayload extends JsonValue>(
-  operation: UnsignedOperation<TPayload>,
-  privateKey: CryptoKey,
-): Promise<OperationEnvelope<TPayload>> {
-  const contentHash = await operationContentHash(operation);
-  const signature = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    privateKey,
-    new TextEncoder().encode(contentHash),
-  );
-  return { ...operation, contentHash, signature: encodeBase64Url(signature) };
-}
 
 self.addEventListener("message", async (event: MessageEvent<PlanRequest>) => {
   const request = event.data;

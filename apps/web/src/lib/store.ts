@@ -11,6 +11,7 @@ import { createSignal } from "solid-js";
 import { liveQuery } from "dexie";
 import { localDb, type LocalExpense, type LocalGroup, type LocalMember, type LocalOperation } from "./db";
 import { ensureDevice, signOperation } from "./device";
+import { expenseRecoveryState, isExpenseMutation } from "./expense-recovery";
 import { SyncEngine, type ConnectionState } from "./sync";
 
 export interface NewExpenseInput {
@@ -208,6 +209,7 @@ export async function updateExpense(expense: LocalExpense, input: NewExpenseInpu
   const device = await ensureDevice();
   const current = await localDb.expenses.get(expense.id);
   if (!current) throw new RangeError("This expense no longer exists.");
+  await assertExpenseHasRemoteTarget(current);
   if (current.version !== expense.version) throw new RangeError("This expense changed. Reopen it and try again.");
   if (current.status !== "active") throw new RangeError("Restore this expense before editing it.");
   if (current.readOnly) throw new RangeError("Imported expenses can’t be edited. Undo the import and import again to make changes.");
@@ -363,10 +365,138 @@ async function enqueueOperation(unsigned: UnsignedOperation): Promise<LocalOpera
   return localOperation;
 }
 
+function retryExpensePayload(expense: LocalExpense): JsonValue {
+  return {
+    description: expense.description,
+    category: expense.category,
+    amountMinor: expense.amountMinor,
+    currency: expense.currency,
+    expenseDate: expense.expenseDate,
+    notes: expense.notes,
+    recurrence: expense.recurrence ?? "none",
+    payers: expense.payers.map(({ participantId, amountMinor }) => ({ participantId, amountMinor })),
+    allocations: expense.allocations.map(({ participantId, amountMinor }) => ({ participantId, amountMinor })),
+  };
+}
+
+function retryExpenseRecord(
+  expense: LocalExpense,
+  expenseId: string,
+  actorId: string,
+  clientTimestamp: string,
+): LocalExpense {
+  return {
+    id: expenseId,
+    groupId: expense.groupId,
+    description: expense.description,
+    category: expense.category,
+    amountMinor: expense.amountMinor,
+    currency: expense.currency,
+    expenseDate: expense.expenseDate,
+    notes: expense.notes,
+    recurrence: expense.recurrence ?? "none",
+    payers: expense.payers.map(({ participantId, amountMinor }) => ({ participantId, amountMinor })),
+    allocations: expense.allocations.map(({ participantId, amountMinor }) => ({ participantId, amountMinor })),
+    yourNetMinor: expense.yourNetMinor,
+    status: "active",
+    version: 1,
+    createdBy: actorId,
+    updatedAt: clientTimestamp,
+    syncStatus: "pending",
+  };
+}
+
+function assertUnchangedExpense(current: LocalExpense | undefined, expense: LocalExpense): asserts current is LocalExpense {
+  if (!current || current.version !== expense.version || current.updatedAt !== expense.updatedAt) {
+    throw new RangeError("This expense changed. Reopen it and try again.");
+  }
+}
+
+async function assertExpenseHasRemoteTarget(expense: LocalExpense): Promise<void> {
+  const targetOperations = await localDb.operations.where("targetId").equals(expense.id).toArray();
+  if (expenseRecoveryState(expense, targetOperations).kind === "local-only") {
+    throw new RangeError("Resolve the failed local expense before making more changes.");
+  }
+}
+
+/** Removes a rejected local-only expense and every unsynced operation that depends on it. */
+export async function discardLocalOnlyExpense(expense: LocalExpense): Promise<void> {
+  await localDb.transaction("rw", localDb.operations, localDb.expenses, async () => {
+    const current = await localDb.expenses.get(expense.id);
+    assertUnchangedExpense(current, expense);
+    const targetOperations = await localDb.operations.where("targetId").equals(current.id).toArray();
+    if (expenseRecoveryState(current, targetOperations).kind !== "local-only") {
+      throw new RangeError("This expense now has synced history and cannot be discarded this way.");
+    }
+    await localDb.operations.bulkDelete(targetOperations.map(({ id }) => id));
+    await localDb.expenses.delete(current.id);
+  });
+}
+
+/** Re-signs a definitively rejected local-only expense with fresh operation and expense ids. */
+export async function retryLocalOnlyExpense(expense: LocalExpense): Promise<string> {
+  const device = await ensureDevice();
+  const initial = await localDb.expenses.get(expense.id);
+  assertUnchangedExpense(initial, expense);
+  const initialOperations = await localDb.operations.where("targetId").equals(initial.id).toArray();
+  const initialRecovery = expenseRecoveryState(initial, initialOperations);
+  if (initialRecovery.kind !== "local-only" || !initialRecovery.canRetryAsNew) {
+    throw new RangeError("This expense cannot be retried as a new expense. Discard it and add it again if needed.");
+  }
+
+  const expenseId = crypto.randomUUID();
+  const clientTimestamp = new Date().toISOString();
+  const operation = await signOperation({
+    id: crypto.randomUUID(),
+    groupId: initial.groupId,
+    actorId: device.actorId,
+    deviceId: device.deviceId,
+    type: "ExpenseCreated",
+    targetId: expenseId,
+    baseVersion: 0,
+    clientTimestamp,
+    payload: retryExpensePayload(initial),
+  }, device.privateKey);
+
+  await localDb.transaction("rw", localDb.operations, localDb.expenses, async () => {
+    const current = await localDb.expenses.get(expense.id);
+    assertUnchangedExpense(current, expense);
+    const targetOperations = await localDb.operations.where("targetId").equals(current.id).toArray();
+    const recovery = expenseRecoveryState(current, targetOperations);
+    if (recovery.kind !== "local-only" || !recovery.canRetryAsNew) {
+      throw new RangeError("This expense changed while it was being retried. Reopen it and try again.");
+    }
+    await localDb.operations.bulkDelete(targetOperations.map(({ id }) => id));
+    await localDb.expenses.delete(current.id);
+    await localDb.operations.add({ ...operation, syncStatus: "pending" });
+    await localDb.expenses.add(retryExpenseRecord(current, expenseId, device.actorId, clientTimestamp));
+  });
+  void syncEngine.sync();
+  return expenseId;
+}
+
+/** Drops failed and dependent local mutations while leaving the canonical expense untouched. */
+export async function discardFailedExpenseChanges(expense: LocalExpense): Promise<void> {
+  await localDb.transaction("rw", localDb.operations, localDb.expenses, async () => {
+    const current = await localDb.expenses.get(expense.id);
+    assertUnchangedExpense(current, expense);
+    const targetOperations = await localDb.operations.where("targetId").equals(current.id).toArray();
+    if (expenseRecoveryState(current, targetOperations).kind !== "canonical") {
+      throw new RangeError("This expense does not have a failed change to discard.");
+    }
+    const discardedIds = targetOperations
+      .filter((operation) => isExpenseMutation(operation) && operation.syncStatus !== "accepted")
+      .map(({ id }) => id);
+    if (discardedIds.length === 0) throw new RangeError("This expense does not have a failed change to discard.");
+    await localDb.operations.bulkDelete(discardedIds);
+  });
+}
+
 export async function voidExpense(expense: LocalExpense, reason = ""): Promise<void> {
   const device = await ensureDevice();
   const current = await localDb.expenses.get(expense.id);
   if (!current) throw new RangeError("This expense no longer exists.");
+  await assertExpenseHasRemoteTarget(current);
   if (current.version !== expense.version) throw new RangeError("This expense changed. Reopen it and try again.");
   if (current.status !== "active") throw new RangeError("This expense is already deleted.");
   if (current.readOnly) throw new RangeError("Undo the import to remove an imported expense.");
@@ -390,6 +520,7 @@ export async function restoreExpense(expense: LocalExpense): Promise<void> {
   const device = await ensureDevice();
   const current = await localDb.expenses.get(expense.id);
   if (!current) throw new RangeError("This expense no longer exists.");
+  await assertExpenseHasRemoteTarget(current);
   if (current.version !== expense.version) throw new RangeError("This expense changed. Reopen it and try again.");
   if (current.status !== "voided") throw new RangeError("This expense is already active.");
   if (current.readOnly) throw new RangeError("Undo the import to restore an imported expense.");
@@ -410,6 +541,9 @@ export async function restoreExpense(expense: LocalExpense): Promise<void> {
 }
 
 export async function addComment(expense: LocalExpense, body: string): Promise<void> {
+  const current = await localDb.expenses.get(expense.id);
+  if (!current) throw new RangeError("This expense no longer exists.");
+  await assertExpenseHasRemoteTarget(current);
   const device = await ensureDevice();
   const value = body.trim();
   if (!value || value.length > 2_000) throw new RangeError("Enter a comment with 2,000 characters or fewer.");

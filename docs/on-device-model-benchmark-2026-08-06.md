@@ -18,8 +18,8 @@ benchmark. Its purpose was to falsify the initial selection quickly; it did.
   because this headless host has no usable Metal device.
 - Generation: temperature `0`, top-k `1`, top-p `1`, fixed seed `42`, thinking
   disabled, and JSON-schema constrained output.
-- Contract: the same read-only proposal shape used by
-  [`expense-model-contract.ts`](../apps/web/src/lib/expense-model-contract.ts).
+- Contract: the read-only proposal shape evaluated by the since-removed
+  experimental model contract.
 
 This is an exact Qwen3-0.6B model-family check, but it is **not** a substitute
 for a WebLLM/XGrammar test on an iPhone: the browser artifact uses a different

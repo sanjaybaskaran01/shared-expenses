@@ -71,7 +71,26 @@ export const versionedTypes = new Set([
   "OpeningBalanceCreated",
   "OpeningBalanceVoided",
   "GroupCurrencyChanged",
-  "ConflictResolved",
+]);
+
+// These are the only operation types that currently materialize a server
+// projection. Keep the protocol's reserved future types from being accepted as
+// successful no-ops, which would otherwise advance entity versions without
+// changing the ledger.
+const projectedOperationTypes = new Set([
+  "ExpenseCreated",
+  "ExpenseAmended",
+  "ExpenseVoided",
+  "ExpenseRestored",
+  "CommentAdded",
+  "PaymentRecorded",
+  "PaymentReversed",
+  "ImportedTransactionRecorded",
+  "ImportedTransactionVoided",
+  "OpeningBalanceCreated",
+  "OpeningBalanceVoided",
+  "GroupCreated",
+  "GroupCurrencyChanged",
 ]);
 
 export const stagedUploadLimitBytes = 192 * 1024 * 1024;
@@ -317,6 +336,7 @@ export abstract class LedgerCore {
         .query<{ sequence: number }, [string]>(
           `SELECT COALESCE(MAX(o.server_sequence), 0) AS sequence FROM operations o
            JOIN group_members gm ON gm.group_id = o.group_id
+           JOIN groups g ON g.id = o.group_id AND g.deleted_at IS NULL
            WHERE gm.user_id = ? AND gm.status = 'active' AND o.status = 'accepted'`,
         )
         .get(actorId)?.sequence ?? 0
@@ -327,7 +347,9 @@ export abstract class LedgerCore {
     const actorIds = new Set<string>();
     for (const groupId of new Set(groupIds)) {
       const rows = this.db.query<{ user_id: string }, [string]>(
-        "SELECT user_id FROM group_members WHERE group_id = ? AND status = 'active'",
+        `SELECT gm.user_id FROM group_members gm
+         JOIN groups g ON g.id = gm.group_id AND g.deleted_at IS NULL
+         WHERE gm.group_id = ? AND gm.status = 'active'`,
       ).all(groupId);
       for (const { user_id } of rows) actorIds.add(user_id);
     }
@@ -409,7 +431,9 @@ export abstract class LedgerCore {
     return Boolean(
       this.db
         .query<{ one: number }, [string, string]>(
-          "SELECT 1 AS one FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'active'",
+          `SELECT 1 AS one FROM group_members gm
+           JOIN groups g ON g.id = gm.group_id AND g.deleted_at IS NULL
+           WHERE gm.group_id = ? AND gm.user_id = ? AND gm.status = 'active'`,
         )
         .get(groupId, userId),
     );
@@ -441,56 +465,66 @@ export abstract class LedgerCore {
 
   protected async verifyOperation(
     actorId: string,
-    operation: OperationEnvelope,
+    operation: unknown,
     plannedGroupIds: ReadonlySet<string> = new Set(),
   ): Promise<string | null> {
+    if (!operation || typeof operation !== "object" || Array.isArray(operation)) return "INVALID_ENVELOPE";
+    const envelope = operation as Partial<OperationEnvelope>;
     if (
-      !operation ||
-      typeof operation.id !== "string" ||
-      operation.id.length === 0 ||
-      operation.id.length > 100 ||
-      typeof operation.groupId !== "string" ||
-      operation.groupId.length === 0 ||
-      operation.groupId.length > 100 ||
-      typeof operation.deviceId !== "string" ||
-      operation.deviceId.length === 0 ||
-      operation.deviceId.length > 100 ||
-      typeof operation.targetId !== "string" ||
-      operation.targetId.length === 0 ||
-      operation.targetId.length > 100 ||
-      !Number.isSafeInteger(operation.baseVersion) ||
-      operation.baseVersion < 0 ||
-      typeof operation.clientTimestamp !== "string" ||
-      !Number.isFinite(Date.parse(operation.clientTimestamp)) ||
-      typeof operation.contentHash !== "string" ||
-      !/^[a-f0-9]{64}$/.test(operation.contentHash) ||
-      typeof operation.signature !== "string" ||
-      operation.signature.length > 512
+      typeof envelope.id !== "string" ||
+      envelope.id.length === 0 ||
+      envelope.id.length > 100 ||
+      typeof envelope.groupId !== "string" ||
+      envelope.groupId.length === 0 ||
+      envelope.groupId.length > 100 ||
+      typeof envelope.actorId !== "string" ||
+      typeof envelope.deviceId !== "string" ||
+      envelope.deviceId.length === 0 ||
+      envelope.deviceId.length > 100 ||
+      typeof envelope.targetId !== "string" ||
+      envelope.targetId.length === 0 ||
+      envelope.targetId.length > 100 ||
+      typeof envelope.baseVersion !== "number" ||
+      !Number.isSafeInteger(envelope.baseVersion) ||
+      envelope.baseVersion < 0 ||
+      typeof envelope.clientTimestamp !== "string" ||
+      !Number.isFinite(Date.parse(envelope.clientTimestamp)) ||
+      typeof envelope.contentHash !== "string" ||
+      !/^[a-f0-9]{64}$/.test(envelope.contentHash) ||
+      typeof envelope.signature !== "string" ||
+      envelope.signature.length > 512 ||
+      !Object.hasOwn(envelope, "payload")
     ) {
       return "INVALID_ENVELOPE";
     }
-    if (operation.actorId !== actorId) return "ACTOR_MISMATCH";
-    if (!isOperationType(operation.type)) return "UNKNOWN_OPERATION_TYPE";
-    if (operation.type !== "GroupCreated" && !this.isActiveMember(operation.groupId, actorId) && !plannedGroupIds.has(operation.groupId)) {
+    if (envelope.actorId !== actorId) return "ACTOR_MISMATCH";
+    if (typeof envelope.type !== "string" || !isOperationType(envelope.type)) return "UNKNOWN_OPERATION_TYPE";
+    if (!projectedOperationTypes.has(envelope.type)) return "UNSUPPORTED_OPERATION";
+    if (envelope.type !== "GroupCreated" && !this.isActiveMember(envelope.groupId, actorId) && !plannedGroupIds.has(envelope.groupId)) {
       return "NOT_A_GROUP_MEMBER";
     }
     const device = this.db
       .query<DeviceRow, [string]>("SELECT id, user_id, public_key_jwk, status FROM devices WHERE id = ?")
-      .get(operation.deviceId);
+      .get(envelope.deviceId);
     if (!device || device.user_id !== actorId || device.status !== "active") return "DEVICE_NOT_TRUSTED";
 
-    const expectedHash = await operationContentHash({
-      id: operation.id,
-      groupId: operation.groupId,
-      actorId: operation.actorId,
-      deviceId: operation.deviceId,
-      type: operation.type,
-      targetId: operation.targetId,
-      baseVersion: operation.baseVersion,
-      clientTimestamp: operation.clientTimestamp,
-      payload: operation.payload,
-    });
-    if (expectedHash !== operation.contentHash) return "CONTENT_HASH_MISMATCH";
+    let expectedHash: string;
+    try {
+      expectedHash = await operationContentHash({
+        id: envelope.id,
+        groupId: envelope.groupId,
+        actorId: envelope.actorId,
+        deviceId: envelope.deviceId,
+        type: envelope.type,
+        targetId: envelope.targetId,
+        baseVersion: envelope.baseVersion,
+        clientTimestamp: envelope.clientTimestamp,
+        payload: envelope.payload as JsonValue,
+      });
+    } catch {
+      return "INVALID_ENVELOPE";
+    }
+    if (expectedHash !== envelope.contentHash) return "CONTENT_HASH_MISMATCH";
 
     try {
       const cacheKey = `${device.id}:${device.public_key_jwk}`;
@@ -510,8 +544,8 @@ export abstract class LedgerCore {
       const valid = await crypto.subtle.verify(
         { name: "ECDSA", hash: "SHA-256" },
         key,
-        decodeBase64Url(operation.signature),
-        new TextEncoder().encode(operation.contentHash),
+        decodeBase64Url(envelope.signature),
+        new TextEncoder().encode(envelope.contentHash),
       );
       return valid ? null : "INVALID_SIGNATURE";
     } catch {
@@ -561,7 +595,7 @@ export abstract class LedgerCore {
     }
   }
 
-  async push(actorId: string, operations: readonly OperationEnvelope[]): Promise<SyncPushResult> {
+  async push(actorId: string, operations: readonly unknown[]): Promise<SyncPushResult> {
     const result: SyncPushResult = {
       accepted: [],
       duplicates: [],
@@ -576,18 +610,45 @@ export abstract class LedgerCore {
       return result;
     }
 
-    for (const operation of operations) {
-      const existing = this.db
-        .query<{ server_sequence: number }, [string]>("SELECT server_sequence FROM operations WHERE id = ?")
-        .get(operation.id);
-      if (existing) {
-        result.duplicates.push({ id: operation.id, serverSequence: existing.server_sequence });
+    for (const candidate of operations) {
+      const operationId = candidate && typeof candidate === "object" && !Array.isArray(candidate) &&
+        typeof (candidate as { id?: unknown }).id === "string"
+        ? (candidate as { id: string }).id
+        : "unknown";
+      const verificationError = await this.verifyOperation(actorId, candidate);
+      if (verificationError) {
+        result.rejected.push({ id: operationId, code: verificationError, message: "Operation verification failed" });
         continue;
       }
-
-      const verificationError = await this.verifyOperation(actorId, operation);
-      if (verificationError) {
-        result.rejected.push({ id: operation.id, code: verificationError, message: "Operation verification failed" });
+      const operation = candidate as OperationEnvelope;
+      const existing = this.db
+        .query<{
+          server_sequence: number;
+          content_hash: string;
+          status: "accepted" | "conflicted" | "rejected";
+          conflict_id: string | null;
+          current_version: number | null;
+        }, [string]>(
+          `SELECT o.server_sequence, o.content_hash, o.status,
+                  c.id AS conflict_id, c.current_version
+           FROM operations o LEFT JOIN conflicts c ON c.operation_id = o.id
+           WHERE o.id = ?`,
+        )
+        .get(operation.id);
+      if (existing) {
+        if (existing.content_hash !== operation.contentHash) {
+          result.rejected.push({ id: operation.id, code: "OPERATION_ID_REUSED", message: "Operation id is already in use" });
+        } else if (existing.status === "accepted") {
+          result.duplicates.push({ id: operation.id, serverSequence: existing.server_sequence });
+        } else if (existing.status === "conflicted" && existing.conflict_id && existing.current_version !== null) {
+          result.conflicts.push({
+            id: operation.id,
+            conflictId: existing.conflict_id,
+            currentVersion: existing.current_version,
+          });
+        } else {
+          result.rejected.push({ id: operation.id, code: "OPERATION_ID_REUSED", message: "Operation id is already in use" });
+        }
         continue;
       }
 

@@ -10,6 +10,12 @@ export interface PaymentActivityDetails {
   note?: string;
 }
 
+export function restoreExpenseFailureMessage(error: unknown): string {
+  return error instanceof Error && error.message.trim()
+    ? error.message
+    : "Unable to restore this expense. Try again.";
+}
+
 export function paymentActivityDetails(
   operation: LocalOperation,
 ): PaymentActivityDetails | undefined {

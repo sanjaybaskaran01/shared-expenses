@@ -448,6 +448,7 @@ export class LedgerProjectionService extends IdentityClaimService {
       .query<OperationRow, [string, number, number]>(
         `SELECT o.* FROM operations o
          JOIN group_members gm ON gm.group_id = o.group_id
+         JOIN groups g ON g.id = o.group_id AND g.deleted_at IS NULL
          WHERE gm.user_id = ? AND gm.status = 'active'
            AND o.status = 'accepted' AND o.server_sequence > ?
          ORDER BY o.server_sequence ASC LIMIT ?`,
@@ -476,6 +477,7 @@ export class LedgerProjectionService extends IdentityClaimService {
         `SELECT o.group_id AS groupId, COUNT(*) AS count, MAX(o.server_sequence) AS maxSequence
          FROM operations o
          JOIN group_members gm ON gm.group_id = o.group_id
+         JOIN groups g ON g.id = o.group_id AND g.deleted_at IS NULL
          WHERE gm.user_id = ? AND gm.status = 'active' AND o.status = 'accepted'
          GROUP BY o.group_id ORDER BY o.group_id`,
       )
@@ -499,7 +501,9 @@ export class LedgerProjectionService extends IdentityClaimService {
         `SELECT e.id, e.group_id AS groupId, e.description, e.category,
                 e.amount_minor AS amountMinor, e.currency, e.expense_date AS expenseDate,
                 e.notes, e.status, e.version, e.created_by AS createdBy
-         FROM expenses e JOIN group_members gm ON gm.group_id = e.group_id
+         FROM expenses e
+         JOIN group_members gm ON gm.group_id = e.group_id
+         JOIN groups g ON g.id = e.group_id AND g.deleted_at IS NULL
          WHERE gm.user_id = ? AND gm.status = 'active'
          ORDER BY e.expense_date DESC, e.created_at DESC`,
       )
@@ -519,10 +523,13 @@ export class LedgerProjectionService extends IdentityClaimService {
                 gm.email, gm.status, ii.id AS importIdentityId, ib.id AS importBatchId,
                 CASE WHEN ii.status IN ('unclaimed', 'reserved', 'awaiting_owner') THEN ii.status END AS importClaimStatus
          FROM group_members gm
+         JOIN groups visible_group ON visible_group.id = gm.group_id AND visible_group.deleted_at IS NULL
          LEFT JOIN imported_identities ii ON ii.placeholder_user_id = gm.user_id
          LEFT JOIN import_batches ib ON ib.id = ii.batch_id AND ib.imported_by = ? AND ib.status = 'completed'
          WHERE gm.group_id IN (
-           SELECT group_id FROM group_members WHERE user_id = ? AND status = 'active'
+           SELECT active_member.group_id FROM group_members active_member
+           JOIN groups active_group ON active_group.id = active_member.group_id AND active_group.deleted_at IS NULL
+           WHERE active_member.user_id = ? AND active_member.status = 'active'
          ) ORDER BY gm.joined_at`,
       )
       .all(actorId, actorId);
@@ -537,6 +544,7 @@ export class LedgerProjectionService extends IdentityClaimService {
               aliases.placeholder_user_id AS fromUserId,
               aliases.claimed_user_id AS toUserId
        FROM import_participant_aliases aliases
+       JOIN groups g ON g.id = aliases.group_id AND g.deleted_at IS NULL
        JOIN imported_identities identity
          ON identity.id = aliases.identity_id AND identity.status = 'claimed'
        JOIN group_members viewer ON viewer.group_id = aliases.group_id
@@ -552,6 +560,7 @@ export class LedgerProjectionService extends IdentityClaimService {
               aliases.placeholder_user_id AS fromUserId,
               aliases.claimed_user_id AS toUserId
        FROM invitation_participant_aliases aliases
+       JOIN groups g ON g.id = aliases.group_id AND g.deleted_at IS NULL
        JOIN group_invitations invitation
          ON invitation.id = aliases.invitation_id AND invitation.status = 'accepted'
        JOIN group_members viewer ON viewer.group_id = aliases.group_id

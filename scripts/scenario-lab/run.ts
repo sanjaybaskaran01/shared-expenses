@@ -948,14 +948,37 @@ async function run(): Promise<void> {
       await Promise.all(sessions.map((session) => forceSync(session)));
       const clients = await Promise.all(sessions.map(({ page }) => bridgeSnapshot(page)));
       const server = readScenarioServerSnapshot(runtime!.databasePath);
-      const conflictClients = clients.filter((client) => client.expenses.some(({ id, syncStatus }) => id === originalId && syncStatus === "conflicted"));
+      // The expense projection returns to its accepted canonical state after a
+      // failed optimistic edit. The immutable local operation retains the
+      // conflict, which the expense detail exposes as a recovery callout.
+      const conflictIndexes = clients.flatMap((client, index) =>
+        client.operations.some(({ targetId, syncStatus }) => targetId === originalId && syncStatus === "conflicted")
+          ? [index]
+          : [],
+      );
       const canonical = server.expenses.find(({ id }) => id === originalId);
-      const unaffected = clients.filter((client) => !conflictClients.includes(client));
+      const conflictSession = conflictIndexes.length === 1 ? sessions[conflictIndexes[0]!] : undefined;
+      let recoveryCalloutVisible = false;
+      if (conflictSession && canonical) {
+        await conflictSession.page.getByRole("button", { name: new RegExp(canonical.description, "i") }).click();
+        const detail = conflictSession.page.getByRole("dialog", { name: "Expense details" });
+        try {
+          await detail.getByRole("heading", { name: "A saved change was not applied" }).waitFor({
+            state: "visible",
+            timeout: 5_000,
+          });
+          recoveryCalloutVisible = true;
+        } catch {
+          // The assertion below records the missing callout in the scenario
+          // report, while allowing its other evidence to be captured.
+        }
+      }
+      const unaffected = clients.filter((_, index) => !conflictIndexes.includes(index));
       const unaffectedConverged = unaffected.every((client) => client.expenses.some(({ id, description, syncStatus }) => id === originalId && description === canonical?.description && syncStatus === "accepted"));
       const checks = [
         ...evaluateLedger(server).checks,
         makeCheck("single-winner", "Exactly one simultaneous edit became canonical", Boolean(canonical && canonical.version === 2), canonical ? `${canonical.description} · version ${canonical.version}` : "Missing canonical expense"),
-        makeCheck("visible-conflict", "Exactly one device retained an explicit conflict", conflictClients.length === 1, `${conflictClients.length} conflicted device`),
+        makeCheck("visible-conflict", "Exactly one device retained a reviewable conflict", conflictIndexes.length === 1 && recoveryCalloutVisible, `${conflictIndexes.length} conflicted operation · recovery callout ${recoveryCalloutVisible ? "visible" : "missing"}`),
         makeCheck("unaffected-convergence", "Non-conflicted devices received the winning edit", unaffectedConverged, `${unaffected.length} unaffected devices checked`),
         evaluateOutsiderIsolation(await outsiderSnapshot(runtime!.apiUrl)),
       ];

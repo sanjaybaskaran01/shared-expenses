@@ -101,12 +101,19 @@ export interface SplitwiseOAuthConfig {
   redirectUri: string;
 }
 
-function validatedBaseUrl(name: string, value: string, production: boolean): string {
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+}
+
+export function validatedBaseUrl(name: string, value: string, production: boolean): string {
   const parsed = new URL(value);
   if (parsed.username || parsed.password || parsed.search || parsed.hash) {
     throw new Error(`${name} cannot contain credentials, a query, or a fragment`);
   }
-  if (production && parsed.protocol !== "https:") throw new Error(`${name} must use HTTPS in production`);
+  const localHttp = parsed.protocol === "http:" && isLoopbackHostname(parsed.hostname);
+  if (production && parsed.protocol !== "https:" && !localHttp) {
+    throw new Error(`${name} must use HTTPS in production except for a loopback-only local deployment`);
+  }
   if (!production && !["http:", "https:"].includes(parsed.protocol)) throw new Error(`${name} must be HTTP or HTTPS`);
   return parsed.origin + (parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/$/, ""));
 }
@@ -177,6 +184,7 @@ export interface AppConfig {
   publicApiUrl: string;
   authSecret: string;
   devAuthBypass: boolean;
+  experimentalConfidentialSync: boolean;
   trustCloudflareProxy: boolean;
   trustedProxies: string[];
   ownerEmail?: string;
@@ -202,6 +210,7 @@ export function loadConfig(): AppConfig {
   if (nodeEnv === "production" && devAuthBypass) {
     throw new Error("DEV_AUTH_BYPASS cannot be enabled in production");
   }
+  const experimentalConfidentialSync = booleanEnv("EXPERIMENTAL_CONFIDENTIAL_SYNC", false);
   if (nodeEnv === "production") validateProductionAuthSecret(authSecret);
   const trustCloudflareProxy = booleanEnv("TRUST_CLOUDFLARE_PROXY", false);
   const trustedProxies = resolveTrustedProxies(process.env.TRUSTED_PROXY_CIDRS, trustCloudflareProxy);
@@ -253,6 +262,7 @@ export function loadConfig(): AppConfig {
     publicApiUrl,
     authSecret,
     devAuthBypass,
+    experimentalConfidentialSync,
     trustCloudflareProxy,
     trustedProxies,
     ...(ownerEmail ? { ownerEmail } : {}),

@@ -76,10 +76,46 @@ describe("server-blind confidential ledger storage", () => {
     expect(persisted).not.toContain("Ramen");
   });
 
+  test("retries a valid operation whose id is the malformed-envelope fallback", async () => {
+    const operation = await signed({ id: "unknown" });
+    const first = await store.push("alice", [operation]);
+    const retried = await store.push("alice", [operation]);
+
+    expect(first.accepted).toHaveLength(1);
+    expect(retried.duplicates).toEqual([{ id: "unknown", serverSequence: first.accepted[0]!.serverSequence }]);
+  });
+
   test("rejects tampering and callers outside the group", async () => {
     const operation = await signed();
     expect((await store.push("mallory", [operation])).rejected[0]?.code).toBe("INVALID_ENVELOPE");
     expect((await store.push("alice", [{ ...operation, ciphertext: `${operation.ciphertext}a` }])).rejected[0]?.code)
       .toBe("CONTENT_HASH_MISMATCH");
+  });
+
+  test("does not disclose a duplicate confidential operation to a non-member", async () => {
+    const operation = await signed();
+    await store.push("alice", [operation]);
+
+    expect((await store.push("mallory", [operation])).duplicates).toEqual([]);
+    expect((await store.push("mallory", [operation])).rejected[0]?.code).toBe("INVALID_ENVELOPE");
+  });
+
+  test("rejects malformed envelopes without dereferencing them", async () => {
+    const result = await store.push("alice", [null, false, 42, "operation", [], {}, { id: "incomplete" }]);
+
+    expect(result.accepted).toEqual([]);
+    expect(result.duplicates).toEqual([]);
+    expect(result.rejected).toHaveLength(7);
+    expect(result.rejected.every(({ code }) => code === "INVALID_ENVELOPE")).toBe(true);
+    expect(result.rejected.at(-1)).toEqual({ id: "incomplete", code: "INVALID_ENVELOPE" });
+  });
+
+  test("does not accept confidential writes after the group is undone", async () => {
+    db.query("UPDATE groups SET deleted_at = ? WHERE id = ?").run("2026-08-14T12:00:00.000Z", "group-1");
+
+    expect((await store.push("alice", [await signed()])).rejected).toEqual([
+      expect.objectContaining({ code: "NOT_A_GROUP_MEMBER" }),
+    ]);
+    expect(store.pull("alice", 0)).toEqual([]);
   });
 });

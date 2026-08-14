@@ -86,15 +86,25 @@ export function summarizeOperationHealth(
 
 export function settlementBlockerCount(
   expenses: readonly LocalExpense[],
+  operations: readonly LocalOperation[],
   groupId: string,
   currency: string,
 ): number {
-  return expenses.filter((expense) =>
-    expense.groupId === groupId &&
-    expense.currency === currency &&
-    expense.status === "active" &&
-    (expense.syncStatus === "conflicted" || expense.syncStatus === "rejected")
-  ).length;
+  const expensesById = new Map(
+    expenses
+      .filter((expense) => expense.groupId === groupId && expense.currency === currency)
+      .map((expense) => [expense.id, expense]),
+  );
+  return new Set(
+    operations
+      .filter((operation) =>
+        operation.groupId === groupId &&
+        expenseOperationTypes.has(operation.type) &&
+        (operation.syncStatus === "conflicted" || operation.syncStatus === "rejected") &&
+        expensesById.has(operation.targetId),
+      )
+      .map((operation) => operation.targetId),
+  ).size;
 }
 
 function previousCalendarMonth(month: string): string {
@@ -161,7 +171,13 @@ export function buildGroupInsights(
   currency: string,
   actorId: string,
 ): GroupInsights {
-  const included = expenses.filter((expense) => expense.status === "active" && expense.currency === currency);
+  const included = expenses.filter(
+    (expense) =>
+      expense.status === "active" &&
+      expense.currency === currency &&
+      expense.syncStatus !== "rejected" &&
+      expense.syncStatus !== "conflicted",
+  );
   const totalMinor = included.reduce((sum, expense) => sum + expense.amountMinor, 0);
   const yourShareMinor = included.reduce(
     (sum, expense) => sum + (expense.allocations.find((allocation) => allocation.participantId === actorId)?.amountMinor ?? 0),

@@ -21,7 +21,13 @@ export function SpendingChart(props: SpendingChartProps) {
   let root!: HTMLDivElement;
   let chart: echarts.ECharts | undefined;
   const accessibleEntries = createMemo(() => {
-    const expenses = props.expenses.filter((expense) => expense.status === "active" && expense.currency === props.currency);
+    const expenses = props.expenses.filter(
+      (expense) =>
+        expense.status === "active" &&
+        expense.currency === props.currency &&
+        expense.syncStatus !== "rejected" &&
+        expense.syncStatus !== "conflicted",
+    );
     const totals = new Map<string, number>();
     for (const expense of expenses) {
       const key = props.mode === "category" ? expense.category : expense.expenseDate.slice(0, 7);
@@ -39,7 +45,13 @@ export function SpendingChart(props: SpendingChartProps) {
 
   function render(): void {
     if (!chart) return;
-    const expenses = props.expenses.filter((expense) => expense.status === "active" && expense.currency === props.currency);
+    const expenses = props.expenses.filter(
+      (expense) =>
+        expense.status === "active" &&
+        expense.currency === props.currency &&
+        expense.syncStatus !== "rejected" &&
+        expense.syncStatus !== "conflicted",
+    );
     const styles = getComputedStyle(document.documentElement);
     const ink = styles.getPropertyValue("--chart-ink").trim() || "#21201c";
     const accent = styles.getPropertyValue("--chart-accent").trim() || "#b86645";

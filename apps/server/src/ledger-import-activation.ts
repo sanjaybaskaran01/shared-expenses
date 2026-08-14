@@ -576,6 +576,14 @@ export abstract class ImportActivationService extends ImportStagingService {
            )`,
       ).run(now, batchId);
       this.db.query(
+        `UPDATE group_members SET status = 'removed', removed_at = COALESCE(removed_at, ?)
+         WHERE status IN ('active', 'placeholder') AND group_id IN (
+           SELECT mapping.local_id FROM import_external_mappings mapping
+           JOIN groups g ON g.id = mapping.local_id AND g.deleted_at IS NOT NULL
+           WHERE mapping.batch_id = ? AND mapping.external_type = 'group'
+         )`,
+      ).run(now, batchId);
+      this.db.query(
         `UPDATE import_batches SET status = 'undone', rollback_status = 'completed', undone_at = ?
          WHERE id = ? AND imported_by = ? AND status = 'completed'`,
       ).run(now, batchId, actorId);

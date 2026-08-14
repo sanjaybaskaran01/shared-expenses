@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import type { OperationEnvelope } from "@expenses/protocol";
+import type { LocalOperation } from "../src/lib/db";
 import {
   SyncRequestQueue,
+  acceptedExpenseProjection,
   expenseFromOperation,
   eventStreamRetryDelay,
+  manifestNeedsBackfill,
   remoteProjectionSyncStatus,
+  staleSnapshotGroupIds,
   staleSnapshotMemberIds,
 } from "../src/lib/sync";
 
@@ -38,6 +42,14 @@ test("reconnects the realtime stream promptly without a hot loop", () => {
 });
 
 describe("snapshot membership reconciliation", () => {
+  test("identifies a locally cached group that is no longer authorized", () => {
+    expect(staleSnapshotGroupIds(
+      ["trip", "home", "pending-offline"],
+      new Set(["trip"]),
+      new Set(["pending-offline"]),
+    )).toEqual(["home"]);
+  });
+
   test("removes a stale member even when the group itself remains visible", () => {
     expect(staleSnapshotMemberIds(
       [
@@ -62,13 +74,83 @@ describe("snapshot membership reconciliation", () => {
   });
 });
 
+describe("sync history manifests", () => {
+  test("backfills when a newly visible group has historical operations before the global cursor", () => {
+    expect(manifestNeedsBackfill(
+      [{ groupId: "existing", syncStatus: "accepted", serverSequence: 100 }],
+      [
+        { groupId: "existing", count: 1, maxSequence: 100 },
+        { groupId: "invited", count: 3, maxSequence: 92 },
+      ],
+    )).toBe(true);
+  });
+
+  test("does not repeat a full history pull after every complete sync", () => {
+    expect(manifestNeedsBackfill(
+      [
+        { groupId: "existing", syncStatus: "accepted", serverSequence: 99 },
+        { groupId: "existing", syncStatus: "accepted", serverSequence: 100 },
+        { groupId: "invited", syncStatus: "accepted", serverSequence: 15 },
+        { groupId: "invited", syncStatus: "accepted", serverSequence: 91 },
+        { groupId: "invited", syncStatus: "accepted", serverSequence: 92 },
+      ],
+      [
+        { groupId: "existing", count: 2, maxSequence: 100 },
+        { groupId: "invited", count: 3, maxSequence: 92 },
+      ],
+    )).toBe(false);
+  });
+});
+
 describe("remote expense projection", () => {
-  test("keeps reviewable local outcomes visible when the canonical projection arrives", () => {
-    expect(remoteProjectionSyncStatus("conflicted")).toBe("conflicted");
-    expect(remoteProjectionSyncStatus("rejected")).toBe("rejected");
+  test("uses accepted state for a canonical remote projection", () => {
+    expect(remoteProjectionSyncStatus("conflicted")).toBe("accepted");
+    expect(remoteProjectionSyncStatus("rejected")).toBe("accepted");
     expect(remoteProjectionSyncStatus("pending")).toBe("accepted");
     expect(remoteProjectionSyncStatus("accepted")).toBe("accepted");
     expect(remoteProjectionSyncStatus(undefined)).toBe("accepted");
+  });
+
+  test("restores the accepted expense projection after an optimistic void is rejected", () => {
+    const created = {
+      id: "created",
+      groupId: "group-1",
+      actorId: "a",
+      deviceId: "device-a",
+      type: "ExpenseCreated",
+      targetId: "expense-1",
+      baseVersion: 0,
+      clientTimestamp: "2026-07-25T00:00:00.000Z",
+      serverSequence: 1,
+      payload: {
+        description: "Dinner",
+        category: "Dining out",
+        amountMinor: 1000,
+        currency: "USD",
+        expenseDate: "2026-07-25",
+        notes: "",
+        payers: [{ participantId: "a", amountMinor: 1000 }],
+        allocations: [{ participantId: "a", amountMinor: 500 }, { participantId: "b", amountMinor: 500 }],
+      },
+      contentHash: "0".repeat(64),
+      signature: "signature",
+      syncStatus: "accepted",
+    } satisfies LocalOperation;
+    const rejectedVoid = {
+      ...created,
+      id: "rejected-void",
+      type: "ExpenseVoided",
+      baseVersion: 1,
+      clientTimestamp: "2026-07-25T01:00:00.000Z",
+      syncStatus: "rejected",
+    } satisfies LocalOperation;
+
+    expect(acceptedExpenseProjection([created, rejectedVoid], "expense-1", "a")).toMatchObject({
+      id: "expense-1",
+      status: "active",
+      version: 1,
+      syncStatus: "accepted",
+    });
   });
 
   test("calculates the balance for the current user, not the operation author", () => {

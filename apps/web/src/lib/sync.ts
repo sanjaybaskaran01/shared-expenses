@@ -15,6 +15,32 @@ export function staleSnapshotMemberIds(
     .map(({ id }) => id);
 }
 
+export function staleSnapshotGroupIds(
+  localGroupIds: readonly string[],
+  remoteGroupIds: ReadonlySet<string>,
+  pendingGroupIds: ReadonlySet<string>,
+): string[] {
+  return localGroupIds.filter((id) => !remoteGroupIds.has(id) && !pendingGroupIds.has(id));
+}
+
+export function manifestNeedsBackfill(
+  localOperations: ReadonlyArray<Pick<LocalOperation, "groupId" | "syncStatus" | "serverSequence">>,
+  remoteGroups: ReadonlyArray<{ groupId: string; count: number; maxSequence: number }>,
+): boolean {
+  const localByGroup = new Map<string, { count: number; maxSequence: number }>();
+  for (const operation of localOperations) {
+    if (operation.syncStatus !== "accepted") continue;
+    const current = localByGroup.get(operation.groupId) ?? { count: 0, maxSequence: 0 };
+    current.count += 1;
+    current.maxSequence = Math.max(current.maxSequence, operation.serverSequence ?? 0);
+    localByGroup.set(operation.groupId, current);
+  }
+  return remoteGroups.some((group) => {
+    const local = localByGroup.get(group.groupId) ?? { count: 0, maxSequence: 0 };
+    return local.count !== group.count || local.maxSequence !== group.maxSequence;
+  });
+}
+
 export function expenseFromOperation(
   operation: OperationEnvelope,
   syncStatus: LocalOperation["syncStatus"],
@@ -65,9 +91,70 @@ export function expenseFromOperation(
 }
 
 export function remoteProjectionSyncStatus(
-  currentStatus: LocalExpense["syncStatus"] | undefined,
+  _currentStatus: LocalExpense["syncStatus"] | undefined,
 ): LocalExpense["syncStatus"] {
-  return currentStatus === "conflicted" || currentStatus === "rejected" ? currentStatus : "accepted";
+  // A server operation is canonical. Failed local operations remain in the
+  // activity log for review instead of tainting the projection they lost to.
+  return "accepted";
+}
+
+const expenseProjectionOperationTypes = new Set([
+  "ExpenseCreated",
+  "ExpenseAmended",
+  "ExpenseVoided",
+  "ExpenseRestored",
+]);
+
+export function acceptedExpenseProjection(
+  operations: readonly LocalOperation[],
+  targetId: string,
+  currentActorId: string,
+  participantAliases: ReadonlyMap<string, string> = new Map(),
+): LocalExpense | undefined {
+  let projection: LocalExpense | undefined;
+  const accepted = operations
+    .filter((operation) =>
+      operation.targetId === targetId &&
+      operation.syncStatus === "accepted" &&
+      expenseProjectionOperationTypes.has(operation.type),
+    )
+    .slice()
+    .sort((left, right) =>
+      (left.serverSequence ?? Number.MAX_SAFE_INTEGER) - (right.serverSequence ?? Number.MAX_SAFE_INTEGER) ||
+      left.clientTimestamp.localeCompare(right.clientTimestamp) ||
+      left.id.localeCompare(right.id),
+    );
+  for (const operation of accepted) {
+    const next = expenseFromOperation(operation, "accepted", currentActorId, projection?.createdBy, participantAliases);
+    if (next) {
+      projection = next;
+    } else if (projection && (operation.type === "ExpenseVoided" || operation.type === "ExpenseRestored")) {
+      projection = {
+        ...projection,
+        status: operation.type === "ExpenseVoided" ? "voided" : "active",
+        version: operation.baseVersion + 1,
+        updatedAt: operation.receivedAt ?? operation.clientTimestamp,
+        syncStatus: "accepted",
+      };
+    }
+  }
+  return projection;
+}
+
+async function restoreCanonicalExpense(
+  operation: LocalOperation,
+  currentActorId: string,
+  participantAliases: ReadonlyMap<string, string>,
+): Promise<void> {
+  if (!expenseProjectionOperationTypes.has(operation.type)) return;
+  const projection = acceptedExpenseProjection(
+    await localDb.operations.where("targetId").equals(operation.targetId).toArray(),
+    operation.targetId,
+    currentActorId,
+    participantAliases,
+  );
+  if (projection) await localDb.expenses.put(projection);
+  else await localDb.expenses.update(operation.targetId, { syncStatus: operation.syncStatus });
 }
 
 async function applyRemoteBatch(
@@ -217,19 +304,35 @@ export class SyncEngine {
       );
       const knownGeneration = String((await localDb.settings.get("generation"))?.value ?? "");
       const recovering = Boolean(knownGeneration && knownGeneration !== snapshot.manifest.generation);
-      await localDb.transaction("rw", localDb.groups, localDb.members, localDb.operations, async () => {
+      await localDb.transaction(
+        "rw",
+        [
+          localDb.groups,
+          localDb.members,
+          localDb.operations,
+          localDb.expenses,
+          localDb.confidentialOperations,
+          localDb.groupKeyEnvelopes,
+        ],
+        async () => {
         const remoteGroupIds = new Set(snapshot.groups.map(({ id }) => id));
         const pendingGroupIds = new Set(
           (await localDb.operations.where("syncStatus").equals("pending").toArray())
             .filter(({ type }) => type === "GroupCreated")
             .map(({ groupId }) => groupId),
         );
-        const removedGroupIds = (await localDb.groups.toArray())
-          .map(({ id }) => id)
-          .filter((id) => !remoteGroupIds.has(id) && !pendingGroupIds.has(id));
+        const removedGroupIds = staleSnapshotGroupIds(
+          (await localDb.groups.toArray()).map(({ id }) => id),
+          remoteGroupIds,
+          pendingGroupIds,
+        );
         if (removedGroupIds.length > 0) {
           await localDb.groups.bulkDelete(removedGroupIds);
           await localDb.members.where("groupId").anyOf(removedGroupIds).delete();
+          await localDb.operations.where("groupId").anyOf(removedGroupIds).delete();
+          await localDb.expenses.where("groupId").anyOf(removedGroupIds).delete();
+          await localDb.confidentialOperations.where("groupId").anyOf(removedGroupIds).delete();
+          await localDb.groupKeyEnvelopes.where("groupId").anyOf(removedGroupIds).delete();
         }
         const staleMemberIds = staleSnapshotMemberIds(
           await localDb.members.toArray(),
@@ -250,6 +353,10 @@ export class SyncEngine {
           })),
         );
       });
+      const needsManifestBackfill = manifestNeedsBackfill(
+        await localDb.operations.toArray(),
+        snapshot.manifest.groups,
+      );
       if (participantAliases.size > 0) {
         const visibleGroupIds = new Set(snapshot.groups.map(({ id }) => id));
         const acceptedOperations = (await localDb.operations.toArray())
@@ -295,18 +402,29 @@ export class SyncEngine {
           for (const conflict of result.conflicts) {
             await localDb.operations.update(conflict.id, { syncStatus: "conflicted", errorCode: "CONFLICT" });
             const operation = await localDb.operations.get(conflict.id);
-            if (operation) await localDb.expenses.update(operation.targetId, { syncStatus: "conflicted" });
+            if (operation) {
+              operation.syncStatus = "conflicted";
+              await restoreCanonicalExpense(operation, device.actorId, participantAliases);
+            }
           }
           for (const rejected of result.rejected) {
-            await localDb.operations.update(rejected.id, { syncStatus: "rejected", errorCode: rejected.code });
+            await localDb.operations.update(rejected.id, {
+              syncStatus: "rejected",
+              errorCode: rejected.code,
+              errorMessage: rejected.message,
+            });
             const operation = await localDb.operations.get(rejected.id);
-            if (operation) await localDb.expenses.update(operation.targetId, { syncStatus: "rejected" });
+            if (operation) {
+              operation.syncStatus = "rejected";
+              await restoreCanonicalExpense(operation, device.actorId, participantAliases);
+            }
           }
         });
       }
 
-      const storedCursor = recovering ? undefined : await localDb.settings.get("serverSequence");
-      let cursor = recovering ? 0 : Number(storedCursor?.value ?? 0);
+      const needsBackfill = recovering || needsManifestBackfill;
+      const storedCursor = needsBackfill ? undefined : await localDb.settings.get("serverSequence");
+      let cursor = needsBackfill ? 0 : Number(storedCursor?.value ?? 0);
       let generation = snapshot.manifest.generation;
       const foregroundOperations: OperationEnvelope[] = [];
       const previousExpenseNetMinor = new Map<string, number>();

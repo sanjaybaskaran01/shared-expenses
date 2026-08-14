@@ -7,7 +7,7 @@ Tallied has two data paths:
 | Path | Status | Server can read expense content? | Used by the current UI? |
 |---|---|---:|---:|
 | v1 signed ledger | Production-shaped | Yes | Yes |
-| v2 confidential ledger | Implemented foundation | Not from stored ciphertext alone | Not yet |
+| v2 confidential ledger | Experimental, disabled by default | Not from stored ciphertext alone | Not yet |
 
 Authentication and group authorization protect both paths from anonymous and unrelated-account reads. That is different from end-to-end encryption: an operator with database or process access can read v1 projections and operation payloads.
 
@@ -32,7 +32,7 @@ The handoff fails closed. A forwarded untrusted import claim grants no data befo
 - Ciphertext metadata and hashes are signed by the sending device. The server verifies membership and signatures without decrypting content.
 - A key envelope is immutable within a group, epoch, and recipient device. Membership removal requires a new epoch and new envelopes for remaining devices.
 
-The implementation lives in the protocol package, browser crypto library, v2 API routes, and confidential database tables. It deliberately does not reinterpret old plaintext operations as encrypted data.
+The implementation lives in the protocol package, browser crypto library, v2 API routes, and confidential database tables. It deliberately does not reinterpret old plaintext operations as encrypted data. The v2 routes return `404` unless an operator explicitly sets `EXPERIMENTAL_CONFIDENTIAL_SYNC=true`; that flag only opens the experimental server boundary and does not migrate or enable the shipped UI. Keep it disabled on production instances until the migration gates below are complete.
 
 ## Important limits
 

@@ -1,6 +1,4 @@
 import type {
-  ConfidentialOperationEnvelope,
-  GroupKeyEnvelope,
   ImportActivationResult,
   ImportBatchCommitRequest,
   ImportBatchSummary,
@@ -106,7 +104,11 @@ export interface RemoteSnapshot {
       status: "unclaimed" | "reserved" | "awaiting_owner";
     };
   }>;
-  manifest: { generation: string; latestServerSequence: number };
+  manifest: {
+    generation: string;
+    latestServerSequence: number;
+    groups: Array<{ groupId: string; count: number; maxSequence: number }>;
+  };
   participantAliases?: Array<{ groupId: string; fromUserId: string; toUserId: string }>;
 }
 
@@ -276,14 +278,6 @@ export async function activateStagedImport(batchId: string): Promise<ImportActiv
     if (recovered) return { batch: recovered, duplicate: true, accepted: [] };
     throw error;
   }
-}
-
-export async function activateImport(body: ImportBatchCommitRequest): Promise<ImportActivationResult> {
-  const staged = await stageImport(body);
-  if (staged.status === "activated" && staged.completedBatch) {
-    return { batch: staged.completedBatch, duplicate: true, accepted: [] };
-  }
-  return activateStagedImport(body.id);
 }
 
 export async function undoImport(
@@ -539,42 +533,4 @@ export function pullOperations(after: number): Promise<{
   latestServerSequence: number;
 }> {
   return apiFetch(`/api/v1/sync/pull?after=${after}`);
-}
-
-export function getConfidentialGroupDevices(groupId: string): Promise<{
-  devices: Array<{ id: string; userId: string; encryptionPublicKeyJwk: JsonWebKey }>;
-}> {
-  return apiFetch(`/api/v2/groups/${encodeURIComponent(groupId)}/devices`);
-}
-
-export function putGroupKeyEnvelope(groupId: string, envelope: GroupKeyEnvelope): Promise<{
-  status: "created" | "duplicate";
-}> {
-  return apiFetch(`/api/v2/groups/${encodeURIComponent(groupId)}/key-envelopes`, {
-    method: "POST",
-    body: JSON.stringify({ envelope }),
-  });
-}
-
-export function getGroupKeyEnvelopes(groupId: string): Promise<{ envelopes: GroupKeyEnvelope[] }> {
-  return apiFetch(`/api/v2/groups/${encodeURIComponent(groupId)}/key-envelopes`);
-}
-
-export function pushConfidentialOperations(operations: ConfidentialOperationEnvelope[]): Promise<{
-  accepted: Array<{ id: string; serverSequence: number }>;
-  duplicates: Array<{ id: string; serverSequence: number }>;
-  rejected: Array<{ id: string; code: string }>;
-  latestServerSequence: number;
-}> {
-  return apiFetch("/api/v2/sync/push", {
-    method: "POST",
-    body: JSON.stringify({ operations }),
-  });
-}
-
-export function pullConfidentialOperations(after: number): Promise<{
-  operations: ConfidentialOperationEnvelope[];
-  latestServerSequence: number;
-}> {
-  return apiFetch(`/api/v2/sync/pull?after=${after}`);
 }

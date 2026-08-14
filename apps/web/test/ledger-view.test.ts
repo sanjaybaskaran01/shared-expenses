@@ -47,6 +47,24 @@ describe("ledger presentation", () => {
     expect(result).toEqual({ a: 3000, b: -1000, c: -2000 });
   });
 
+  test("does not remove a server payment when its optimistic reversal is rejected", () => {
+    const rejectedReversal = {
+      ...payment,
+      id: "rejected-payment-reversal",
+      type: "PaymentReversed",
+      baseVersion: 1,
+      syncStatus: "rejected",
+    } satisfies LocalOperation;
+
+    expect(computeBalances([], [payment, rejectedReversal], "group-1", "USD"))
+      .toEqual({ a: -1000, b: 1000 });
+  });
+
+  test("does not count a rejected optimistic expense toward balances", () => {
+    expect(computeBalances([{ ...expense, syncStatus: "rejected" }], [], "group-1", "USD"))
+      .toEqual({});
+  });
+
   test("applies balance-only imports without treating them as expenses", () => {
     const imported = {
       ...payment,
@@ -63,6 +81,33 @@ describe("ledger presentation", () => {
       },
     } satisfies LocalOperation;
     expect(computeBalances([], [imported], "group-1", "USD")).toEqual({ a: 750, "import:mira": -750 });
+  });
+
+  test("does not remove an imported balance when its optimistic undo is rejected", () => {
+    const imported = {
+      ...payment,
+      id: "imported-effect-operation",
+      type: "ImportedTransactionRecorded",
+      targetId: "imported-effect-1",
+      payload: {
+        currency: "USD",
+        effects: [
+          { participantId: "a", amountMinor: 750 },
+          { participantId: "import:mira", amountMinor: -750 },
+        ],
+        import: { readOnly: true },
+      },
+    } satisfies LocalOperation;
+    const rejectedUndo = {
+      ...imported,
+      id: "rejected-import-undo",
+      type: "ImportedTransactionVoided",
+      baseVersion: 1,
+      syncStatus: "conflicted",
+    } satisfies LocalOperation;
+
+    expect(computeBalances([], [imported, rejectedUndo], "group-1", "USD"))
+      .toEqual({ a: 750, "import:mira": -750 });
   });
 
   test("reprojects immutable imported effects after a person securely claims them", () => {

@@ -12,7 +12,12 @@ export function latestExpenseChange(
   expenseId: string,
 ): LocalOperation | undefined {
   return operations
-    .filter((operation) => operation.targetId === expenseId && expenseChangeTypes.has(operation.type))
+    .filter((operation) =>
+      operation.targetId === expenseId &&
+      expenseChangeTypes.has(operation.type) &&
+      operation.syncStatus !== "rejected" &&
+      operation.syncStatus !== "conflicted",
+    )
     .slice()
     .sort((left, right) => left.clientTimestamp.localeCompare(right.clientTimestamp) || left.id.localeCompare(right.id))
     .at(-1);

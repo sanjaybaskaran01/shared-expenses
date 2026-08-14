@@ -14,6 +14,7 @@ function testContext(options: {
   return {
     config: {
       nodeEnv: "test",
+      experimentalConfidentialSync: false,
       trustCloudflareProxy: false,
       trustedProxies: [],
     },
@@ -86,6 +87,24 @@ describe("API router trust boundary", () => {
       expect((await router(request, new URL(request.url), "127.0.0.1")).status).toBe(401);
     }
     expect(actorChecks).toBe(6);
+  });
+
+  test("keeps disabled experimental confidential routes unavailable before the actor gate", async () => {
+    let actorChecks = 0;
+    const context = testContext({
+      requireActor: async () => {
+        actorChecks += 1;
+        return "verified-user";
+      },
+    });
+    const router = createApiRouter(context);
+    const request = new Request("https://api.example.com/api/v2/sync/pull");
+
+    const response = await router(request, new URL(request.url), "127.0.0.1");
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: { code: "NOT_FOUND", message: "Not found" } });
+    expect(actorChecks).toBe(0);
   });
 
   test("returns not found only after an authenticated unknown route passes the gate", async () => {

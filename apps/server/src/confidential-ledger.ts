@@ -68,7 +68,9 @@ export class ConfidentialLedgerStore {
 
   private activeMember(groupId: string, userId: string): boolean {
     return Boolean(this.db.query<{ one: number }, [string, string]>(
-      "SELECT 1 AS one FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'active'",
+      `SELECT 1 AS one FROM group_members gm
+       JOIN groups g ON g.id = gm.group_id AND g.deleted_at IS NULL
+       WHERE gm.group_id = ? AND gm.user_id = ? AND gm.status = 'active'`,
     ).get(groupId, userId));
   }
 
@@ -81,32 +83,38 @@ export class ConfidentialLedgerStore {
 
   private async validateOperation(
     actorId: string,
-    operation: ConfidentialOperationEnvelope,
+    operation: unknown,
   ): Promise<string | null> {
+    if (!operation || typeof operation !== "object" || Array.isArray(operation)) return "INVALID_ENVELOPE";
+    const envelope = operation as Partial<ConfidentialOperationEnvelope>;
     if (
-      operation.version !== 1 ||
-      typeof operation.id !== "string" || operation.id.length < 1 || operation.id.length > 100 ||
-      typeof operation.groupId !== "string" || operation.groupId.length < 1 || operation.groupId.length > 100 ||
-      typeof operation.actorId !== "string" || operation.actorId !== actorId ||
-      typeof operation.deviceId !== "string" || operation.deviceId.length < 1 || operation.deviceId.length > 100 ||
-      !Number.isSafeInteger(operation.keyEpoch) || operation.keyEpoch < 1 ||
-      !Number.isFinite(Date.parse(operation.clientTimestamp)) ||
-      !compactBase64Url(operation.iv, 64) ||
-      !compactBase64Url(operation.ciphertext, 1_000_000) ||
-      !/^[a-f0-9]{64}$/.test(operation.contentHash) ||
-      !compactBase64Url(operation.signature, 512)
+      envelope.version !== 1 ||
+      typeof envelope.id !== "string" || envelope.id.length < 1 || envelope.id.length > 100 ||
+      typeof envelope.groupId !== "string" || envelope.groupId.length < 1 || envelope.groupId.length > 100 ||
+      typeof envelope.actorId !== "string" || envelope.actorId !== actorId ||
+      typeof envelope.deviceId !== "string" || envelope.deviceId.length < 1 || envelope.deviceId.length > 100 ||
+      typeof envelope.keyEpoch !== "number" || !Number.isSafeInteger(envelope.keyEpoch) || envelope.keyEpoch < 1 ||
+      typeof envelope.clientTimestamp !== "string" || !Number.isFinite(Date.parse(envelope.clientTimestamp)) ||
+      !compactBase64Url(envelope.iv, 64) ||
+      !compactBase64Url(envelope.ciphertext, 1_000_000) ||
+      typeof envelope.contentHash !== "string" || !/^[a-f0-9]{64}$/.test(envelope.contentHash) ||
+      !compactBase64Url(envelope.signature, 512)
     ) return "INVALID_ENVELOPE";
-    if (!this.activeMember(operation.groupId, actorId)) return "NOT_A_GROUP_MEMBER";
-    const device = this.device(operation.deviceId);
+    if (!this.activeMember(envelope.groupId, actorId)) return "NOT_A_GROUP_MEMBER";
+    const device = this.device(envelope.deviceId);
     if (!device || device.status !== "active" || device.user_id !== actorId) return "UNTRUSTED_DEVICE";
-    const expectedHash = await confidentialOperationContentHash(operation);
-    if (expectedHash !== operation.contentHash) return "CONTENT_HASH_MISMATCH";
-    return await verifyDeviceSignature(JSON.parse(device.public_key_jwk), expectedHash, operation.signature)
-      ? null
-      : "INVALID_SIGNATURE";
+    try {
+      const expectedHash = await confidentialOperationContentHash(envelope as ConfidentialOperationEnvelope);
+      if (expectedHash !== envelope.contentHash) return "CONTENT_HASH_MISMATCH";
+      return await verifyDeviceSignature(JSON.parse(device.public_key_jwk), expectedHash, envelope.signature)
+        ? null
+        : "INVALID_SIGNATURE";
+    } catch {
+      return "INVALID_ENVELOPE";
+    }
   }
 
-  async push(actorId: string, operations: ConfidentialOperationEnvelope[]): Promise<{
+  async push(actorId: string, operations: readonly unknown[]): Promise<{
     accepted: Array<{ id: string; serverSequence: number }>;
     duplicates: Array<{ id: string; serverSequence: number }>;
     rejected: Array<{ id: string; code: string }>;
@@ -115,7 +123,17 @@ export class ConfidentialLedgerStore {
     const accepted: Array<{ id: string; serverSequence: number }> = [];
     const duplicates: Array<{ id: string; serverSequence: number }> = [];
     const rejected: Array<{ id: string; code: string }> = [];
-    for (const operation of operations.slice(0, 100)) {
+    for (const candidate of operations.slice(0, 100)) {
+      const rejectedId = candidate && typeof candidate === "object" && !Array.isArray(candidate) &&
+        typeof (candidate as { id?: unknown }).id === "string"
+        ? (candidate as { id: string }).id
+        : "unknown";
+      const code = await this.validateOperation(actorId, candidate);
+      if (code) {
+        rejected.push({ id: rejectedId, code });
+        continue;
+      }
+      const operation = candidate as ConfidentialOperationEnvelope;
       const existing = this.db.query<{ server_sequence: number; content_hash: string }, [string]>(
         "SELECT server_sequence, content_hash FROM confidential_operations WHERE id = ?",
       ).get(operation.id);
@@ -125,11 +143,6 @@ export class ConfidentialLedgerStore {
         } else {
           rejected.push({ id: operation.id, code: "OPERATION_ID_REUSED" });
         }
-        continue;
-      }
-      const code = await this.validateOperation(actorId, operation);
-      if (code) {
-        rejected.push({ id: operation.id || "unknown", code });
         continue;
       }
       const receivedAt = new Date().toISOString();
@@ -166,6 +179,7 @@ export class ConfidentialLedgerStore {
       `SELECT COALESCE(MAX(co.server_sequence), 0) AS sequence
        FROM confidential_operations co
        JOIN group_members gm ON gm.group_id = co.group_id
+       JOIN groups g ON g.id = co.group_id AND g.deleted_at IS NULL
        WHERE gm.user_id = ? AND gm.status = 'active'`,
     ).get(actorId)?.sequence ?? 0;
   }
@@ -174,6 +188,7 @@ export class ConfidentialLedgerStore {
     return this.db.query<ConfidentialOperationRow, [string, number]>(
       `SELECT co.* FROM confidential_operations co
        JOIN group_members gm ON gm.group_id = co.group_id
+       JOIN groups g ON g.id = co.group_id AND g.deleted_at IS NULL
        WHERE gm.user_id = ? AND gm.status = 'active' AND co.server_sequence > ?
        ORDER BY co.server_sequence LIMIT 500`,
     ).all(actorId, after).map((row) => ({

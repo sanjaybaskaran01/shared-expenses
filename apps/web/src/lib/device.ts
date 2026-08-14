@@ -1,13 +1,7 @@
-import { operationContentHash, type JsonValue, type OperationEnvelope, type UnsignedOperation } from "@expenses/protocol";
 import { localDb, type DeviceRecord } from "./db";
 import { generateAgreementKeyPair } from "./confidential";
 
-function encodeBase64Url(buffer: ArrayBuffer): string {
-  return btoa(String.fromCharCode(...new Uint8Array(buffer)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
+export { signOperation } from "./operation-signing";
 
 export async function ensureDevice(actorId?: string): Promise<DeviceRecord> {
   const existing = await localDb.devices.get("current");
@@ -59,17 +53,4 @@ export async function ensureDevice(actorId?: string): Promise<DeviceRecord> {
   };
   await localDb.devices.add(record);
   return record;
-}
-
-export async function signOperation<TPayload extends JsonValue>(
-  operation: UnsignedOperation<TPayload>,
-  privateKey: CryptoKey,
-): Promise<OperationEnvelope<TPayload>> {
-  const contentHash = await operationContentHash(operation);
-  const signature = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    privateKey,
-    new TextEncoder().encode(contentHash),
-  );
-  return { ...operation, contentHash, signature: encodeBase64Url(signature) };
 }

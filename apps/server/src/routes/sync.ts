@@ -34,7 +34,13 @@ export async function handleSyncRoutes(
     }
     if (result.accepted.length > 0) {
       const acceptedIds = new Set(result.accepted.map(({ id }) => id));
-      const groupIds = body.operations.filter(({ id }) => acceptedIds.has(id)).map(({ groupId }) => groupId);
+      const groupIds = body.operations.flatMap((operation) => {
+        if (!operation || typeof operation !== "object" || Array.isArray(operation)) return [];
+        const candidate = operation as { id?: unknown; groupId?: unknown };
+        return typeof candidate.id === "string" && acceptedIds.has(candidate.id) && typeof candidate.groupId === "string"
+          ? [candidate.groupId]
+          : [];
+      });
       for (const memberId of ledger.activeMemberIdsForGroups(groupIds)) {
         publish(memberId, ledger.latestSequenceFor(memberId));
       }
@@ -53,6 +59,13 @@ export async function handleSyncRoutes(
 
   if (url.pathname === "/api/v1/sync/manifest" && request.method === "GET") {
     return json(request, ledger.manifest(actorId));
+  }
+
+  // The v2 store is retained for explicitly opted-in cryptography work. The
+  // current product never calls it, so keep its externally reachable surface
+  // closed until the full client migration is ready to ship.
+  if (url.pathname.startsWith("/api/v2/") && !context.config.experimentalConfidentialSync) {
+    return error(request, 404, "NOT_FOUND", "Not found");
   }
 
   if (url.pathname === "/api/v2/sync/push" && request.method === "POST") {
@@ -109,9 +122,11 @@ export async function handleSyncRoutes(
     return new Response(context.createEventStream(actorId), {
       headers: {
         ...http.corsHeaders(request),
+        ...http.securityHeaders(),
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
       },
     });
   }

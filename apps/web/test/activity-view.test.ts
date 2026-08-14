@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { groupTimelineItems, paymentActivityDetails } from "../src/lib/activity-view";
+import { groupTimelineItems, paymentActivityDetails, restoreExpenseFailureMessage } from "../src/lib/activity-view";
 import type { LocalExpense, LocalOperation } from "../src/lib/db";
 
 describe("activity payment details", () => {
@@ -13,6 +13,14 @@ describe("activity payment details", () => {
   test("ignores unrelated or malformed operations", () => {
     expect(paymentActivityDetails({ type: "ExpenseCreated", payload: {} })).toBeUndefined();
     expect(paymentActivityDetails({ type: "PaymentRecorded", payload: { amountMinor: 0 } })).toBeUndefined();
+  });
+});
+
+describe("restore feedback", () => {
+  test("keeps a useful restore error and falls back to recovery guidance", () => {
+    expect(restoreExpenseFailureMessage(new Error("You no longer have access to this group."))).toBe("You no longer have access to this group.");
+    expect(restoreExpenseFailureMessage(new Error("  "))).toBe("Unable to restore this expense. Try again.");
+    expect(restoreExpenseFailureMessage(undefined)).toBe("Unable to restore this expense. Try again.");
   });
 });
 

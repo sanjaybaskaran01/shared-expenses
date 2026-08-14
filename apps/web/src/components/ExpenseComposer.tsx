@@ -13,7 +13,7 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "so
 import type { LocalExpense } from "../lib/db";
 import { isLocalToday, localDateValue } from "../lib/dates";
 import { initialExpenseEntryMode, initialExpenseFocusTarget, shouldDismissKeyboardForPanel, type ExpenseEntryMode } from "../lib/expense-composer-state";
-import { validateExpenseForm, type ExpenseFormIssue } from "../lib/expense-form";
+import { normalizeExpenseAmountInput, validateExpenseForm, type ExpenseFormIssue } from "../lib/expense-form";
 import { EXPENSE_CATEGORIES, suggestExpenseCategory } from "../lib/expense-categories";
 import { parseExpenseLanguage, type ExpenseLanguageChip, type ExpenseLanguageIssue, type ParsedExpenseLanguage } from "../lib/expense-language";
 import { describeExpenseOutcome } from "../lib/group-insights";
@@ -111,6 +111,10 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   let categorySelectRef: HTMLSelectElement | undefined;
 
   const currentGroup = createMemo(() => appStore.groups().find((group) => group.id === groupId()));
+  // Keep what the person is typing intact until the number is unambiguous
+  // (for example, `1,00` may still become either 1.00 or 1,000). Every
+  // calculation and save uses the safe canonical form instead.
+  const normalizedAmount = createMemo(() => normalizeExpenseAmountInput(amount()));
   const groupMembers = createMemo(() => appStore.members().filter((member) => member.groupId === groupId() && isVisibleGroupMember(member.status)));
   const languageDraft = createMemo(() => {
     const text = languageText().trim();
@@ -325,7 +329,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
 
   const allocations = createMemo(() => {
     try {
-      return calculateExpenseAllocations({ amount: amount(), participantIds: participants(), splitMethod: splitMethod(), splitValues: splitValues() });
+      return calculateExpenseAllocations({ amount: normalizedAmount(), participantIds: participants(), splitMethod: splitMethod(), splitValues: splitValues() });
     } catch {
       return [];
     }
@@ -333,7 +337,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
 
   const payers = createMemo(() => {
     try {
-      return calculateExpensePayers({ amount: amount(), payerIds: payerIds(), payerValues: payerValues() });
+      return calculateExpensePayers({ amount: normalizedAmount(), payerIds: payerIds(), payerValues: payerValues() });
     } catch {
       return [];
     }
@@ -388,7 +392,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       return;
     }
     try {
-      const equal = calculateExpenseAllocations({ amount: amount(), participantIds: ids, splitMethod: "equal", splitValues: {} });
+      const equal = calculateExpenseAllocations({ amount: normalizedAmount(), participantIds: ids, splitMethod: "equal", splitValues: {} });
       setSplitValues(Object.fromEntries(equal.map((item) => [item.participantId, (item.amountMinor / 100).toFixed(2)])));
     } catch {
       setSplitValues(Object.fromEntries(ids.map((id) => [id, "0.00"])));
@@ -404,7 +408,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
     }
     setPayerIds(ids);
     try {
-      const equal = calculateExpenseAllocations({ amount: amount(), participantIds: ids, splitMethod: "equal", splitValues: {} });
+      const equal = calculateExpenseAllocations({ amount: normalizedAmount(), participantIds: ids, splitMethod: "equal", splitValues: {} });
       setPayerValues(Object.fromEntries(equal.map((item) => [item.participantId, minorInput(item.amountMinor)])));
     } catch {
       setPayerValues(Object.fromEntries(ids.map((id) => [id, "0.00"])));
@@ -432,11 +436,15 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
   }
 
   function updateAmount(value: string): void {
-    const normalized = value.replace(/,/g, ".").replace(/[^\d.]/g, "");
-    const [whole = "", ...decimalParts] = normalized.split(".");
-    const next = decimalParts.length ? `${whole.slice(0, 7)}.${decimalParts.join("").slice(0, 2)}` : whole.slice(0, 7);
-    setAmount(next);
+    setAmount(value.replace(/[^\d.,]/g, "").slice(0, 32));
     if (splitMethod() !== "equal") initializeValues(splitMethod());
+  }
+
+  function clearAmountIssue(): void {
+    if (formIssue()?.field === "amount") {
+      setFormIssue(undefined);
+      setError("");
+    }
   }
 
   function panelTrigger(panel: Exclude<ComposerPanel, "none">): HTMLButtonElement | undefined {
@@ -474,7 +482,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
 
   const exactLeftoverMinor = createMemo(() => {
     if (splitMethod() !== "exact") return 0;
-    const totalMinor = Math.round((Number(amount()) || 0) * 100);
+    const totalMinor = Math.round((Number(normalizedAmount()) || 0) * 100);
     const assigned = participants().reduce((sum, id) => sum + Math.round((Number(splitValues()[id]) || 0) * 100), 0);
     return totalMinor - assigned;
   });
@@ -500,7 +508,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
     const editingExpense = props.expense;
     setError("");
     const issue = validateExpenseForm({
-      amount: amount(),
+      amount: normalizedAmount(),
       description: description(),
       payersValid: payers().length > 0,
       allocationsValid: allocations().length > 0,
@@ -529,7 +537,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
       const input = {
         groupId: groupId(),
         description: description(),
-        amount: amount(),
+        amount: normalizedAmount(),
         currency: currency(),
         category: category(),
         expenseDate: date(),
@@ -694,7 +702,17 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                     value={amount()}
                     onInput={(event) => {
                       updateAmount(event.currentTarget.value);
-                      if (formIssue()?.field === "amount") { setFormIssue(undefined); setError(""); }
+                      clearAmountIssue();
+                    }}
+                    onPaste={(event) => {
+                      event.preventDefault();
+                      const input = event.currentTarget;
+                      const selectionStart = input.selectionStart ?? input.value.length;
+                      const selectionEnd = input.selectionEnd ?? selectionStart;
+                      const pasted = event.clipboardData?.getData("text") ?? "";
+                      const nextValue = `${input.value.slice(0, selectionStart)}${pasted}${input.value.slice(selectionEnd)}`;
+                      updateAmount(normalizeExpenseAmountInput(nextValue));
+                      clearAmountIssue();
                     }}
                     inputmode="decimal"
                     enterkeyhint="next"
@@ -765,7 +783,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
                 </section>
               </Show>
 
-              <Show when={Number(amount()) > 0 && payers().length > 0 && allocations().length > 0}>
+              <Show when={Number(normalizedAmount()) > 0 && payers().length > 0 && allocations().length > 0}>
                 <section class="expense-outcome" aria-label="Effect of this expense">
                   <div><span>Your balance change</span><strong>{outcomeHeadline()}</strong></div>
                   <p>You paid {formatMinor(outcome().actorPaidMinor, currency())} · your share is {formatMinor(outcome().actorShareMinor, currency())}</p>
@@ -843,7 +861,7 @@ export function ExpenseComposer(props: ExpenseComposerProps) {
               <Show when={error()}><p id="expense-form-error" class="error-callout" role="alert">{error()}</p></Show>
               <footer class="sticky bottom-0 z-10 -mx-4 mt-1 grid gap-2 border-t border-border bg-card/95 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur sm:-mx-6 sm:px-6">
                 <Button class="h-11 w-full" type="submit" disabled={saving()}>
-                  <Show when={saving()} fallback={<><Check size={16} /> {props.expense ? "Save changes" : `Add ${formatMinor(Math.round((Number(amount()) || 0) * 100), currency())}`}</>}><LoaderCircle class="animate-spin" size={16} /> Saving…</Show>
+                  <Show when={saving()} fallback={<><Check size={16} /> {props.expense ? "Save changes" : `Add ${formatMinor(Math.round((Number(normalizedAmount()) || 0) * 100), currency())}`}</>}><LoaderCircle class="animate-spin" size={16} /> Saving…</Show>
                 </Button>
                 <p class="micro-label text-center">Saves on this device, then syncs automatically.</p>
               </footer>

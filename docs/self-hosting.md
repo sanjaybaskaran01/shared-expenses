@@ -3,13 +3,15 @@
 ## Quick path
 
 1. Install Docker with Compose.
-2. Copy `apps/server/.env.example` to `.env`.
+2. Copy `apps/server/.env.example` to `.env`. Leave the commented path and origin overrides commented: Compose provides its persistent `/data` volume and same-origin `http://localhost:8080` defaults.
 3. Set a random `BETTER_AUTH_SECRET`, the initial `OWNER_EMAIL`, a valid `SMTP_FROM`, and either SMTP delivery or Google OAuth.
 4. Run `docker compose up -d --build`.
 5. Open `http://localhost:8080` locally.
 6. Before inviting anyone over the internet, put HTTPS in front of port 8080 and change both `WEB_ORIGIN` and `PUBLIC_API_URL` to that exact public origin.
 
 The API is not published as a host port in the default Compose file. Nginx serves the PWA and proxies `/api/*` and `/health` internally, which avoids cross-origin cookie/CORS setup.
+
+The default `http://localhost:8080` configuration is permitted only for this loopback-only local deployment. A remotely reachable origin must use HTTPS; update both `WEB_ORIGIN` and `PUBLIC_API_URL` before exposing the service.
 
 ## Required secrets
 
@@ -41,8 +43,9 @@ Use SQLite's online backup mechanism while the service is running, or stop the A
 
 - HTTPS is mandatory and the configured origins match exactly.
 - `DEV_AUTH_BYPASS=false`.
+- `EXPERIMENTAL_CONFIDENTIAL_SYNC=false`; the shipped UI does not use v2 yet.
 - The API/database is not exposed directly to the internet.
-- `TRUST_CLOUDFLARE_PROXY` stays disabled unless Cloudflare is the only path to the origin and overwrites `cf-connecting-ip`. If a forwarded chain is required, `TRUSTED_PROXY_CIDRS` contains only the exact proxy addresses or narrow subnets—not a broad private range.
+- With the bundled Compose/Nginx gateway, `TRUST_CLOUDFLARE_PROXY=false`. That gateway deliberately strips `cf-connecting-ip` so an internet client cannot forge a rate-limit identity. Only a custom deployment whose final proxy validates and overwrites that header before the API may opt in; then `TRUSTED_PROXY_CIDRS` must contain only that proxy's exact addresses or narrow subnets—not a broad private range.
 - Backups are encrypted and a restore has been tested.
 - SMTP sender alignment and delivery are verified.
 - Dependencies and GitHub Actions remain pinned and CI is green.

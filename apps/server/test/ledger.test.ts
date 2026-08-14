@@ -123,6 +123,16 @@ describe("ledger ingestion", () => {
     expect(store.pull("user-1", 0)).toHaveLength(1);
   });
 
+  test("rejects malformed envelope entries without crashing the batch", async () => {
+    const result = await store.push("user-1", [null, true, 42, "operation", [], {}, { id: "missing-fields" }]);
+
+    expect(result.accepted).toEqual([]);
+    expect(result.conflicts).toEqual([]);
+    expect(result.rejected).toHaveLength(7);
+    expect(result.rejected.every(({ code }) => code === "INVALID_ENVELOPE")).toBe(true);
+    expect(result.rejected.at(-1)).toEqual(expect.objectContaining({ id: "missing-fields" }));
+  });
+
   test("creates an explicit conflict for a stale financial edit", async () => {
     await store.push("user-1", [await signedOperation(privateKey)]);
     const staleEdit = await signedOperation(privateKey, {
@@ -145,6 +155,81 @@ describe("ledger ingestion", () => {
     expect(store.snapshot("user-1").expenses).toEqual([
       expect.objectContaining({ description: "Dinner", version: 1 }),
     ]);
+  });
+
+  test("keeps a retried conflicted operation conflicted after a lost response", async () => {
+    await store.push("user-1", [await signedOperation(privateKey)]);
+    const staleEdit = await signedOperation(privateKey, {
+      id: crypto.randomUUID(),
+      type: "ExpenseAmended",
+      baseVersion: 0,
+      payload: {
+        description: "Stale dinner",
+        category: "Dining out",
+        amountMinor: 1001,
+        currency: "USD",
+        expenseDate: "2026-07-25",
+        notes: "",
+        payers: [{ participantId: "user-1", amountMinor: 1001 }],
+        allocations: [{ participantId: "user-1", amountMinor: 1001 }],
+      },
+    });
+
+    const first = await store.push("user-1", [staleEdit]);
+    const retry = await store.push("user-1", [staleEdit]);
+
+    expect(first.conflicts).toHaveLength(1);
+    expect(retry.duplicates).toEqual([]);
+    expect(retry.conflicts).toEqual([expect.objectContaining({
+      id: staleEdit.id,
+      conflictId: first.conflicts[0]!.conflictId,
+      currentVersion: 1,
+    })]);
+  });
+
+  test("rejects a separately signed operation that reuses an existing id", async () => {
+    const first = await signedOperation(privateKey);
+    expect((await store.push("user-1", [first])).accepted).toHaveLength(1);
+    const reused = await signedOperation(privateKey, {
+      id: first.id,
+      payload: {
+        description: "Different dinner",
+        category: "Dining out",
+        amountMinor: 1001,
+        currency: "USD",
+        expenseDate: "2026-07-25",
+        notes: "",
+        payers: [{ participantId: "user-1", amountMinor: 1001 }],
+        allocations: [{ participantId: "user-1", amountMinor: 1001 }],
+      },
+    });
+
+    expect((await store.push("user-1", [reused])).rejected).toEqual([
+      expect.objectContaining({ id: first.id, code: "OPERATION_ID_REUSED" }),
+    ]);
+  });
+
+  test("rejects protocol-reserved operation types that have no ledger projection", async () => {
+    const operation = await signedOperation(privateKey, {
+      type: "GroupMemberAdded",
+      targetId: "user-2",
+      payload: { userId: "user-2" },
+    });
+
+    expect((await store.push("user-1", [operation])).rejected).toEqual([
+      expect.objectContaining({ code: "UNSUPPORTED_OPERATION" }),
+    ]);
+  });
+
+  test("does not authorize writes or history reads from an undone group", async () => {
+    db.query("UPDATE groups SET deleted_at = ? WHERE id = ?").run("2026-08-14T12:00:00.000Z", "group-1");
+    const operation = await signedOperation(privateKey);
+
+    expect((await store.push("user-1", [operation])).rejected).toEqual([
+      expect.objectContaining({ code: "NOT_A_GROUP_MEMBER" }),
+    ]);
+    expect(store.pull("user-1", 0)).toEqual([]);
+    expect(store.snapshot("user-1").groups).toEqual([]);
   });
 
   test("lets an active group member correct an expense created by another member", async () => {
